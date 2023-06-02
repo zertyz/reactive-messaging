@@ -24,9 +24,7 @@ use lazy_static::lazy_static;
 ///   * `serialize()` enum variants into a String (like RON, for textual protocols) to be sent to the remote peer
 ///   * inform the peer if any wrong input was sent
 ///   * identify local messages that should cause a disconnection
-pub trait SocketServerSerializer<LocalPeerMessages, LocalPeerDisconnectionReason>
-    where LocalPeerMessages:            Send + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages, LocalPeerDisconnectionReason>,
-          LocalPeerDisconnectionReason: Send {
+pub trait SocketServerSerializer<LocalPeerMessages: Send + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages>> {
 
     /// `SocketServer`s serializer: transforms a strong typed `message` into a `String`
     fn ss_serialize(message: &LocalPeerMessages) -> String;
@@ -34,10 +32,9 @@ pub trait SocketServerSerializer<LocalPeerMessages, LocalPeerDisconnectionReason
     /// Called whenever the socket server found an error -- the returned message should be as descriptive as possible
     fn processor_error_message(err: String) -> LocalPeerMessages;
 
-    /// Informs if the given internal `processor_answer` is a "disconnect" message (usually issued by the messages processor).\
-    /// Answers with `None` if it isn't or with `Some(msg)` if we should disconnect the peer
+    /// Informs if the given internal `processor_answer` is a "disconnect" message (usually issued by the messages processor)\
     /// -- in which case, the socket server will send it and, immediately, close the connection
-    fn is_disconnect_message(processor_answer: &LocalPeerMessages) -> Option<&LocalPeerDisconnectionReason>;
+    fn is_disconnect_message(processor_answer: &LocalPeerMessages) -> bool;
 
     /// Tells if the given `processor_answer` represents a "no message" -- a message that should produce no answer to the peer
     fn is_no_answer_message(processor_answer: &LocalPeerMessages) -> bool;
@@ -48,6 +45,7 @@ pub trait SocketServerSerializer<LocalPeerMessages, LocalPeerDisconnectionReason
 /// This trait, therefore, specifies how to:
 ///   * `deserialize()` enum variants received by the remote peer (like RON, for textual protocols)
 pub trait SocketServerDeserializer<T> {
+
     /// `SocketServer`s deserializer: transform a textual `message` into a string typed value
     fn ss_deserialize(message: &[u8]) -> Result<T, Box<dyn std::error::Error + Sync + Send>>;
 }

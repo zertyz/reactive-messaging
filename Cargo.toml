@@ -74,12 +74,10 @@ neat-date-time = "0.1"  # as of 2023-04-05: scheduled to be removed once ogre is
 # dependencies for benchmarks
 #############################
 
-# criterion = { version = "0.3", features=["html_reports"] }
-# 
-# [[bench]]
-# name = "channels"
-# harness = false
-# 
-# [[bench]]
-# name = "rc_wrappers"
-# harness = false
+criterion    = { version = "0.5", features=["html_reports"] }
+tokio-stream = "0.1"
+crossbeam    = "0.8"     # scoped threads
+
+[[bench]]
+name = "streamable_channels"
+harness = false

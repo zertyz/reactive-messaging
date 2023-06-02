@@ -7,6 +7,7 @@
 
 
 use super::{
+    types::AtomicChannel,
     serde::{SocketServerDeserializer, SocketServerSerializer},
 };
 use std::{
@@ -21,6 +22,7 @@ use std::{
     task::{Context, Poll, Waker},
     time::Duration,
 };
+use std::fmt::Formatter;
 use futures::{StreamExt, Stream, stream, SinkExt};
 use tokio::{
     io::{self,AsyncWriteExt, AsyncBufReadExt, BufReader, BufWriter, Interest},
@@ -28,6 +30,7 @@ use tokio::{
     sync::Mutex,
 };
 use log::{trace, debug, warn, error};
+use reactive_mutiny::prelude::{ChannelCommon, ChannelUni, ChannelProducer};
 
 
 /// The internal events this peer shares with the protocol processors.\
@@ -36,29 +39,29 @@ use log::{trace, debug, warn, error};
 ///   * `LocalPeerMessages` are the server messages
 ///   * `LocalPeerDisconnectionReason` is the reason offered to the remote peer for disconnecting
 #[derive(Debug)]
-pub enum SocketEvent<RemotePeerMessages, LocalPeerMessages, LocalPeerDisconnectionReason>
-                    where LocalPeerMessages:            Send + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages, LocalPeerDisconnectionReason>,
-                          LocalPeerDisconnectionReason: Send {
-    Incoming     {peer: Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>, message: RemotePeerMessages },
-    Connected    {peer: Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>},
-    Disconnected {peer: Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>},
+pub enum SocketEvent<RemotePeerMessages,
+                     LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages>> {
+    Incoming     {peer: Arc<Peer<LocalPeerMessages>>, message: RemotePeerMessages },
+    Connected    {peer: Arc<Peer<LocalPeerMessages>>},
+    Disconnected {peer: Arc<Peer<LocalPeerMessages>>},
     Shutdown     {timeout_ms: u32},
 }
 
 const CHAT_MSG_SIZE_HINT: usize = 2048;
+/// How many messages may be produced ahead of sending
+const SENDER_BUFFER_SIZE: usize = 1024;
 
 /// Our `message-io` special version for '\n' separated textual protocols,
 /// substituting the original crate with functional and performance improvements (see [self]).\
 /// `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
 /// milliseconds, to wait for messages to flush before closing & to send the shutdown message to connected clients
-pub async fn server_network_loop_for_text_protocol<DisconnectionReason: Send + Sync + 'static,
-                                                   ClientMessages:      SocketServerDeserializer<ClientMessages> + Send + 'static,
-                                                   ServerMessages:      Debug + PartialEq + SocketServerSerializer<ServerMessages, DisconnectionReason> + Send + Sync + 'static,
+pub async fn server_network_loop_for_text_protocol<ClientMessages:      SocketServerDeserializer<ClientMessages> + Send + 'static,
+                                                   ServerMessages:      Debug + PartialEq + SocketServerSerializer<ServerMessages> + Send + Sync + 'static,
                                                    ProcessorFuture:     Future<Output=()> + Send + 'static>
                                                   (listening_interface:   String,
                                                    listening_port:        u16,
                                                    mut shutdown_signaler: tokio::sync::oneshot::Receiver<u32>,
-                                                   processor:             impl Fn(SocketEvent<ClientMessages, ServerMessages, DisconnectionReason>) -> ProcessorFuture + Send + Sync + 'static) {
+                                                   processor:             impl Fn(SocketEvent<ClientMessages, ServerMessages>) -> ProcessorFuture + Send + Sync + 'static) {
 
     let processor = Arc::new(processor);
     let listener = TcpListener::bind(&format!("{}:{}", listening_interface, listening_port)).await.unwrap();
@@ -110,14 +113,13 @@ pub async fn server_network_loop_for_text_protocol<DisconnectionReason: Send + S
 
 }
 
-pub async fn client_for_text_protocol<DisconnectionReason: Send + Sync + 'static,
-                                      ClientMessages:      SocketServerDeserializer<ClientMessages> + Send + 'static,
-                                      ServerMessages:      Debug + PartialEq + SocketServerSerializer<ServerMessages, DisconnectionReason> + Send + Sync + 'static,
+pub async fn client_for_text_protocol<ClientMessages:      SocketServerDeserializer<ClientMessages> + Send + 'static,
+                                      ServerMessages:      Debug + PartialEq + SocketServerSerializer<ServerMessages> + Send + Sync + 'static,
                                       ProcessorFuture:     Future<Output=()> + Send + 'static>
                                      (server_address:      &str,
                                       server_port:         u16,
                                       mut shutdown_signaler: tokio::sync::oneshot::Receiver<u32>,
-                                      processor:             impl FnMut(SocketEvent<ClientMessages, ServerMessages, DisconnectionReason>) -> ProcessorFuture + Send + Sync + 'static)
+                                      processor:             impl FnMut(SocketEvent<ClientMessages, ServerMessages>) -> ProcessorFuture + Send + Sync + 'static)
                                      -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let socket = TcpStream::connect(&format!("{}:{}", server_address, server_port)).await?;
@@ -126,21 +128,20 @@ pub async fn client_for_text_protocol<DisconnectionReason: Send + Sync + 'static
 }
 
 /// connection (chat) loop (after the connection is set) usable either by clients & servers of the same protocol
-async fn connection_loop_for_textual_protocol<DisconnectionReason: Send,
-                                              ClientMessages:      SocketServerDeserializer<ClientMessages> + Send,
-                                              ServerMessages:      Debug + PartialEq + SocketServerSerializer<ServerMessages, DisconnectionReason> + Send + Sync,
+async fn connection_loop_for_textual_protocol<ClientMessages:      SocketServerDeserializer<ClientMessages> + Send,
+                                              ServerMessages:      'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<ServerMessages>,
                                               ProcessorFuture:     Future<Output=()> + Send>
                                              (mut socket:    TcpStream,
-                                              mut processor: impl FnMut(SocketEvent<ClientMessages, ServerMessages, DisconnectionReason>) -> ProcessorFuture + Send + Sync) {
+                                              mut processor: impl FnMut(SocketEvent<ClientMessages, ServerMessages>) -> ProcessorFuture + Send + Sync) {
 
     let mut read_buffer = Vec::with_capacity(CHAT_MSG_SIZE_HINT);
     socket.set_nodelay(true).expect("setting nodelay() for the socket");
     socket.set_ttl(30).expect("setting ttl(30) for the socket");
 
-    let peer_address = socket.peer_addr().expect("could not get the peer address");
+    let peer_address = socket.peer_addr().expect("could not get the peer's address");
 
-    let sender = FastSender::<ServerMessages, DisconnectionReason>::new();
-    let mut sender_stream = Arc::clone(&sender).stream();
+    let sender = AtomicChannel::<ServerMessages, SENDER_BUFFER_SIZE>::new(format!("Sender for client {peer_address}"));
+    let (mut sender_stream, _) = Arc::clone(&sender).create_stream();
     let peer = Arc::new(Peer::new(sender, peer_address));
 
     // issue the connection event
@@ -159,18 +160,18 @@ async fn connection_loop_for_textual_protocol<DisconnectionReason: Send,
                         let to_send_text = ServerMessages::ss_serialize(&to_send_message);
                         if let Err(err) = socket.write_all(to_send_text.as_bytes()).await {
                             warn!("SocketServer::TokioMessageIO: PROBLEM in the connection with {:?} (peer id {}) while WRITING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
-                            peer.sender.close();
+                            peer.sender.cancel_all_streams();
                             break 'connection
                         }
                         // sending was complete. Was it a "disconnect" message?
-                        if ServerMessages::is_disconnect_message(&to_send_message).is_some() {
-                            peer.sender.close();
+                        if ServerMessages::is_disconnect_message(&to_send_message) {
+                            peer.sender.cancel_all_streams();
                             break 'connection
                         }
                     },
                     None => {
-                        warn!("SocketServer::TokioMessageIO: Sender for {:?} (peer id {}) ended (most likely, .close() was called on the `peer` by the processor. Closing the connection...", peer.peer_address, peer.peer_id);
-                        peer.sender.close();
+                        warn!("SocketServer::TokioMessageIO: Sender for {:?} (peer id {}) ended (most likely, .cancel_all_streams() was called on the `peer` by the processor. Closing the connection...", peer.peer_address, peer.peer_id);
+                        peer.sender.cancel_all_streams();
                         break 'connection
                     }
                 }
@@ -180,7 +181,7 @@ async fn connection_loop_for_textual_protocol<DisconnectionReason: Send,
                 match socket.try_read_buf(&mut read_buffer) {
                     Ok(0) => {
                         warn!("SocketServer::TokioMessageIO: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
-                        peer.sender.close();
+                        peer.sender.cancel_all_streams();
                         break 'connection
                     },
                     Ok(n) => {
@@ -198,7 +199,11 @@ async fn connection_loop_for_textual_protocol<DisconnectionReason: Send,
                                                                            peer.peer_address, peer.peer_id, stripped_line);
                                         debug!("SocketServer: {error_message}");
                                         let outgoing_error = ServerMessages::processor_error_message(error_message);
-                                        peer.sender.send(outgoing_error).await;
+                                        let sent = peer.sender.try_send(|slot| *slot = outgoing_error);
+                                        if !sent {
+                                            // prevent bad clients from depleting our resources: if the out buffer is full due to bad input, we'll wait 1 sec to process the next message
+                                            tokio::time::sleep(Duration::from_millis(1000)).await;
+                                        }
                                     }
                                 }
                                 next_line_index = eol_pos + 1;
@@ -233,20 +238,16 @@ async fn connection_loop_for_textual_protocol<DisconnectionReason: Send,
 
 static PEER_COUNTER: AtomicU32 = AtomicU32::new(0);
 pub type PeerId = u32;
-#[derive(Debug)]
-pub struct Peer<MessagesType:            Send + Debug + PartialEq + SocketServerSerializer<MessagesType, DisconnectionReasonType>,
-                DisconnectionReasonType: Send> {
+pub struct Peer<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>> {
     pub peer_id:      PeerId,
-    pub sender:       Arc<FastSender<MessagesType, DisconnectionReasonType>>,
+    pub sender:       Arc<AtomicChannel<MessagesType, SENDER_BUFFER_SIZE>>,
     pub peer_address: SocketAddr,
 }
 
-impl<MessagesType:            Send + Debug + PartialEq + SocketServerSerializer<MessagesType, DisconnectionReasonType>,
-     DisconnectionReasonType: Send>
-Peer<MessagesType,
-     DisconnectionReasonType> {
+impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>>
+Peer<MessagesType> {
 
-    pub fn new(sender: Arc<FastSender<MessagesType, DisconnectionReasonType>>, peer_address: SocketAddr) -> Self {
+    pub fn new(sender: Arc<AtomicChannel<MessagesType, SENDER_BUFFER_SIZE>>, peer_address: SocketAddr) -> Self {
         Self {
             peer_id: PEER_COUNTER.fetch_add(1, Relaxed),
             sender,
@@ -256,96 +257,13 @@ Peer<MessagesType,
 
 }
 
-/// as-fast-as-possible same-thread channel for sending messages to peers, relying on the fact that
-/// our network chat for receiving and sending messages uses a single thread.\
-/// It is 10x faster than tokio's MPSC, which is not needed here.
-#[derive(Debug)]
-pub struct FastSender<MessagesType:            Send + Debug + PartialEq + SocketServerSerializer<MessagesType, DisconnectionReasonType>,
-                      DisconnectionReasonType: Send> {
-    to_send_messages:           Mutex<VecDeque<MessagesType>>,
-    waker:                      Option<Waker>,
-    closed:                     bool,
-    _disconnection_reason_type: PhantomData<DisconnectionReasonType>,
-}
-
-impl<MessagesType:            Send + Debug + PartialEq + SocketServerSerializer<MessagesType, DisconnectionReasonType>,
-     DisconnectionReasonType: Send>
-FastSender<MessagesType, DisconnectionReasonType> {
-
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            to_send_messages:           Mutex::new(VecDeque::with_capacity(1)),
-            waker:                      None,
-            closed:                     false,
-            _disconnection_reason_type: PhantomData::default(),
-        })
+impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>>
+Debug
+for Peer<MessagesType> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Peer {{peer_id: {}, peer_address: '{}', sender: {} pending messages}}",
+                  self.peer_id, self.peer_address, self.sender.pending_items_count())
     }
-
-    #[inline(always)]
-    pub async fn send(&self, message: MessagesType) {
-        self.to_send_messages.lock().await
-                             .push_back(message);
-        // wake the stream
-        if let Some(waker) = &self.waker {
-            waker.wake_by_ref();
-        }
-    }
-
-    #[inline(always)]
-    pub async fn flush(&self) {
-        loop {
-            let len = self.to_send_messages.lock().await.len();
-            if len == 0 {
-                break;
-            } else {
-                // wake the stream
-                if let Some(waker) = &self.waker {
-                    waker.wake_by_ref();
-                }
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        }
-    }
-
-    /// should be called just once
-    pub fn stream(self: Arc<Self>) -> impl Stream<Item=MessagesType> {
-        stream::poll_fn(move |cx| {
-            let mutable_self = unsafe {&mut *((Arc::as_ptr(&self)) as *mut Self)};
-            mutable_self.waker.get_or_insert_with(|| cx.waker().clone());
-            if let Ok(mut mutable_to_send_messages) = self.to_send_messages.try_lock() {
-                match mutable_to_send_messages.pop_front() {
-                    Some(message) => Poll::Ready(Some(message)),
-                    None => {
-                        if !self.closed {
-                            Poll::Pending
-                        } else {
-                            Poll::Ready(None)
-                        }
-                    }
-                }
-            } else {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-        })
-    }
-
-
-
-    /// Marks this sender as closed, which should cause the connection to be dropped
-    pub fn close(&self) {
-        let mutable_self = unsafe {&mut *((self as *const Self) as *mut Self)};
-        mutable_self.closed = true;
-        // wake the stream
-        if let Some(waker) = &self.waker {
-            waker.wake_by_ref();
-        }
-    }
-
-    pub fn is_closed(&self) -> bool {
-        self.closed
-    }
-
 }
 
 
@@ -379,18 +297,18 @@ mod tests {
         let (_client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
         // server
-        tokio::spawn(server_network_loop_for_text_protocol("127.0.0.1".to_string(), 8570, server_shutdown_receiver, |event: SocketEvent<String, String, ()>| async {
+        tokio::spawn(server_network_loop_for_text_protocol("127.0.0.1".to_string(), 8570, server_shutdown_receiver, |event: SocketEvent<String, String>| async {
             match event {
                 SocketEvent::Incoming { peer, message: client_message } => {
-                    peer.sender.send(format!("Client just sent '{}'\n", client_message)).await;
+                    peer.sender.try_send_movable(format!("Client just sent '{}'\n", client_message));
                     if client_message == CLIENT_SECRET {
-                        peer.sender.send(format!("{}\n", SERVER_SECRET)).await;
+                        peer.sender.try_send_movable(format!("{}\n", SERVER_SECRET));
                     } else {
                         panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, CLIENT_SECRET);
                     }
                 },
                 SocketEvent::Connected { peer } => {
-                    peer.sender.send(format!("Welcome! State your business!\n")).await;
+                    peer.sender.try_send_movable(format!("Welcome! State your business!\n"));
                 },
                 SocketEvent::Disconnected { peer } => {},
                 SocketEvent::Shutdown { timeout_ms } => {
@@ -404,7 +322,7 @@ mod tests {
 
         // client
         let observed_secret_ref = Arc::clone(&observed_secret);
-        client_for_text_protocol("127.0.0.1", 8570, client_shutdown_receiver, move |event: SocketEvent<String, String, ()>| {
+        client_for_text_protocol("127.0.0.1", 8570, client_shutdown_receiver, move |event: SocketEvent<String, String>| {
             let observed_secret_ref = Arc::clone(&observed_secret_ref);
             async move {
                 match event {
@@ -413,7 +331,7 @@ mod tests {
                         let _ = observed_secret_ref.lock().await.insert(server_message);
                     },
                     SocketEvent::Connected { peer } => {
-                        peer.sender.send(format!("{}\n", CLIENT_SECRET)).await;
+                        peer.sender.try_send_movable(format!("{}\n", CLIENT_SECRET));
                     },
                     SocketEvent::Disconnected { peer } => {
                         println!("Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
@@ -444,14 +362,14 @@ mod tests {
         let (_client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
         // server
-        tokio::spawn(server_network_loop_for_text_protocol("127.0.0.1".to_string(), 8571, server_shutdown_receiver, |event: SocketEvent<String, String, ()>| async {
+        tokio::spawn(server_network_loop_for_text_protocol("127.0.0.1".to_string(), 8571, server_shutdown_receiver, |event: SocketEvent<String, String>| async {
             match event {
                 SocketEvent::Incoming { peer, message: client_message } => {
                     // Message received: Ping(n)
                     // Answer: Pong(n)
                     let n_str = &client_message[5..(client_message.len()-1)];
                     let n = str::parse::<u32>(n_str).expect(&format!("could not convert '{}' to number. Original message: '{}'", n_str, client_message));
-                    peer.sender.send(format!("Pong({})\n", n)).await;
+                    peer.sender.try_send_movable(format!("Pong({})\n", n));
                 },
                 SocketEvent::Connected { .. } => {},
                 SocketEvent::Disconnected { .. } => {},
@@ -465,7 +383,7 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_ref = Arc::clone(&counter);
         // client
-        client_for_text_protocol("127.0.0.1", 8571, client_shutdown_receiver, move |event: SocketEvent<String, String, ()>| {
+        client_for_text_protocol("127.0.0.1", 8571, client_shutdown_receiver, move |event: SocketEvent<String, String>| {
             let counter_ref = Arc::clone(&counter_ref);
             async move {
                 match event {
@@ -478,10 +396,10 @@ mod tests {
                         if n != current_count {
                             panic!("Received '{}', where Client was expecting 'Pong({})'", server_message, current_count);
                         }
-                        peer.sender.send(format!("Ping({})\n", current_count+1)).await;
+                        peer.sender.try_send_movable(format!("Ping({})\n", current_count+1));
                     },
                     SocketEvent::Connected { peer } => {
-                        peer.sender.send(format!("Ping(0)\n")).await;
+                        peer.sender.try_send_movable(format!("Ping(0)\n"));
                     },
                     SocketEvent::Disconnected { .. } => {},
                     SocketEvent::Shutdown { .. } => {},
@@ -524,7 +442,7 @@ mod tests {
         let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaputt
         let received_messages_count_ref = Arc::clone(&received_messages_count);
         let unordered_ref = Arc::clone(&unordered);
-        tokio::spawn(server_network_loop_for_text_protocol("127.0.0.1".to_string(), 8572, server_shutdown_receiver, move |event: SocketEvent<String, String, ()>| {
+        tokio::spawn(server_network_loop_for_text_protocol("127.0.0.1".to_string(), 8572, server_shutdown_receiver, move |event: SocketEvent<String, String>| {
             let received_messages_count = Arc::clone(&received_messages_count_ref);
             let unordered = Arc::clone(&unordered_ref);
             async move {
@@ -553,7 +471,7 @@ mod tests {
         // client
         let sent_messages_count = Arc::new(AtomicU32::new(0));
         let sent_messages_count_ref = Arc::clone(&sent_messages_count);
-        client_for_text_protocol("127.0.0.1", 8572, client_shutdown_receiver, move |event: SocketEvent<String, String, ()>| {
+        client_for_text_protocol("127.0.0.1", 8572, client_shutdown_receiver, move |event: SocketEvent<String, String>| {
             let sent_messages_count = Arc::clone(&sent_messages_count_ref);
             async move {
                 let sent_messages_count = Arc::clone(&sent_messages_count);
@@ -564,11 +482,11 @@ mod tests {
                             let start = SystemTime::now();
                             let mut n = 0;
                             loop {
-                                peer.sender.send(format!("DoNotAnswer({})\n", n)).await;
+                                peer.sender.try_send_movable(format!("DoNotAnswer({})\n", n));
                                 n += 1;
                                 // flush & bailout check for timeout every 1024 messages
                                 if n % (1<<10) == 0 {
-                                    peer.sender.flush().await;
+                                    peer.sender.flush(Duration::from_millis(100)).await;
                                     if start.elapsed().unwrap().as_millis() as u64 >= TEST_DURATION_MS  {
                                         println!("Client sent {} messages before bailing out", n);
                                         sent_messages_count.store(n, Relaxed);
@@ -612,7 +530,7 @@ mod tests {
 
 
     /// Test implementation for our text-only protocol
-    impl SocketServerSerializer<String, ()> for String {
+    impl SocketServerSerializer<String> for String {
 
         fn ss_serialize(message: &String) -> String {
             message.clone()
@@ -622,13 +540,9 @@ mod tests {
             panic!("SocketServerSerializer<String>::processor_error_message(): {}", msg);
             // msg
         }
-        fn is_disconnect_message(processor_answer: &String) -> Option<&()> {
+        fn is_disconnect_message(processor_answer: &String) -> bool {
             // for String communications, an empty line sent by the messages processor signals that the connection should be closed
-            if processor_answer.is_empty() {
-                Some(&())
-            } else {
-                None
-            }
+            processor_answer.is_empty()
         }
 
         fn is_no_answer_message(processor_answer: &String) -> bool {

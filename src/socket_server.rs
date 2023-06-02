@@ -11,27 +11,25 @@ use std::{
     net::{ToSocketAddrs,SocketAddr},
     fmt::Debug,
 };
-use futures::future::BoxFuture;
-use futures::{Stream, stream, StreamExt};
+use reactive_mutiny::prelude::{ChannelCommon, ChannelProducer};
+use futures::{Stream, stream, StreamExt, future::BoxFuture};
 use log::{trace, debug, info, warn, error};
 
 
 /// The handle to define, start and shutdown a Socket Server
-pub struct SocketServer<'a, RemotePeerMessages:           Send + SocketServerDeserializer<RemotePeerMessages>,
-                            LocalPeerMessages:            Send + Debug + PartialEq + SocketServerSerializer<LocalPeerMessages, LocalPeerDisconnectionReason>,
-                            LocalPeerDisconnectionReason: Send> {
+pub struct SocketServer<'a, RemotePeerMessages: Send + SocketServerDeserializer<RemotePeerMessages>,
+                            LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages> > {
     interface_ip:                      String,
     port:                              u16,
     workers:                           u16,
     shutdown_signaler:                 Option<tokio::sync::oneshot::Sender<u32>>,
-    request_processor_stream_producer: Option<Box<dyn Fn(SocketEvent<RemotePeerMessages, LocalPeerMessages, LocalPeerDisconnectionReason>) -> bool + Send + Sync + 'a>>,
+    request_processor_stream_producer: Option<Box<dyn Fn(SocketEvent<RemotePeerMessages, LocalPeerMessages>) -> bool + Send + Sync + 'a>>,
     request_processor_stream_closer:   Option<Box<dyn Fn() + Send + Sync + 'a>>,
 }
 
-impl<RemotePeerMessages:           'static + Send + SocketServerDeserializer<RemotePeerMessages>,
-     LocalPeerMessages:            'static + Send + Sync + Debug + PartialEq + SocketServerSerializer<LocalPeerMessages, LocalPeerDisconnectionReason>,
-     LocalPeerDisconnectionReason: 'static + Send + Sync>
-SocketServer<'static, RemotePeerMessages, LocalPeerMessages, LocalPeerDisconnectionReason> {
+impl<RemotePeerMessages: 'static + Send + SocketServerDeserializer<RemotePeerMessages>,
+     LocalPeerMessages:  'static + Send + Sync + Debug + PartialEq + SocketServerSerializer<LocalPeerMessages> >
+SocketServer<'static, RemotePeerMessages, LocalPeerMessages> {
 
     /// Creates a new server instance listening on TCP/IP:
     ///   `interface_ip`: the interface's IP to listen to -- 0.0.0.0 will cause listening to all network interfaces
@@ -55,11 +53,11 @@ SocketServer<'static, RemotePeerMessages, LocalPeerMessages, LocalPeerDisconnect
     ///   - `request_processor_stream_producer`: a `sync` function to feed in [ClientMessages] to the `request_stream_processor`
     ///   - `request_processor_stream_closer`: this closes the stream and is called when the server is shutdown
     pub fn set_processor(&mut self,
-                         request_processor_stream:          impl Stream<Item = Result<(Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>, LocalPeerMessages),
-                                                                                      (Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>, Box<dyn std::error::Error + Sync + Send>)>> + Send + Sync + 'static,
-                         request_processor_stream_producer: impl Fn(SocketEvent<RemotePeerMessages, LocalPeerMessages, LocalPeerDisconnectionReason>) -> bool + Send + Sync + 'static,
+                         request_processor_stream:          impl Stream<Item = Result<(Arc<Peer<LocalPeerMessages>>, LocalPeerMessages),
+                                                                                      (Arc<Peer<LocalPeerMessages>>, Box<dyn std::error::Error + Sync + Send>)>> + Send + Sync + 'static,
+                         request_processor_stream_producer: impl Fn(SocketEvent<RemotePeerMessages, LocalPeerMessages>) -> bool + Send + Sync + 'static,
                          request_processor_stream_closer:   impl Fn() + Send + Sync + 'static)
-                        -> impl Stream<Item = (Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>, bool)> + Send + Sync + 'static {
+                        -> impl Stream<Item = (Arc<Peer<LocalPeerMessages>>, bool)> + Send + Sync + 'static {
         self.request_processor_stream_producer = Some(Box::new(request_processor_stream_producer));
         self.request_processor_stream_closer   = Some(Box::new(request_processor_stream_closer));
         Self::to_sender_stream(request_processor_stream)
@@ -127,9 +125,9 @@ SocketServer<'static, RemotePeerMessages, LocalPeerMessages, LocalPeerDisconnect
     }
 
     /// upgrades the `request_processor_stream` to a `Stream` able to both process requests & send back answers to the clients
-    fn to_sender_stream(request_processor_stream: impl Stream<Item = Result<(Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>, LocalPeerMessages),
-                                                                            (Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>, Box<dyn std::error::Error + Sync + Send>)>>)
-                        -> impl Stream<Item = (Arc<Peer<LocalPeerMessages, LocalPeerDisconnectionReason>>, bool)> {
+    fn to_sender_stream(request_processor_stream: impl Stream<Item = Result<(Arc<Peer<LocalPeerMessages>>, LocalPeerMessages),
+                                                                            (Arc<Peer<LocalPeerMessages>>, Box<dyn std::error::Error + Sync + Send>)>>)
+                        -> impl Stream<Item = (Arc<Peer<LocalPeerMessages>>, bool)> {
 
         request_processor_stream
             .filter_map(move |processor_response| async {
@@ -147,12 +145,16 @@ SocketServer<'static, RemotePeerMessages, LocalPeerMessages, LocalPeerDisconnect
                 };
                 // send the message, skipping messages that are programmed not to generate any response
                 if !LocalPeerMessages::is_no_answer_message(&outgoing) {
-                    if let Some(_kickout_response) = LocalPeerMessages::is_disconnect_message(&outgoing) {
+                    if LocalPeerMessages::is_disconnect_message(&outgoing) {
                         trace!("Server choose to drop connection with {:?} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
-                        peer.sender.send(outgoing).await;   // sending back `outgoing` instead of `kickout_response`... ? If the latter is not needed, we may simplify the trait
-                        peer.sender.close();
+                        let _sent = peer.sender.try_send(|slot| *slot = outgoing);
+                        peer.sender.cancel_all_streams();
                     } else {
-                        peer.sender.send(outgoing).await;
+                        let sent = peer.sender.try_send(|slot| *slot = outgoing);
+                        if !sent {
+                            // client is flooding us with messages and is not reading, fast enough, the responses -- this is a protocol offence and the connection will be closed
+                            peer.sender.cancel_all_streams();
+                        }
                     }
                     Some((peer, true))
                 } else {
