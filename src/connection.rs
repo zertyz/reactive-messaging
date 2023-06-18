@@ -49,9 +49,10 @@ pub type ProcessorRemoteStreamType<MessagesType> = MutinyStream<'static, Message
 /// milliseconds, to wait for messages to flush before closing & to send the shutdown message to connected clients
 pub async fn server_network_loop_for_text_protocol<ClientMessages:           SocketServerDeserializer<ClientMessages>              + Send + Sync + PartialEq + Debug + 'static,
                                                    ServerMessages:           SocketServerSerializer<ServerMessages>                + Send + Sync + PartialEq + Debug + 'static,
-                                                   LocalStreamType:          Stream<Item=ServerMessages>                           + Send + 'static,
+                                                   PipelineOutputType:                                                               Send + Sync +             Debug + 'static,
+                                                   OutputStreamType:         Stream<Item=PipelineOutputType>                       + Send + 'static,
                                                    ConnectionEventsCallback: Fn(/*server_event: */ConnectionEvent<ServerMessages>) + Send + Sync + 'static,
-                                                   ProcessorBuilderFn:       Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> LocalStreamType>
+                                                   ProcessorBuilderFn:       Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> OutputStreamType>
 
                                                   (listening_interface:         String,
                                                    listening_port:              u16,
@@ -59,7 +60,7 @@ pub async fn server_network_loop_for_text_protocol<ClientMessages:           Soc
                                                    connection_events_callback:  ConnectionEventsCallback,
                                                    dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                  -> Result<(), Box<dyn std::error::Error>> {
+                                                  -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     let connection_events_callback = Arc::new(connection_events_callback);
     let listener = TcpListener::bind(&format!("{}:{}", listening_interface, listening_port)).await?;
@@ -138,10 +139,10 @@ pub async fn server_network_loop_for_text_protocol<ClientMessages:           Soc
 
 pub async fn client_for_text_protocol<ClientMessages:           SocketServerSerializer<ClientMessages>                + Send + Sync + PartialEq + Debug + 'static,
                                       ServerMessages:           SocketServerDeserializer<ServerMessages>              + Send + Sync + PartialEq + Debug + 'static,
-                                      RemoteStreamType:         Stream<Item=ServerMessages>                           + Send + 'static,
-                                      LocalStreamType:          Stream<Item=ClientMessages>                           + Send + 'static,
+                                      PipelineOutputType:                                                               Send + Sync +             Debug + 'static,
+                                      OutputStreamType:         Stream<Item=PipelineOutputType>                       + Send + 'static,
                                       ConnectionEventsCallback: Fn(/*server_event: */ConnectionEvent<ClientMessages>) + Send + Sync + 'static,
-                                      ProcessorBuilderFn:       Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ClientMessages>>, /*server_messages_stream: */ProcessorRemoteStreamType<ServerMessages>) -> LocalStreamType>
+                                      ProcessorBuilderFn:       Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ClientMessages>>, /*server_messages_stream: */ProcessorRemoteStreamType<ServerMessages>) -> OutputStreamType>
 
                                      (server_ipv4_addr:            String,
                                       port:                        u16,
@@ -149,7 +150,7 @@ pub async fn client_for_text_protocol<ClientMessages:           SocketServerSeri
                                       connection_events_callback:  ConnectionEventsCallback,
                                       dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                      -> Result<(), Box<dyn std::error::Error>> {
+                                      -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str(server_ipv4_addr.as_str())?), port);
     let socket = TcpStream::connect(addr).await?;
@@ -345,6 +346,8 @@ mod tests {
         let (_client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
         // server
+        let client_secret_ref = client_secret.clone();
+        let server_secret_ref = server_secret.clone();
         tokio::spawn(server_network_loop_for_text_protocol("127.0.0.1".to_string(), 8570, server_shutdown_receiver,
            |connection_event| {
                match connection_event {
@@ -357,13 +360,15 @@ mod tests {
                    }
                }
            },
-           |client_addr, client_port, peer, client_messages_stream: ProcessorRemoteStreamType<String>| {
-               client_messages_stream.map(|client_message| {
+           move |client_addr, client_port, peer, client_messages_stream| {
+               let client_secret_ref = client_secret_ref.clone();
+               let server_secret_ref = server_secret_ref.clone();
+               client_messages_stream.inspect(move |client_message| {
                    peer.sender.try_send_movable(format!("Client just sent '{}'\n", client_message));
-                   if client_message == client_secret {
-                       peer.sender.try_send_movable(format!("{}\n", server_secret));
+                   if &*client_message == &client_secret_ref {
+                       peer.sender.try_send_movable(format!("{}\n", server_secret_ref));
                    } else {
-                       panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret);
+                       panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
                    }
                })
             }));
@@ -372,12 +377,14 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // client
+        let client_secret_ref1 = client_secret.clone();
+        let server_secret_ref = server_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
         client_for_text_protocol(format!("127.0.0.1"), 8570, client_shutdown_receiver,
-            |connection_event| {
+            move |connection_event| {
                 match connection_event {
                     ConnectionEvent::PeerConnected { peer } => {
-                        peer.sender.try_send_movable(format!("{}\n", client_secret));
+                        peer.sender.try_send_movable(format!("{}\n", client_secret_ref1));
                     },
                     ConnectionEvent::PeerDisconnected { peer } => {
                         println!("Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
@@ -385,11 +392,14 @@ mod tests {
                     ConnectionEvent::ApplicationShutdown => {}
                 }
             },
-            move |client_addr, client_port, peer, server_messages_stream| {
+            move |client_addr, client_port, peer, server_messages_stream: ProcessorRemoteStreamType<String>| {
                 let observed_secret_ref = Arc::clone(&observed_secret_ref);
-                server_messages_stream.inspect(|server_message| async {
-                    println!("Server said: '{}'", server_message);
-                    let _ = observed_secret_ref.lock().await.insert(server_message);
+                server_messages_stream.then(move |server_message| {
+                    let observed_secret_ref = Arc::clone(&observed_secret_ref);
+                    async move {
+                        println!("Server said: '{}'", server_message);
+                        let _ = observed_secret_ref.lock().await.insert(server_message);
+                    }
                 })
             }).await.expect("Starting the client");
         println!("### Client is running concurrently, in the background...");
@@ -400,7 +410,9 @@ mod tests {
         println!("### Waiting a little for the shutdown signal to reach the server...");
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        assert_eq!(*observed_secret.lock().await, Some(server_secret.to_string()), "Communications didn't go according the plan");
+        let locked_observed_secret = observed_secret.lock().await;
+        let observed_secret = locked_observed_secret.as_ref().expect("Server secret has not been computed");
+        assert_eq!(*observed_secret, server_secret, "Communications didn't go according the plan");
     }
 /*
     /// Assures the minimum acceptable latency values -- either for Debug & Release modes.\
