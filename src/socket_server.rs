@@ -3,64 +3,64 @@
 
 use super::{
     types::*,
-    connection::{self, Peer, SocketEvent},
+    connection::{self, Peer},
     serde::{SocketServerSerializer,SocketServerDeserializer}
 };
 use std::{
     sync::Arc,
     net::{ToSocketAddrs,SocketAddr},
     fmt::Debug,
+    future::Future,
+    marker::PhantomData,
 };
-use reactive_mutiny::prelude::{ChannelCommon, ChannelProducer};
+use std::fmt::Formatter;
+use reactive_mutiny::prelude::{ChannelCommon, ChannelProducer, Uni};
 use futures::{Stream, stream, StreamExt, future::BoxFuture};
 use log::{trace, debug, info, warn, error};
+use crate::connection::ProcessorRemoteStreamType;
 
 
-/// The handle to define, start and shutdown a Socket Server
-pub struct SocketServer<'a, RemotePeerMessages: Send + SocketServerDeserializer<RemotePeerMessages>,
-                            LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages> > {
-    interface_ip:                      String,
-    port:                              u16,
-    workers:                           u16,
-    shutdown_signaler:                 Option<tokio::sync::oneshot::Sender<u32>>,
-    request_processor_stream_producer: Option<Box<dyn Fn(SocketEvent<RemotePeerMessages, LocalPeerMessages>) -> bool + Send + Sync + 'a>>,
-    request_processor_stream_closer:   Option<Box<dyn Fn() + Send + Sync + 'a>>,
+/// The internal events a server shares with the user code.\
+/// The user code may use those events to maintain a list of connected clients, be notified about shutdowns, init/deinit sessions, etc.
+/// Note that the `Peer` objects received in those events may be used, at any time, to send messages to the clients -- like "Shutting down. Goodbye".
+/// *When doing this on other occasions, make sure you won't break your own protocol.*
+#[derive(Debug)]
+pub enum ConnectionEvent<LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages>> {
+    PeerConnected {peer: Arc<Peer<LocalPeerMessages>>},
+    PeerDisconnected {peer: Arc<Peer<LocalPeerMessages>>},
+    ApplicationShutdown,
 }
 
-impl<RemotePeerMessages: 'static + Send + SocketServerDeserializer<RemotePeerMessages>,
-     LocalPeerMessages:  'static + Send + Sync + Debug + PartialEq + SocketServerSerializer<LocalPeerMessages> >
-SocketServer<'static, RemotePeerMessages, LocalPeerMessages> {
+
+pub type SenderUniType<RemotePeerMessages> = reactive_mutiny::prelude::advanced::UniZeroCopyAtomic<RemotePeerMessages, 1024>;
+
+/// The handle to define, start and shutdown a Socket Server
+pub struct SocketServer {
+    interface_ip:                String,
+    port:                        u16,
+    shutdown_signaler:           Option<tokio::sync::oneshot::Sender<u32>>,
+}
+
+impl SocketServer {
 
     /// Creates a new server instance listening on TCP/IP:
-    ///   `interface_ip`: the interface's IP to listen to -- 0.0.0.0 will cause listening to all network interfaces
-    ///   `port`: what port to listen to
-    ///   `workers`: How many tokio async tasks should be used to process the incoming requests?
-    ///              If you delegate it to events (or similar), this should be 1;
-    ///              If you fully process the request in the worker task (questionable practice), measure and pick your optimal number.
-    pub fn new(interface_ip: String, port: u16, workers: u16) -> Self {
+    ///   `interface_ip`:         the interface's IP to listen to -- 0.0.0.0 will cause listening to all network interfaces
+    ///   `port`:                 what port to listen to
+    ///   `processor_builder_fn`: a function to instantiate a new processor `Stream` whenever a new connection arrives
+    pub fn new(interface_ip:                String,
+               port:                        u16)
+               -> Self {
         Self {
             interface_ip,
             port,
-            workers,
-            shutdown_signaler:                 None,
-            request_processor_stream_producer: None,
-            request_processor_stream_closer:   None,
+            shutdown_signaler: None,
         }
     }
 
-    /// Attaches a request processor to this Socket Server, comprising of:
-    ///   - `request_processor_stream`: this is a stream yielding [ServerMessages] -- most likely mapping [ClientMessages] to it. See [processor::processor()] for an implementation
-    ///   - `request_processor_stream_producer`: a `sync` function to feed in [ClientMessages] to the `request_stream_processor`
-    ///   - `request_processor_stream_closer`: this closes the stream and is called when the server is shutdown
-    pub fn set_processor(&mut self,
-                         request_processor_stream:          impl Stream<Item = Result<(Arc<Peer<LocalPeerMessages>>, LocalPeerMessages),
-                                                                                      (Arc<Peer<LocalPeerMessages>>, Box<dyn std::error::Error + Sync + Send>)>> + Send + Sync + 'static,
-                         request_processor_stream_producer: impl Fn(SocketEvent<RemotePeerMessages, LocalPeerMessages>) -> bool + Send + Sync + 'static,
-                         request_processor_stream_closer:   impl Fn() + Send + Sync + 'static)
-                        -> impl Stream<Item = (Arc<Peer<LocalPeerMessages>>, bool)> + Send + Sync + 'static {
-        self.request_processor_stream_producer = Some(Box::new(request_processor_stream_producer));
-        self.request_processor_stream_closer   = Some(Box::new(request_processor_stream_closer));
-        Self::to_sender_stream(request_processor_stream)
+    fn sender_stream() {
+        // create the uni
+        // let server_messages_stream = self.processor_builder_fn(uni.stream)
+        // return Self::to_client_stream(client_socket: Peer, server_messages_stream)
     }
 
     /// returns a runner, which you may call to run `Server` and that will only return when
@@ -69,22 +69,19 @@ SocketServer<'static, RemotePeerMessages, LocalPeerMessages> {
     /// Example:
     /// ```no_compile
     ///     self.runner()().await;
-    pub async fn runner(&mut self) -> Result<impl FnOnce() -> BoxFuture<'static, Result<(),
-                                                                                        Box<dyn std::error::Error + Sync + Send>>> + Sync + Send + 'static,
-                                             Box<dyn std::error::Error + Sync + Send>> {
-
-        let request_processor_stream_producer = self.request_processor_stream_producer.take();
-        let request_processor_stream_closer = self.request_processor_stream_closer.take();
-
-        if request_processor_stream_producer.is_none() || request_processor_stream_closer.is_none() {
-            return Err(Box::from(format!("Request processor fields are not present. Was `set_processor()` called? ... or was this server already executed?")));
-        }
-
-        let request_processor_stream_producer = request_processor_stream_producer.unwrap();
-        let request_processor_stream_closer = request_processor_stream_closer.unwrap();
+    pub async fn runner<RemotePeerMessages:   SocketServerDeserializer<RemotePeerMessages> + Send + Sync + PartialEq + Debug + 'static,
+                        LocalPeerMessages:    SocketServerSerializer<LocalPeerMessages>    + Send + Sync + PartialEq + Debug + 'static,
+                        LocalStreamType:      Stream<Item=LocalPeerMessages>               + Send + 'static,
+                        ServerEventsCallback: Fn(/*server_event: */ConnectionEvent<LocalPeerMessages>) + Send + Sync + 'static,
+                        ProcessorBuilderFn:   Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<LocalPeerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<RemotePeerMessages>) -> LocalStreamType + Send + Sync + 'static>
+                       (&mut self,
+                        server_events_callback:      ServerEventsCallback,
+                        dialog_processor_builder_fn: ProcessorBuilderFn)
+                       -> Result<impl FnOnce() -> BoxFuture<'static, Result<(),
+                                                                            Box<dyn std::error::Error + Sync + Send>>> + Sync + Send + 'static,
+                                 Box<dyn std::error::Error + Sync + Send>> {
 
         let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
-
         self.shutdown_signaler = Some(shutdown_sender);
         let listening_interface = self.interface_ip.to_string();
         let port = self.port;
@@ -93,13 +90,14 @@ SocketServer<'static, RemotePeerMessages, LocalPeerMessages> {
             Box::pin(async move {
                 tokio::spawn(async move {
                     //run(handler, listener.unwrap(), addr, request_processor_stream_producer, request_processor_stream_closer)
-                    connection::server_network_loop_for_text_protocol(listening_interface,
-                                                                      port,
-                                                                      shutdown_receiver,
-                                                                      move |network_event| {
-                                                                          request_processor_stream_producer(network_event);
-                                                                          async move {}
-                                                                      }).await;
+                    let result = connection::server_network_loop_for_text_protocol(listening_interface.to_string(),
+                                                                                                      port,
+                                                                                                      shutdown_receiver,
+                                                                                                      server_events_callback,
+                                                                                                      dialog_processor_builder_fn).await;
+                    if let Err(err) = result {
+                        error!("Error starting SocketServer @ {listening_interface}:{port}: {:?}", err);
+                    }
                 }).await?;
 
                 Ok(())
@@ -124,43 +122,43 @@ SocketServer<'static, RemotePeerMessages, LocalPeerMessages> {
         }
     }
 
-    /// upgrades the `request_processor_stream` to a `Stream` able to both process requests & send back answers to the clients
-    fn to_sender_stream(request_processor_stream: impl Stream<Item = Result<(Arc<Peer<LocalPeerMessages>>, LocalPeerMessages),
-                                                                            (Arc<Peer<LocalPeerMessages>>, Box<dyn std::error::Error + Sync + Send>)>>)
-                        -> impl Stream<Item = (Arc<Peer<LocalPeerMessages>>, bool)> {
-
-        request_processor_stream
-            .filter_map(move |processor_response| async {
-                let (peer, outgoing) = match processor_response {
-                    Ok((peer, outgoing)) => {
-                        trace!("Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
-                        (peer, outgoing)
-                    },
-                    Err((peer, err)) => {
-                        let err_string = format!("{:?}", err);
-                        error!("Socket Server's processor yielded an error: {}", err_string);
-                        let error_message = LocalPeerMessages::processor_error_message(err_string);
-                        (peer, error_message)
-                    },
-                };
-                // send the message, skipping messages that are programmed not to generate any response
-                if !LocalPeerMessages::is_no_answer_message(&outgoing) {
-                    if LocalPeerMessages::is_disconnect_message(&outgoing) {
-                        trace!("Server choose to drop connection with {:?} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
-                        let _sent = peer.sender.try_send(|slot| *slot = outgoing);
-                        peer.sender.cancel_all_streams();
-                    } else {
-                        let sent = peer.sender.try_send(|slot| *slot = outgoing);
-                        if !sent {
-                            // client is flooding us with messages and is not reading, fast enough, the responses -- this is a protocol offence and the connection will be closed
-                            peer.sender.cancel_all_streams();
-                        }
-                    }
-                    Some((peer, true))
-                } else {
-                    None
-                }
-            })
-    }
+    // /// upgrades the `request_processor_stream` to a `Stream` able to both process requests & send back answers to the clients
+    // fn to_sender_stream<'a>(request_processor_stream: impl Stream<Item = Result<(&'a Peer<LocalPeerMessages>, LocalPeerMessages),
+    //                                                                             (&'a Peer<LocalPeerMessages>, Box<dyn std::error::Error + Sync + Send>)>>)
+    //                     -> impl Stream<Item = (Arc<Peer<LocalPeerMessages>>, bool)> {
+    //
+    //     request_processor_stream
+    //         .filter_map(move |processor_response| async {
+    //             let (peer, outgoing) = match processor_response {
+    //                 Ok((peer, outgoing)) => {
+    //                     trace!("Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
+    //                     (peer, outgoing)
+    //                 },
+    //                 Err((peer, err)) => {
+    //                     let err_string = format!("{:?}", err);
+    //                     error!("Socket Server's processor yielded an error: {}", err_string);
+    //                     let error_message = LocalPeerMessages::processor_error_message(err_string);
+    //                     (peer, error_message)
+    //                 },
+    //             };
+    //             // send the message, skipping messages that are programmed not to generate any response
+    //             if !LocalPeerMessages::is_no_answer_message(&outgoing) {
+    //                 if LocalPeerMessages::is_disconnect_message(&outgoing) {
+    //                     trace!("Server choose to drop connection with {:?} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
+    //                     let _sent = peer.sender.try_send(|slot| *slot = outgoing);
+    //                     peer.sender.cancel_all_streams();
+    //                 } else {
+    //                     let sent = peer.sender.try_send(|slot| *slot = outgoing);
+    //                     if !sent {
+    //                         // client is flooding us with messages and is not reading, fast enough, the responses -- this is a protocol offence and the connection will be closed
+    //                         peer.sender.cancel_all_streams();
+    //                     }
+    //                 }
+    //                 Some((peer, true))
+    //             } else {
+    //                 None
+    //             }
+    //         })
+    // }
 
 }

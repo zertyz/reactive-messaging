@@ -24,7 +24,7 @@ use lazy_static::lazy_static;
 ///   * `serialize()` enum variants into a String (like RON, for textual protocols) to be sent to the remote peer
 ///   * inform the peer if any wrong input was sent
 ///   * identify local messages that should cause a disconnection
-pub trait SocketServerSerializer<LocalPeerMessages: Send + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages>> {
+pub trait SocketServerSerializer<LocalPeerMessages: SocketServerSerializer<LocalPeerMessages> + Send + PartialEq + Debug> {
 
     /// `SocketServer`s serializer: transforms a strong typed `message` into a `String`
     fn ss_serialize(message: &LocalPeerMessages) -> String;

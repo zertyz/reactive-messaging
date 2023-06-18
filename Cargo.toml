@@ -22,10 +22,10 @@ license       = "Unlicense"
 [dependencies]
 tokio             = { version = "1", features = ["full", "rt-multi-thread"] }
 log               = "0.4"
-reactive-mutiny   = "0.1"     # for reactive programming in Rust
+reactive-mutiny   = "1"       # for reactive programming in Rust
 futures           = "0.3"     # brings in "Streams" / async iterators
 minstant          = "0.1"     # as fast as possible time measurements on X86_64 using TSC / RDTSC instructions -- avoiding system calls & context switches
-once_cell         = "1.17"    # lazy statics
+once_cell         = "1.17"    # lazy
 
 
 # doc-dependencies
@@ -44,13 +44,17 @@ simple_logger = "4.0"    # a dirty console logger
 log           = { version = "0.4", features = ["max_level_trace", "release_max_level_info"] }
 
 
-# dependencies for the socket-server example
-############################################
+# dependencies for the examples
+###############################
+
+# the next might not be needed, after all, as the server events will be issued by a single thread
+# dashmap    = "5.4"     # atomic hash maps & sets -- to send a shutdown message to clients
 
 # default config loading & saving
 serde      = { version = "1.0", features = ["derive"] }      # typed serialization / deserialization
 ron        = "0.8"                                           # .ron config files
 regex      = "1.5"                                           # for placing docs along with config files
+rand       = "0.8"                                           # random number
 
 # std replacements
 minstant       = "0.1"  # (real) time measurements through RDTSC instruction (without calling the Kernel / without causing a context switch)
