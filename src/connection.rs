@@ -237,11 +237,11 @@ async fn connection_loop_for_textual_protocol<RemoteMessages:    SocketServerDes
                                 let line_bytes = &read_buffer[next_line_index..eol_pos];
                                 match RemoteMessages::ss_deserialize(&line_bytes) {
                                     Ok(client_message) => {
-                                        if !processor_sender.try_send(|slot| *slot = client_message) {
+                                        if !processor_sender.try_send(|slot| unsafe { std::ptr::write(slot, client_message) }) {
                                             // breach in protocol: we cannot process further messages (they were sent too fast)
                                             let msg = format!("Client message ignored: server is too busy -- `dialog_processor` is full of unprocessed messages ({}/{}) while attempting to enqueue another message",
                                                                      processor_sender.channel.pending_items_count(), processor_sender.channel.buffer_size());
-                                            peer.sender.send(|slot| *slot = LocalMessages::processor_error_message(msg.clone()));
+                                            peer.sender.send(|slot| unsafe { std::ptr::write(slot, LocalMessages::processor_error_message(msg.clone())) });
                                             error!("SocketServer: {}", msg);
                                         }
                                     },
@@ -251,7 +251,7 @@ async fn connection_loop_for_textual_protocol<RemoteMessages:    SocketServerDes
                                                                            peer.peer_address, peer.peer_id, stripped_line);
                                         debug!("SocketServer: {error_message}");
                                         let outgoing_error = LocalMessages::processor_error_message(error_message);
-                                        let sent = peer.sender.try_send(|slot| *slot = outgoing_error);
+                                        let sent = peer.sender.try_send(|slot| unsafe { std::ptr::write(slot, outgoing_error) });
                                         if !sent {
                                             // prevent bad clients from depleting our resources: if the out buffer is full due to bad input, we'll wait 1 sec to process the next message
                                             tokio::time::sleep(Duration::from_millis(1000)).await;
