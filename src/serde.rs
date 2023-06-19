@@ -26,17 +26,21 @@ use lazy_static::lazy_static;
 ///   * identify local messages that should cause a disconnection
 pub trait SocketServerSerializer<LocalPeerMessages: SocketServerSerializer<LocalPeerMessages> + Send + PartialEq + Debug> {
 
-    /// `SocketServer`s serializer: transforms a strong typed `message` into a `String`
+    /// `SocketServer`s serializer: transforms a strong typed `message` into a `String`.\
+    /// IMPLEMENTORS: #[inline(always)]
     fn ss_serialize(message: &LocalPeerMessages) -> String;
 
-    /// Called whenever the socket server found an error -- the returned message should be as descriptive as possible
+    /// Called whenever the socket server found an error -- the returned message should be as descriptive as possible.\
+    /// IMPLEMENTORS: #[inline(always)]
     fn processor_error_message(err: String) -> LocalPeerMessages;
 
     /// Informs if the given internal `processor_answer` is a "disconnect" message (usually issued by the messages processor)\
-    /// -- in which case, the socket server will send it and, immediately, close the connection
+    /// -- in which case, the socket server will send it and, immediately, close the connection.\
+    /// IMPLEMENTORS: #[inline(always)]
     fn is_disconnect_message(processor_answer: &LocalPeerMessages) -> bool;
 
-    /// Tells if the given `processor_answer` represents a "no message" -- a message that should produce no answer to the peer
+    /// Tells if the given `processor_answer` represents a "no message" -- a message that should produce no answer to the peer.\
+    /// IMPLEMENTORS: #[inline(always)]
     fn is_no_answer_message(processor_answer: &LocalPeerMessages) -> bool;
 }
 
@@ -46,7 +50,8 @@ pub trait SocketServerSerializer<LocalPeerMessages: SocketServerSerializer<Local
 ///   * `deserialize()` enum variants received by the remote peer (like RON, for textual protocols)
 pub trait SocketServerDeserializer<T> {
 
-    /// `SocketServer`s deserializer: transform a textual `message` into a string typed value
+    /// `SocketServer`s deserializer: transform a textual `message` into a string typed value.\
+    /// IMPLEMENTORS: #[inline(always)]
     fn ss_deserialize(message: &[u8]) -> Result<T, Box<dyn std::error::Error + Sync + Send>>;
 }
 

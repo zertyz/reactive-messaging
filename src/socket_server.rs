@@ -28,7 +28,7 @@ use crate::connection::ProcessorRemoteStreamType;
 pub enum ConnectionEvent<LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages>> {
     PeerConnected {peer: Arc<Peer<LocalPeerMessages>>},
     PeerDisconnected {peer: Arc<Peer<LocalPeerMessages>>},
-    ApplicationShutdown,
+    ApplicationShutdown {timeout_ms: u32},
 }
 
 
@@ -69,15 +69,16 @@ impl SocketServer {
     /// Example:
     /// ```no_compile
     ///     self.runner()().await;
-    pub async fn runner<RemotePeerMessages:   SocketServerDeserializer<RemotePeerMessages> + Send + Sync + PartialEq + Debug + 'static,
-                        LocalPeerMessages:    SocketServerSerializer<LocalPeerMessages>    + Send + Sync + PartialEq + Debug + 'static,
-                        LocalStreamType:      Stream<Item=LocalPeerMessages>               + Send + 'static,
-                        ServerEventsCallback: Fn(/*server_event: */ConnectionEvent<LocalPeerMessages>) + Send + Sync + 'static,
-                        ProcessorBuilderFn:   Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<LocalPeerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<RemotePeerMessages>) -> LocalStreamType + Send + Sync + 'static>
+    pub async fn runner<RemotePeerMessages:             SocketServerDeserializer<RemotePeerMessages> + Send + Sync + PartialEq + Debug + 'static,
+                        LocalPeerMessages:              SocketServerSerializer<LocalPeerMessages>    + Send + Sync + PartialEq + Debug + 'static,
+                        LocalStreamType:                Stream<Item=LocalPeerMessages>               + Send + 'static,
+                        ConnectionEventsCallbackFuture: Future<Output=()>,
+                        ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<LocalPeerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                        ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<LocalPeerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<RemotePeerMessages>) -> LocalStreamType + Send + Sync + 'static>
                        (&mut self,
-                        server_events_callback:      ServerEventsCallback,
+                        server_events_callback: ConnectionEventsCallback,
                         dialog_processor_builder_fn: ProcessorBuilderFn)
-                       -> Result<impl FnOnce() -> BoxFuture<'static, Result<(),
+                        -> Result<impl FnOnce() -> BoxFuture<'static, Result<(),
                                                                             Box<dyn std::error::Error + Sync + Send>>> + Sync + Send + 'static,
                                  Box<dyn std::error::Error + Sync + Send>> {
 
