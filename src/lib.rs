@@ -1,6 +1,6 @@
 mod types;
 mod serde;
-mod connection;
+mod socket_connection_handler;
 
 mod socket_server;
 pub use socket_server::*;

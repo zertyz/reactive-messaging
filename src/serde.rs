@@ -2,7 +2,7 @@
 
 
 use crate::{
-    connection::Peer,
+    socket_connection_handler::Peer,
 };
 use std::{
     sync::Arc,
