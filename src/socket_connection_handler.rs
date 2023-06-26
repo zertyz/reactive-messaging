@@ -7,42 +7,26 @@
 
 
 use super::{
-    types::AtomicChannel,
+    config::*,
+    types::*,
     serde::{SocketServerDeserializer, SocketServerSerializer},
 };
+use crate::{ConnectionEvent, SenderUniType, SocketServer};
 use std::{cell::Cell, collections::VecDeque, fmt::Debug, future, future::Future, marker::PhantomData, net::SocketAddr, ops::Deref, sync::{Arc, atomic::{AtomicBool, AtomicU32, AtomicU8}, atomic::Ordering::Relaxed}, task::{Context, Poll, Waker}, time::Duration};
 use std::fmt::Formatter;
+use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
+use reactive_mutiny::prelude::advanced::{MutinyStream, UniZeroCopyAtomic, ChannelCommon, ChannelUni, ChannelProducer, Instruments, ChannelUniZeroCopyAtomic, OgreUnique, AllocatorAtomicArray};
 use futures::{StreamExt, Stream, stream, SinkExt};
 use tokio::{
     io::{self,AsyncWriteExt, AsyncBufReadExt, BufReader, BufWriter, Interest},
     net::{TcpListener, TcpStream, tcp::WriteHalf},
     sync::Mutex,
 };
-use log::{trace, debug, warn, error};
-use reactive_mutiny::prelude::advanced::{UniZeroCopyAtomic, ChannelCommon, ChannelUni, ChannelProducer, Instruments, ChannelUniZeroCopyAtomic, OgreUnique, AllocatorAtomicArray};
-use reactive_mutiny::prelude::MutinyStream;
 use tokio::sync::oneshot::error::RecvError;
-use crate::{ConnectionEvent, SenderUniType, SocketServer};
-
-
-const CHAT_MSG_SIZE_HINT: usize = 1024;
-/// How many messages may be produced ahead of sending, for each socket client
-const SENDER_BUFFER_SIZE: usize = 1024;
-/// How many messages may be received ahead of processing, for each socket
-const RECEIVER_BUFFER_SIZE: usize = 1024;
-/// Default executor instruments for processing the server-side logic due to each client message
-const SOCKET_PROCESSOR_INSTRUMENTS: usize = Instruments::NoInstruments.into();
-/// Timeout to wait for any last messages to be sent to the peer when a disconnection was commanded
-const GRACEFUL_STREAM_ENDING_TIMEOUT_DURATION: Duration = Duration::from_millis(100);
-
-// Uni types
-type SocketProcessorUniType<MessagesType>     = UniZeroCopyAtomic<MessagesType, RECEIVER_BUFFER_SIZE, 1, SOCKET_PROCESSOR_INSTRUMENTS>;
-type SocketProcessorChannelType<MessagesType> = ChannelUniZeroCopyAtomic<MessagesType, RECEIVER_BUFFER_SIZE, 1>;
-type SocketProcessorDerivedType<MessagesType> = OgreUnique<MessagesType, AllocatorAtomicArray<MessagesType, RECEIVER_BUFFER_SIZE>>;
-
-pub type ProcessorRemoteStreamType<MessagesType> = MutinyStream<'static, MessagesType, SocketProcessorChannelType<MessagesType>, SocketProcessorDerivedType<MessagesType>>;
+use log::{trace, debug, warn, error};
+use crate::prelude::ProcessorRemoteStreamType;
 
 
 // base functions
@@ -61,7 +45,7 @@ pub type ProcessorRemoteStreamType<MessagesType> = MutinyStream<'static, Message
 pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:                 SocketServerDeserializer<ClientMessages>              + Send + Sync + PartialEq + Debug + 'static,
                                                         ServerMessages:                 SocketServerSerializer<ServerMessages>                + Send + Sync + PartialEq + Debug + 'static,
                                                         PipelineOutputType:                                                                     Send + Sync +             Debug + 'static,
-                                                        OutputStreamType:               Stream<Item=PipelineOutputType>                       + Send + 'static,
+                                                        OutputStreamType:               Stream<Item=PipelineOutputType>                       + Send                            + 'static,
                                                         ConnectionEventsCallbackFuture: Future<Output=()>,
                                                         ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                                         ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> OutputStreamType>
@@ -114,7 +98,7 @@ pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:         
         };
 
         // prepares for the dialog to come with the (just accepted) connection
-        let sender = AtomicChannel::<ServerMessages, SENDER_BUFFER_SIZE>::new(format!("Sender for client {addr}"));
+        let sender = SenderChannel::<ServerMessages, SENDER_BUFFER_SIZE>::new(format!("Sender for client {addr}"));
         let (mut sender_stream, _) = Arc::clone(&sender).create_stream();
         let peer = Arc::new(Peer::new(sender, addr));
         let peer_ref1 = Arc::clone(&peer);
@@ -173,7 +157,7 @@ pub async fn client_for_unresponsive_text_protocol<ClientMessages:              
     let socket = TcpStream::connect(addr).await?;
 
     // prepares for the dialog to come with the (just accepted) connection
-    let sender = AtomicChannel::<ClientMessages, SENDER_BUFFER_SIZE>::new(format!("Sender for client {addr}"));
+    let sender = SenderChannel::<ClientMessages, SENDER_BUFFER_SIZE>::new(format!("Sender for client {addr}"));
     let peer = Arc::new(Peer::new(sender, addr));
     let peer_ref1 = Arc::clone(&peer);
     let peer_ref2 = Arc::clone(&peer);
@@ -245,7 +229,7 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
             result = sender_stream.next() => {
                 match result {
                     Some(to_send_message) => {
-                        let to_send_text = LocalMessages::ss_serialize(&to_send_message);
+                        let to_send_text = LocalMessages::serialize(&to_send_message);
                         if let Err(err) = textual_socket.write_all(to_send_text.as_bytes()).await {
                             warn!("SocketServer: PROBLEM in the connection with {:#?} while WRITING: '{:?}' -- dropping it", peer, err);
                             peer.sender.cancel_all_streams();
@@ -273,7 +257,7 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
                             if let Some(mut eol_pos) = read_buffer[next_line_index+search_start..].iter().position(|&b| b == '\n' as u8) {
                                 eol_pos += next_line_index+search_start;
                                 let line_bytes = &read_buffer[next_line_index..eol_pos];
-                                match RemoteMessages::ss_deserialize(&line_bytes) {
+                                match RemoteMessages::deserialize(&line_bytes) {
                                     Ok(client_message) => {
                                         if !processor_uni.try_send(|slot| unsafe { std::ptr::write(slot, client_message) }) {
                                             // breach in protocol: we cannot process further messages (they were received too fast)
@@ -409,13 +393,14 @@ fn to_responsive_stream<LocalMessages: SocketServerSerializer<LocalMessages> + S
                 if !LocalMessages::is_no_answer_message(&outgoing) {
                     let _sent = peer.sender.try_send(|slot| unsafe { std::ptr::write(slot,  outgoing) } );
                 }
-                futures::executor::block_on(peer.sender.gracefully_end_all_streams(GRACEFUL_STREAM_ENDING_TIMEOUT_DURATION));
+                peer.sender.cancel_all_streams();
             } else if !LocalMessages::is_no_answer_message(&outgoing) {
                 // send the answer
                 trace!("Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
                 let sent = peer.sender.try_send(|slot|  unsafe { std::ptr::write(slot,  outgoing) } );
                 if !sent {
-                    // peer is slow-reading (and, possibly, fast sending?) -- this is a protocol offence and the connection will be closed without any warning
+                    warn!("Slow reader detected -- {:?} (peer id {}). Closing the connection...", peer.peer_address, peer.peer_id);
+                    // peer is slow-reading (and, possibly, fast sending?) -- this is a protocol offence and the connection will be closed (as soon as all messages are sent?? names should be reviewed: gracefully_end_all_streams() & immediately_cancel_all_streams())
                     peer.sender.cancel_all_streams();
                 }
             }
@@ -430,14 +415,14 @@ pub type PeerId = u32;
 /// Represents a channel to a peer able to send out `MessageType` kinds of messages from "here" to "there"
 pub struct Peer<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>> {
     pub peer_id:      PeerId,
-    pub sender:       Arc<AtomicChannel<MessagesType, SENDER_BUFFER_SIZE>>,
+    pub sender:       Arc<SenderChannel<MessagesType, SENDER_BUFFER_SIZE>>,
     pub peer_address: SocketAddr,
 }
 
 impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>>
 Peer<MessagesType> {
 
-    pub fn new(sender: Arc<AtomicChannel<MessagesType, SENDER_BUFFER_SIZE>>, peer_address: SocketAddr) -> Self {
+    pub fn new(sender: Arc<SenderChannel<MessagesType, SENDER_BUFFER_SIZE>>, peer_address: SocketAddr) -> Self {
         Self {
             peer_id: PEER_COUNTER.fetch_add(1, Relaxed),
             sender,
@@ -448,11 +433,19 @@ Peer<MessagesType> {
 }
 
 impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>>
-Debug
-for Peer<MessagesType> {
+Debug for
+Peer<MessagesType> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Peer {{peer_id: {}, peer_address: '{}', sender: {} pending messages}}",
                   self.peer_id, self.peer_address, self.sender.pending_items_count())
+    }
+}
+
+impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>>
+Hash for
+Peer<MessagesType> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.peer_id.hash(state)
     }
 }
 
@@ -861,7 +854,7 @@ mod tests {
         /// Test implementation for our text-only protocol
     impl SocketServerSerializer<String> for String {
         #[inline(always)]
-        fn ss_serialize(message: &String) -> String {
+        fn serialize(message: &String) -> String {
             message.clone()
         }
         #[inline(always)]
@@ -884,7 +877,7 @@ mod tests {
     /// Testable implementation for our text-only protocol
     impl SocketServerDeserializer<String> for String {
         #[inline(always)]
-        fn ss_deserialize(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
+        fn deserialize(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send + 'static>> {
             Ok(String::from_utf8_lossy(message).to_string())
         }
     }

@@ -28,7 +28,7 @@ pub trait SocketServerSerializer<LocalPeerMessages: SocketServerSerializer<Local
 
     /// `SocketServer`s serializer: transforms a strong typed `message` into a `String`.\
     /// IMPLEMENTORS: #[inline(always)]
-    fn ss_serialize(message: &LocalPeerMessages) -> String;
+    fn serialize(remote_message: &LocalPeerMessages) -> String;
 
     /// Called whenever the socket server found an error -- the returned message should be as descriptive as possible.\
     /// IMPLEMENTORS: #[inline(always)]
@@ -52,12 +52,13 @@ pub trait SocketServerDeserializer<T> {
 
     /// `SocketServer`s deserializer: transform a textual `message` into a string typed value.\
     /// IMPLEMENTORS: #[inline(always)]
-    fn ss_deserialize(message: &[u8]) -> Result<T, Box<dyn std::error::Error + Sync + Send>>;
+    fn deserialize(local_message: &[u8]) -> Result<T, Box<dyn std::error::Error + Sync + Send>>;
 }
 
 
 // RON SERDE
 ////////////
+// TODO 2023-06-21: make this use the, now recommended, once_cell (instead of lazy_static)
 
 lazy_static! {
 
@@ -90,9 +91,11 @@ pub fn ron_serializer<T: Serialize>(message: &T) -> String {
     output_data
 }
 
+// TODO 2023-06-21: explore any performance improvements of making a `ron_serialize_into()`, receiving a reusable String
+
 /// RON deserializer
 #[inline(always)]
-pub fn ron_deserializer<T: for<'a> Deserialize<'a>>(message: &[u8]) -> Result<T, Box<dyn std::error::Error + Sync + Send>> {
+pub fn ron_deserializer<T: for<'r> Deserialize<'r>>(message: &[u8]) -> Result<T, Box<dyn std::error::Error + Sync + Send>> {
     RON_DESERIALIZER_CONFIG.from_bytes(message)
         .map_err(|err| Box::from(format!("RON deserialization error for message '{:?}': {}", std::str::from_utf8(message), err)))
 }

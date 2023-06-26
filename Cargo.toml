@@ -47,8 +47,7 @@ log           = { version = "0.4", features = ["max_level_trace", "release_max_l
 # dependencies for the examples
 ###############################
 
-# the next might not be needed, after all, as the server events will be issued by a single thread
-# dashmap    = "5.4"     # atomic hash maps & sets -- to send a shutdown message to clients
+dashmap    = "5.4"     # atomic hash maps & sets -- to send a shutdown message to clients
 
 # default config loading & saving
 serde      = { version = "1.0", features = ["derive"] }      # typed serialization / deserialization

@@ -1,23 +1,73 @@
 #[path = "../common/mod.rs"] mod common;
 
+use std::cell::UnsafeCell;
+use std::future;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::time::Duration;
 use common::protocol_model::{ClientMessages, ServerMessages};
 use reactive_messaging;
 use futures::{Stream, StreamExt};
+use reactive_messaging::{ConnectionEvent, ron_serializer};
+use crate::common::logic::ping_pong_models::{FaultEvents, GameOverStates, GameStates, MatchConfig, PingPongEvent, PlayerAction, Players, TurnFlipEvents};
+use crate::common::logic::ping_pong_logic::{act, Umpire};
+use dashmap::DashMap;
+use tokio::sync::{Mutex, MutexGuard};
+use log::{info,warn,error};
+use reactive_messaging::prelude::ProcessorRemoteStreamType;
+use crate::common::logic::protocol_processor::ServerProtocolProcessor;
+
 
 const LISTENING_INTERFACE: &str = "0.0.0.0";
 const LISTENING_PORT:      u16  = 1234;
 
 
-/// This build server processors to handle dialogues with clients
-fn processor_builder(client_addr: String, connected_port: u16, client_messages_stream: impl Stream<Item=String>) -> impl Stream<Item=String> {
-    client_messages_stream
-        .map(move |client_message| format!("Server just received: '{client_message}' from client_addr '{client_addr}', connected to port {connected_port}"))
-}
-
-fn main() {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
-    println!("Ping-Pong server started at {LISTENING_INTERFACE}:{LISTENING_PORT}");
-    let socket_server = reactive_messaging::SocketServer::new(LISTENING_INTERFACE.to_string(), LISTENING_PORT);
+
+    println!("Ping-Pong server starting at {LISTENING_INTERFACE}:{LISTENING_PORT}");
+    println!("Try pasting this into nc -vvvv localhost 9758:");
+    let client_message_config = ClientMessages::Config(MatchConfig {
+        score_limit:            3,
+        rally_timeout_millis:   1000,
+        no_bounce_probability:  0.01,
+        no_rebate_probability:  0.02,
+        mishit_probability:     0.03,
+        pre_bounce_probability: 0.04,
+        net_touch_probability:  0.05,
+        net_block_probability:  0.06,
+        ball_out_probability:   0.07,
+    });
+    print!("{}", ron_serializer(&client_message_config));
+    let service = ClientMessages::PingPongEvent(PingPongEvent::TurnFlip { player_action: PlayerAction { lucky_number: 0.15 }, resulting_event: TurnFlipEvents::SuccessfulService });
+    print!("{}", ron_serializer(&service));
+    println!();
+
+    let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
+    let server_processor_ref2 = Arc::clone(&server_processor_ref1);
+
+    let mut socket_server = reactive_messaging::SocketServer::new(LISTENING_INTERFACE.to_string(), LISTENING_PORT);
+
+    let start_server = socket_server.responsive_starter(
+        move |connection_events| {
+            server_processor_ref1.server_events_callback(connection_events);
+            future::ready(())
+        },
+        move |client_addr, port, peer, client_messages_stream: ProcessorRemoteStreamType<ClientMessages>| {
+            server_processor_ref2.dialog_processor(client_addr, port, peer, client_messages_stream)
+        }
+    );
+    start_server().await?;
+
+    let wait_for_shutdown = socket_server.shutdown_waiter();
+tokio::spawn( async move {
+    tokio::time::sleep(Duration::from_secs(300)).await;
+    socket_server.shutdown().expect("FAILED TO SHUTDOWN");
+});
+    wait_for_shutdown().await?;
+
+    Ok(())
     //let (processor_stream, stream_producer, stream_closer) = socket_server.set_processor()
 
     // socket server should allow me to inquire some executor/stream metrics (from reactive-mutiny) and should allow for clean shutdowns

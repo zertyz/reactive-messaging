@@ -1,4 +1,4 @@
-//! Models used in the ping-pong game [super::logic]
+//! Models used in the ping-pong game [super::ping_pong_logic]
 
 use serde::{Serialize, Deserialize};
 
@@ -8,13 +8,13 @@ use serde::{Serialize, Deserialize};
 pub enum PingPongEvent {
     /// The ball hit the opponent's field without any hard faults, causing the turn to flip
     /// --requiring the opponent to react to it in order not to lose the score opportunity
-    TurnFlip(TurnFlipEvents),
+    TurnFlip { player_action: PlayerAction, resulting_event: TurnFlipEvents },
     /// A hard fault occurred due to the player's reaction when hitting the ball
     /// -- the score opportunity was won by the opponent and, which must service the next ball
     /// (if the game is not over yet due to having reached the score limit)
-    HardFault(FaultEvents),
+    HardFault { player_action: PlayerAction, resulting_fault_event: FaultEvents },
     /// A soft fault happened -- which may cause the service to be attempted again or simply ignored during the rally (a "Let" event)
-    SoftFault(FaultEvents),
+    SoftFault { player_action: PlayerAction, resulting_fault_event: FaultEvents },
     /// Indicates that a score was won by the given player
     Score {
         point_winning_player: Players,
@@ -24,14 +24,14 @@ pub enum PingPongEvent {
     GameOver(GameOverStates),
 }
 
-/// Events describing how a rally progresses
+/// Events describing the result of the previous `PlayerAction`, continuing in the "rally" state
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum TurnFlipEvents {
     /// the player shot the ball, causing it to hit the opponent's field (without touching the net)
-    SuccessfulService (PlayerAction),
-    SoftFaultService (PlayerAction),
+    SuccessfulService,
+    SoftFaultService,
     /// the player rebated the ball, causing it to hit the opponent's field (a net touch is allowed)
-    SuccessfulRebate  (PlayerAction),
+    SuccessfulRebate,
 }
 
 /// Contains details of the action taken by a player during his turn in the game

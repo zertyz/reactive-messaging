@@ -55,22 +55,46 @@
 //! simply match that number with all the probabilities above, in that order: if the received number is lower or equal, the rally will end
 //! for the triggered reason.
 
-use super::logic::models::*;
+use std::error::Error;
+use super::logic::ping_pong_models::*;
 use serde::{Serialize, Deserialize};
+use reactive_messaging::{ron_deserializer, ron_serializer, SocketServerDeserializer, SocketServerSerializer};
+
+
+pub const PROTOCOL_VERSION: &str = "2023-06-21";
+
 
 /// Messages coming from the clients, suitable to be deserialized by the server
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ClientMessages {
 
-    /// First message that the client must send, upon connecting
+    /// First message that the client must send, upon establishing a connection
     Config(MatchConfig),
 
-    PingPongEvent,
+    /// The rally -- to be started after receiving [ServerMessages::GameStarted]
+    PingPongEvent(PingPongEvent),
 
-    /// Sent when the client request an immediate termination of the game
-    Stop,
+    /// Tells the server we agree with the score given by [ServerMessages::PingPongEvent] -> [PingPongEvent::GameOver] -> [GameOverStates::GracefullyEnded].\
+    /// Upon receiving this message, the server must close the connection.
     EndorsedScore,
+    /// Tells the server we computed a different score than the one given by [ServerMessages::PingPongEvent] -> [PingPongEvent::GameOver] -> [GameOverStates::GracefullyEnded].\
+    /// Upon receiving this message, the server must close the connection.
     ContestedScore(MatchScore),
+
+    // `SocketServer` basic messages
+    ////////////////////////////////
+
+    /// Asks the server version, which should cause the server to respond with [ServerMessages::Version]
+    Version,
+    /// States that the last command wasn't correctly processed or was not recognized as valid
+    Error(/*reason: */String),
+    /// Issued by the client's local processor when no answer should be sent back to the server
+    NoAnswer,
+    /// Sent at any time, when the client request an immediate termination of the communications.\
+    /// It is elegant to send it before abruptly closing the connection, even if we are in the middle of a transaction
+    /// -- anyway, if the connection is dropped or faces an error, the "connection events callback" may be instructed to
+    /// send this message, so the server processor knows it is time to release the resources associated with this client.
+    Quit,
 }
 
 /// Messages coming from the server, suitable to be deserialized by the clients
@@ -80,6 +104,98 @@ pub enum ServerMessages {
     /// Issued after a [ClientMessages::Config] has been received, indicating the client should service the first ball of the game
     GameStarted,
 
-    PingPongEvent,
+    /// The rally
+    PingPongEvent(PingPongEvent),
+
+    // `SocketServer` basic messages
+    ////////////////////////////////
+
+    /// After being asked by [ClientMessages::Version], tells the client which version of the server we're running
+    Version(String),
+    /// States that the last command wasn't correctly processed or was not recognized as valid
+    Error(/*reason: */String),
+    /// Issued by the server's local processor when no answer should be sent back to the client
+    NoAnswer,
+    /// Issued when the server is ending the connection due to gracefully completing the communications
+    GoodBye,
+    /// Issued when the server was asked to gracefully shutdown: all connected clients will be informed, data will be persisted and pretty much nothing else will be done.
+    ServerShutdown,
+
 }
 
+// implementation of the RON SerDe
+//////////////////////////////////
+
+impl SocketServerSerializer<ClientMessages> for ClientMessages {
+
+    #[inline(always)]
+    fn serialize(remote_message: &ClientMessages) -> String {
+        ron_serializer(remote_message)
+    }
+
+    #[inline(always)]
+    fn processor_error_message(err: String) -> ClientMessages {
+        ClientMessages::Error(err)
+    }
+
+    #[inline(always)]
+    fn is_disconnect_message(processor_answer: &ClientMessages) -> bool {
+        match processor_answer {
+            ClientMessages::Quit => true,
+            _ => false,
+        }
+    }
+
+    #[inline(always)]
+    fn is_no_answer_message(processor_answer: &ClientMessages) -> bool {
+        if let ClientMessages::NoAnswer = processor_answer {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl SocketServerDeserializer<ClientMessages> for ClientMessages {
+
+    #[inline(always)]
+    fn deserialize(local_message: &[u8]) -> Result<ClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+        ron_deserializer(local_message)
+    }
+}
+
+impl SocketServerSerializer<ServerMessages> for ServerMessages {
+
+    #[inline(always)]
+    fn serialize(remote_message: &ServerMessages) -> String {
+        ron_serializer(remote_message)
+    }
+
+    #[inline(always)]
+    fn processor_error_message(err: String) -> ServerMessages {
+        ServerMessages::Error(err)
+    }
+
+    #[inline(always)]
+    fn is_disconnect_message(processor_answer: &ServerMessages) -> bool {
+        match processor_answer {
+            ServerMessages::GoodBye | ServerMessages::PingPongEvent(PingPongEvent::GameOver(GameOverStates::GameCancelled { .. })) => true,
+            _ => false,
+        }
+    }
+
+    #[inline(always)]
+    fn is_no_answer_message(processor_answer: &ServerMessages) -> bool {
+        if let ServerMessages::NoAnswer = processor_answer {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl SocketServerDeserializer<ServerMessages> for ServerMessages {
+    fn deserialize(local_message: &[u8]) -> Result<ServerMessages, Box<dyn Error + Sync + Send>> {
+        ron_deserializer(local_message)
+    }
+}
