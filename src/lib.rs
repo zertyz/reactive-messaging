@@ -10,3 +10,6 @@ pub mod prelude;
 
 mod socket_server;
 pub use socket_server::*;
+
+mod socket_client;
+pub use socket_client::*;

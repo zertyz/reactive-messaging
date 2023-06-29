@@ -129,8 +129,9 @@ pub enum ServerMessages {
 impl SocketServerSerializer<ClientMessages> for ClientMessages {
 
     #[inline(always)]
-    fn serialize(remote_message: &ClientMessages) -> String {
-        ron_serializer(remote_message)
+    fn serialize(remote_message: &ClientMessages, buffer: &mut Vec<u8>) {
+        ron_serializer(remote_message, buffer)
+            .expect("`ron_serializer()` for `ClientMessages`");
     }
 
     #[inline(always)]
@@ -167,8 +168,9 @@ impl SocketServerDeserializer<ClientMessages> for ClientMessages {
 impl SocketServerSerializer<ServerMessages> for ServerMessages {
 
     #[inline(always)]
-    fn serialize(remote_message: &ServerMessages) -> String {
-        ron_serializer(remote_message)
+    fn serialize(remote_message: &ServerMessages, buffer: &mut Vec<u8>) {
+        ron_serializer(remote_message, buffer)
+            .expect("`ron_serializer()` for `ServerMessages`");
     }
 
     #[inline(always)]
@@ -176,6 +178,7 @@ impl SocketServerSerializer<ServerMessages> for ServerMessages {
         ServerMessages::Error(err)
     }
 
+    /// Disconnects when our processor issues either of "GoodBye" or "GameCancelled"
     #[inline(always)]
     fn is_disconnect_message(processor_answer: &ServerMessages) -> bool {
         match processor_answer {

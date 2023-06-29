@@ -18,7 +18,8 @@ pub enum PingPongEvent {
     /// Indicates that a score was won by the given player
     Score {
         point_winning_player: Players,
-        opponent_fault:       FaultEvents,
+        last_player_action:   PlayerAction,
+        last_fault:           FaultEvents,
     },
     /// Indicates that the match is over
     GameOver(GameOverStates),
@@ -80,8 +81,9 @@ pub enum GameStates {
 pub enum GameOverStates {
     /// The score limit was reached and the game ended gracefully
     GracefullyEnded {
-        final_score: MatchScore,
-        last_fault:  FaultEvents,
+        final_score:        MatchScore,
+        last_player_action: PlayerAction,
+        last_fault:         FaultEvents,
     },
     /// A rule was not honored, causing the game to be aborted due to the given (human readable) reason
     GameCancelled {

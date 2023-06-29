@@ -1,4 +1,4 @@
-//! Server-side handler the `reactive-sockets`'s connection
+//! Reactive server for socket connections
 
 
 use super::{
@@ -22,18 +22,6 @@ use reactive_mutiny::prelude::{ChannelCommon, ChannelProducer, Uni};
 use futures::{Stream, stream, StreamExt, future::BoxFuture};
 use log::{trace, debug, info, warn, error};
 use crate::prelude::ProcessorRemoteStreamType;
-
-
-/// The internal events a server shares with the user code.\
-/// The user code may use those events to maintain a list of connected clients, be notified about shutdowns, init/deinit sessions, etc.
-/// Note that the `Peer` objects received in those events may be used, at any time, to send messages to the clients -- like "Shutting down. Goodbye".
-/// *When doing this on other occasions, make sure you won't break your own protocol.*
-#[derive(Debug)]
-pub enum ConnectionEvent<LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages>> {
-    PeerConnected {peer: Arc<Peer<LocalPeerMessages>>},
-    PeerDisconnected {peer: Arc<Peer<LocalPeerMessages>>},
-    ApplicationShutdown {timeout_ms: u32},
-}
 
 
 pub type SenderUniType<RemotePeerMessages> = reactive_mutiny::prelude::advanced::UniZeroCopyAtomic<RemotePeerMessages, 1024>;
@@ -168,7 +156,7 @@ impl SocketServer {
         })
     }
 
-    pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn shutdown(mut self) -> Result<(), Box<dyn std::error::Error>> {
         const TIMEOUT_MILLIS: u32 = 5000;
         match self.server_shutdown_signaler.take().zip(self.local_shutdown_signaler.take()) {
             Some((server_sender, local_sender)) => {
@@ -176,13 +164,13 @@ impl SocketServer {
                 if let Err(_err) = server_sender.send(TIMEOUT_MILLIS) {
                     Err(Box::from(format!("Socket Server BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix")))
                 } else if let Err(_err) = local_sender.send(()) {
-                    Err(Box::from(format!("Socket Server BUG: couldn't send shutdown signal to the local `one_shut` channel. Program is, likely, hanged. Please, investigate and fix")))
+                    Err(Box::from(format!("Socket Server BUG: couldn't send shutdown signal to the local `one_shot` channel. Program is, likely, hanged. Please, investigate and fix")))
                 } else {
                     Ok(())
                 }
             }
             None => {
-                Err(Box::from(format!("Socket Server: Shutdown requested, but the service was not started (or a previous shutdown is underway). Ignoring...")))
+                Err(Box::from(format!("Socket Server: Shutdown requested, but the service was not started. Ignoring...")))
             }
         }
     }

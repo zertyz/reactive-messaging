@@ -11,7 +11,7 @@ use super::{
     types::*,
     serde::{SocketServerDeserializer, SocketServerSerializer},
 };
-use crate::{ConnectionEvent, SenderUniType, SocketServer};
+use crate::{SenderUniType, SocketServer};
 use std::{cell::Cell, collections::VecDeque, fmt::Debug, future, future::Future, marker::PhantomData, net::SocketAddr, ops::Deref, sync::{Arc, atomic::{AtomicBool, AtomicU32, AtomicU8}, atomic::Ordering::Relaxed}, task::{Context, Poll, Waker}, time::Duration};
 use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
@@ -26,6 +26,7 @@ use tokio::{
 };
 use tokio::sync::oneshot::error::RecvError;
 use log::{trace, debug, warn, error};
+use tokio::io::AsyncReadExt;
 use crate::prelude::ProcessorRemoteStreamType;
 
 
@@ -181,11 +182,11 @@ pub async fn client_for_unresponsive_text_protocol<ClientMessages:              
     tokio::spawn(async move {
         let timeout_ms = match shutdown_signaler.await {
             Ok(timeout_millis) => {
-                trace!("SocketServer: SHUTDOWN requested for client connected to server @ {server_ipv4_addr}:{port} -- with timeout {}ms: notifying & dropping the connection", timeout_millis);
+                trace!("reactive-messaging: SHUTDOWN requested for client connected to server @ {server_ipv4_addr}:{port} -- with timeout {}ms: notifying & dropping the connection", timeout_millis);
                 timeout_millis
             },
             Err(err) => {
-                error!("SocketServer: PROBLEM in the `shutdown signaler` client connected to server @ {server_ipv4_addr}:{port} (a client shutdown will be commanded now due to this occurrence): {:?}", err);
+                error!("reactive-messaging: PROBLEM in the `shutdown signaler` client connected to server @ {server_ipv4_addr}:{port} (a client shutdown will be commanded now due to this occurrence): {:?}", err);
                 5000    // consider this as the "problematic shutdown timeout (millis) constant"
             },
         };
@@ -216,6 +217,7 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
     textual_socket.set_ttl(30).map_err(|err| format!("error setting ttl(30) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
     textual_socket.set_linger(Some(Duration::from_secs(3))).map_err(|err| format!("error setting linger(Some(Duration::from_secs(3))) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
     let mut read_buffer = Vec::with_capacity(CHAT_MSG_SIZE_HINT);
+    let mut serialization_buffer = Vec::with_capacity(CHAT_MSG_SIZE_HINT);
 
     let (mut sender_stream, _) = peer.sender.create_stream();
 
@@ -226,52 +228,49 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
             biased;     // sending has priority over receiving
 
             // send?
-            result = sender_stream.next() => {
-                match result {
-                    Some(to_send_message) => {
-                        let to_send_text = LocalMessages::serialize(&to_send_message);
-                        if let Err(err) = textual_socket.write_all(to_send_text.as_bytes()).await {
-                            warn!("SocketServer: PROBLEM in the connection with {:#?} while WRITING: '{:?}' -- dropping it", peer, err);
+            to_send = sender_stream.next() => {
+                match to_send {
+                    Some(to_send) => {
+                        LocalMessages::serialize(&to_send, &mut serialization_buffer);
+                        serialization_buffer.push('\n' as u8);
+                        if let Err(err) = textual_socket.write_all(&serialization_buffer).await {
+                            warn!("reactive-messaging: PROBLEM in the connection with {:#?} while WRITING: '{:?}' -- dropping it", peer, err);
                             peer.sender.cancel_all_streams();
                             break 'connection
                         }
                     },
                     None => {
-                        debug!("SocketServer: Sender for {:#?} ended (most likely, .cancel_all_streams() was called on the `peer` by the processor.", peer);
+                        debug!("reactive-messaging: Sender for {:#?} ended (most likely, .cancel_all_streams() was called on the `peer` by the processor.", peer);
                         break 'connection
                     }
                 }
             },
+
             // read?
-            _ = textual_socket.readable() => {
-                match textual_socket.try_read_buf(&mut read_buffer) {
-                    Ok(0) => {
-                        warn!("SocketServer: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
-                        peer.sender.cancel_all_streams();
-                        break 'connection
-                    },
-                    Ok(n) => {
+            read = textual_socket.read_buf(&mut read_buffer) => {
+                match read {
+                    Ok(n) if n > 0 => {
                         let mut next_line_index = 0;
-                        let mut search_start = read_buffer.len() - n;
+                        let mut this_line_search_start = read_buffer.len() - n;
                         loop {
-                            if let Some(mut eol_pos) = read_buffer[next_line_index+search_start..].iter().position(|&b| b == '\n' as u8) {
-                                eol_pos += next_line_index+search_start;
+                            if let Some(mut eol_pos) = read_buffer[next_line_index+this_line_search_start..].iter().position(|&b| b == '\n' as u8) {
+                                eol_pos += next_line_index+this_line_search_start;
                                 let line_bytes = &read_buffer[next_line_index..eol_pos];
                                 match RemoteMessages::deserialize(&line_bytes) {
                                     Ok(client_message) => {
                                         if !processor_uni.try_send(|slot| unsafe { std::ptr::write(slot, client_message) }) {
                                             // breach in protocol: we cannot process further messages (they were received too fast)
-                                            let msg = format!("Client message ignored: server is too busy -- `dialog_processor` is full of unprocessed messages ({}/{}) while attempting to enqueue another message from {:?} (peer id {})",
+                                            let msg = format!("Input message ignored: local processor is too busy -- `dialog_processor` is full of unprocessed messages ({}/{}) while attempting to enqueue another message from {:?} (peer id {})",
                                                                      processor_uni.channel.pending_items_count(), processor_uni.channel.buffer_size(), peer.peer_address, peer.peer_id);
                                             peer.sender.try_send(|slot| unsafe { std::ptr::write(slot, LocalMessages::processor_error_message(msg.clone())) });
-                                            error!("SocketServer: {}", msg);
+                                            error!("reactive-messaging: {}", msg);
                                         }
                                     },
                                     Err(err) => {
                                         let stripped_line = String::from_utf8_lossy(line_bytes);
                                         let error_message = format!("Unknown command received from {:?} (peer id {}): '{}'",
                                                                            peer.peer_address, peer.peer_id, stripped_line);
-                                        warn!("SocketServer: {error_message}");
+                                        warn!("reactive-messaging: {error_message}");
                                         let outgoing_error = LocalMessages::processor_error_message(error_message);
                                         let sent = peer.sender.try_send(|slot| unsafe { std::ptr::write(slot, outgoing_error) });
                                         if !sent {
@@ -281,22 +280,27 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
                                     }
                                 }
                                 next_line_index = eol_pos + 1;
+                                this_line_search_start = 0;
                                 if next_line_index >= read_buffer.len() {
-                                    next_line_index = read_buffer.len();
+                                    read_buffer.clear();
                                     break
                                 }
-                                search_start = 0;
                             } else {
+                                if next_line_index > 0 {
+                                    read_buffer.drain(0..next_line_index);
+                                }
                                 break
                             }
                         }
-                        if next_line_index > 0 {
-                            read_buffer.drain(0..next_line_index);
-                        }
+                    },
+                    Ok(_) /* zero bytes received */ => {
+                        warn!("reactive-messaging: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                        peer.sender.cancel_all_streams();
+                        break 'connection
                     },
                     Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
                     Err(err) => {
-                        error!("SocketServer: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
+                        error!("reactive-messaging: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
                         break 'connection
                     },
                 }
@@ -441,14 +445,6 @@ Peer<MessagesType> {
     }
 }
 
-impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>>
-Hash for
-Peer<MessagesType> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.peer_id.hash(state)
-    }
-}
-
 
 /// Unit tests the [tokio_message_io](self) module
 #[cfg(any(test,doc))]
@@ -487,7 +483,7 @@ mod tests {
                                                                 |connection_event| {
                match connection_event {
                    ConnectionEvent::PeerConnected { peer } => {
-                       assert!(peer.sender.try_send_movable(format!("Welcome! State your business!\n")), "couldn't send");
+                       assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
                    },
                    ConnectionEvent::PeerDisconnected { peer } => {},
                    ConnectionEvent::ApplicationShutdown { timeout_ms } => {
@@ -500,9 +496,9 @@ mod tests {
                let client_secret_ref = client_secret_ref.clone();
                let server_secret_ref = server_secret_ref.clone();
                client_messages_stream.inspect(move |client_message| {
-                   assert!(peer.sender.try_send_movable(format!("Client just sent '{}'\n", client_message)), "couldn't send");
+                   assert!(peer.sender.try_send_movable(format!("Client just sent '{}'", client_message)), "couldn't send");
                    if &*client_message == &client_secret_ref {
-                       assert!(peer.sender.try_send_movable(format!("{}\n", server_secret_ref)), "couldn't send");
+                       assert!(peer.sender.try_send_movable(format!("{}", server_secret_ref)), "couldn't send");
                    } else {
                        panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
                    }
@@ -520,7 +516,7 @@ mod tests {
                                               move |connection_event| {
                 match connection_event {
                     ConnectionEvent::PeerConnected { peer } => {
-                        assert!(peer.sender.try_send_movable(format!("{}\n", client_secret_ref1)), "couldn't send");
+                        assert!(peer.sender.try_send_movable(format!("{}", client_secret_ref1)), "couldn't send");
                     },
                     ConnectionEvent::PeerDisconnected { peer } => {
                         println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
@@ -573,7 +569,7 @@ mod tests {
                     let n_str = &client_message[5..(client_message.len() - 1)];
                     let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original client message: '{}'. Parsing error: {:?}", n_str, client_message, err));
                     // Answers:  "Pong(n)"
-                    assert!(peer.sender.try_send_movable(format!("Pong({})\n", n)), "couldn't send");
+                    assert!(peer.sender.try_send_movable(format!("Pong({})", n)), "couldn't send");
                 })
             }));
 
@@ -588,7 +584,7 @@ mod tests {
                 match connection_event {
                     ConnectionEvent::PeerConnected { peer } => {
                         // conversation starter
-                        assert!(peer.sender.try_send_movable(format!("Ping(0)\n")), "couldn't send");
+                        assert!(peer.sender.try_send_movable(format!("Ping(0)")), "couldn't send");
                     },
                     ConnectionEvent::PeerDisconnected { .. } => {},
                     ConnectionEvent::ApplicationShutdown { .. } => {},
@@ -606,7 +602,7 @@ mod tests {
                         panic!("Received '{}', where Client was expecting 'Pong({})'", server_message, current_count);
                     }
                     // Answers: "Ping(n+1)"
-                    assert!(peer.sender.try_send_movable(format!("Ping({})\n", current_count+1)), "couldn't send");
+                    assert!(peer.sender.try_send_movable(format!("Ping({})", current_count+1)), "couldn't send");
                 })
             }).await.expect("Starting the client");
 
@@ -625,7 +621,7 @@ mod tests {
         if DEBUG {
             assert!(counter > 30000, "Latency regression detected: we used to make 36690 round trips in 2 seconds (Debug mode) -- now only {} were made", counter);
         } else {
-            assert!(counter > 200000, "Latency regression detected: we used to make 232620 round trips in 2 seconds (Release mode) -- now only {} were made", counter);
+            assert!(counter > 200000, "Latency regression detected: we used to make 276385 round trips in 2 seconds (Release mode) -- now only {} were made", counter);
 
         }
     }
@@ -681,7 +677,7 @@ mod tests {
                             let start = SystemTime::now();
                             let mut n = 0;
                             loop {
-                                assert!(peer.sender.try_send_movable(format!("DoNotAnswer({})\n", n)), "couldn't send");
+                                assert!(peer.sender.try_send_movable(format!("DoNotAnswer({})", n)), "couldn't send");
                                 n += 1;
                                 // flush & bailout check for timeout every 1024 messages
                                 if n % (1<<10) == 0 {
@@ -725,7 +721,7 @@ mod tests {
         if DEBUG {
             assert!(received_messages_count > 400000, "Client flooding throughput regression detected: we used to send/receive 451584 flood messages in this test (Debug mode) -- now only {} were made", received_messages_count);
         } else {
-            assert!(received_messages_count > 400000, "Client flooding throughput regression detected: we used to send/receive 490472 flood messages in this test (Release mode) -- now only {} were made", received_messages_count);
+            assert!(received_messages_count > 400000, "Client flooding throughput regression detected: we used to send/receive 500736 flood messages in this test (Release mode) -- now only {} were made", received_messages_count);
 
         }
 
@@ -751,12 +747,12 @@ mod tests {
             move |client_addr, client_port, peer, client_messages_stream| {
                let client_secret_ref = client_secret_ref.clone();
                let server_secret_ref = server_secret_ref.clone();
-                assert!(peer.sender.try_send_movable(format!("Welcome! State your business!\n")), "couldn't send");
+                assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
                 client_messages_stream.flat_map(move |client_message: SocketProcessorDerivedType<String>| {
                    stream::iter([
-                       format!("Client just sent '{}'\n", client_message),
+                       format!("Client just sent '{}'", client_message),
                        if &*client_message == &client_secret_ref {
-                           format!("{}\n", server_secret_ref)
+                           format!("{}", server_secret_ref)
                        } else {
                            panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
                        }])
@@ -774,7 +770,7 @@ mod tests {
             move |connection_event| future::ready(()),
             move |client_addr, client_port, peer, server_messages_stream: ProcessorRemoteStreamType<String>| {
                 let observed_secret_ref = Arc::clone(&observed_secret_ref);
-                assert!(peer.sender.try_send_movable(format!("{}\n", client_secret_ref1)), "couldn't send");
+                assert!(peer.sender.try_send_movable(format!("{}", client_secret_ref1)), "couldn't send");
                 server_messages_stream
                     .then(move |server_message| {
                         let observed_secret_ref = Arc::clone(&observed_secret_ref);
@@ -854,8 +850,9 @@ mod tests {
         /// Test implementation for our text-only protocol
     impl SocketServerSerializer<String> for String {
         #[inline(always)]
-        fn serialize(message: &String) -> String {
-            message.clone()
+        fn serialize(message: &String, buffer: &mut Vec<u8>) {
+            buffer.clear();
+            buffer.extend_from_slice(message.as_bytes());
         }
         #[inline(always)]
         fn processor_error_message(err: String) -> String {

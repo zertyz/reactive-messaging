@@ -1,5 +1,7 @@
 #[path = "../common/mod.rs"] mod common;
 
+pub mod protocol_processor;
+
 use std::cell::UnsafeCell;
 use std::future;
 use std::ops::Deref;
@@ -8,14 +10,14 @@ use std::time::Duration;
 use common::protocol_model::{ClientMessages, ServerMessages};
 use reactive_messaging;
 use futures::{Stream, StreamExt};
-use reactive_messaging::{ConnectionEvent, ron_serializer};
+use reactive_messaging::{ron_serializer};
 use crate::common::logic::ping_pong_models::{FaultEvents, GameOverStates, GameStates, MatchConfig, PingPongEvent, PlayerAction, Players, TurnFlipEvents};
 use crate::common::logic::ping_pong_logic::{act, Umpire};
 use dashmap::DashMap;
 use tokio::sync::{Mutex, MutexGuard};
 use log::{info,warn,error};
 use reactive_messaging::prelude::ProcessorRemoteStreamType;
-use crate::common::logic::protocol_processor::ServerProtocolProcessor;
+use crate::protocol_processor::ServerProtocolProcessor;
 
 
 const LISTENING_INTERFACE: &str = "0.0.0.0";
@@ -27,22 +29,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
 
     println!("Ping-Pong server starting at {LISTENING_INTERFACE}:{LISTENING_PORT}");
-    println!("Try pasting this into nc -vvvv localhost 9758:");
-    let client_message_config = ClientMessages::Config(MatchConfig {
-        score_limit:            3,
-        rally_timeout_millis:   1000,
-        no_bounce_probability:  0.01,
-        no_rebate_probability:  0.02,
-        mishit_probability:     0.03,
-        pre_bounce_probability: 0.04,
-        net_touch_probability:  0.05,
-        net_block_probability:  0.06,
-        ball_out_probability:   0.07,
-    });
-    print!("{}", ron_serializer(&client_message_config));
-    let service = ClientMessages::PingPongEvent(PingPongEvent::TurnFlip { player_action: PlayerAction { lucky_number: 0.15 }, resulting_event: TurnFlipEvents::SuccessfulService });
-    print!("{}", ron_serializer(&service));
-    println!();
 
     let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);

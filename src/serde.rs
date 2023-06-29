@@ -10,12 +10,9 @@ use std::{
     fmt::Debug,
 };
 use futures::future::BoxFuture;
-use ron::{
-    Options,
-    ser::PrettyConfig,
-};
+use ron::{Options, ser::PrettyConfig, Serializer};
 use serde::{Serialize, Deserialize};
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 
 
 /// Trait that should be implemented by enums that model the "local messages" to be handled by the [SocketServer] --
@@ -26,9 +23,10 @@ use lazy_static::lazy_static;
 ///   * identify local messages that should cause a disconnection
 pub trait SocketServerSerializer<LocalPeerMessages: SocketServerSerializer<LocalPeerMessages> + Send + PartialEq + Debug> {
 
-    /// `SocketServer`s serializer: transforms a strong typed `message` into a `String`.\
+    /// `SocketServer`s serializer: transforms a strong typed `message` into a sequence of bytes, put in `buffer`\
+    /// -- not appending any '\n'.
     /// IMPLEMENTORS: #[inline(always)]
-    fn serialize(remote_message: &LocalPeerMessages) -> String;
+    fn serialize(remote_message: &LocalPeerMessages, buffer: &mut Vec<u8>);
 
     /// Called whenever the socket server found an error -- the returned message should be as descriptive as possible.\
     /// IMPLEMENTORS: #[inline(always)]
@@ -58,37 +56,16 @@ pub trait SocketServerDeserializer<T> {
 
 // RON SERDE
 ////////////
-// TODO 2023-06-21: make this use the, now recommended, once_cell (instead of lazy_static)
 
-lazy_static! {
-
-    static ref RON_EXTENSIONS: ron::extensions::Extensions = {
-        let mut extensions = ron::extensions::Extensions::empty();
-        extensions.insert(ron::extensions::Extensions::IMPLICIT_SOME);
-        extensions.insert(ron::extensions::Extensions::UNWRAP_NEWTYPES);
-        extensions.insert(ron::extensions::Extensions::UNWRAP_VARIANT_NEWTYPES);
-        extensions
-    };
-
-    static ref RON_SERIALIZER_CONFIG: PrettyConfig = ron::ser::PrettyConfig::new()
-        .depth_limit(10)
-        .new_line(String::from(""))
-        .indentor(String::from(""))
-        .separate_tuple_members(true)
-        .enumerate_arrays(false)
-        .extensions(*RON_EXTENSIONS);
-
-    static ref RON_DESERIALIZER_CONFIG: Options = ron::Options::default()
-        ;//.with_default_extension(*RON_EXTENSIONS);
-
-}
+static RON_DESERIALIZER_CONFIG: Lazy<Options> = Lazy::new(|| ron::Options::default());
 
 /// RON serializer
 #[inline(always)]
-pub fn ron_serializer<T: Serialize>(message: &T) -> String {
-    let mut output_data = ron::ser::to_string(message).unwrap();
-    write!(output_data, "\n").unwrap();
-    output_data
+pub fn ron_serializer<T: ?Sized + Serialize>(message: &T, buffer: &mut Vec<u8>) -> Result<(), ron::Error> {
+    buffer.clear();
+    let mut serializer = Serializer::with_options(buffer, None, ron::Options::default())?;
+    message.serialize(&mut serializer)?;
+    Ok(())
 }
 
 // TODO 2023-06-21: explore any performance improvements of making a `ron_serialize_into()`, receiving a reusable String
@@ -117,9 +94,11 @@ mod tests {
     /// assures RON serialization / deserialization works for all client / server messages
     #[cfg_attr(not(doc),test)]
     fn ron_serde_for_server_only() {
+        let mut buffer = Vec::<u8>::with_capacity(16);
         let message = Messages::Echo(String::from("This is an error message"));
-        let expected = "Echo(\"This is an error message\")\n";
-        let observed = ron_serializer(&message);
+        let expected = "Echo(\"This is an error message\")";
+        ron_serializer(&message, &mut buffer).expect("calling `ron_serializer()`");
+        let observed = String::from_utf8(buffer).expect("Ron should be utf-8");
         assert_eq!(observed, expected, "RON serialization is not good");
 
         let message = "Recursive(Some(Recursive(Some(Echo(\"here it is\")))))".as_bytes();

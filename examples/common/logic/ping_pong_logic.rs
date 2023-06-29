@@ -57,7 +57,7 @@ impl Umpire {
                         })
                         .unwrap_or_else(|| {
                             self.consider_hard_fault(action)
-                                .map(|hard_fault| self.compute_lost_score(hard_fault))
+                                .map(|hard_fault| self.compute_lost_score(hard_fault, *action))
                                 .unwrap_or_else(|| {
                                     self.state = GameStates::Rally;
                                     self.progress_on_the_rally(*action, TurnFlipEvents::SuccessfulService)
@@ -66,7 +66,7 @@ impl Umpire {
                 },
                 GameStates::Rally => {
                     self.consider_hard_fault(action)
-                        .map(|hard_fault| self.compute_lost_score(hard_fault))
+                        .map(|hard_fault| self.compute_lost_score(hard_fault, *action))
                         .unwrap_or_else(|| self.progress_on_the_rally(*action, TurnFlipEvents::SuccessfulRebate))
                 }
                 GameStates::GameOver(game_over_state) => {
@@ -98,7 +98,7 @@ impl Umpire {
     }
 
     /// either end the game (if the score limit was reached) or compute the score to the opponent, setting it to service the next ball
-    fn compute_lost_score(&mut self, hard_fault: FaultEvents) -> PingPongEvent {
+    fn compute_lost_score(&mut self, hard_fault: FaultEvents, action: PlayerAction) -> PingPongEvent {
         match self.turn_player {
             Players::OneSelf => self.score.opponent += 1,
             Players::Opponent => self.score.oneself += 1,
@@ -106,8 +106,9 @@ impl Umpire {
         if self.score.oneself >= self.config.score_limit ||
            self.score.opponent >= self.config.score_limit {
             let game_over_state = GameOverStates::GracefullyEnded {
-                final_score: self.score,
-                last_fault:  hard_fault,
+                final_score:        self.score,
+                last_player_action: action,
+                last_fault:         hard_fault,
             };
             self.state = GameStates::GameOver(game_over_state.clone());
             PingPongEvent::GameOver(game_over_state)
@@ -116,7 +117,8 @@ impl Umpire {
             self.state = GameStates::WaitingForService { attempt: 1 };
             PingPongEvent::Score {
                 point_winning_player: self.turn_player,
-                opponent_fault: hard_fault,
+                last_player_action:   action,
+                last_fault:           hard_fault,
             }
         }
     }
@@ -220,7 +222,7 @@ mod tests {
 
         // serviced on the net for the 3rd attempt
         assert_eq!(umpire.process_turn(Players::OneSelf, &PlayerAction { lucky_number: config.net_touch_probability }),
-                   PingPongEvent::Score { point_winning_player: Players::Opponent, opponent_fault: FaultEvents::NetBlock },
+                   PingPongEvent::Score { point_winning_player: Players::Opponent, last_fault: FaultEvents::NetBlock },
                    "Touching the net on the 3rd service attempt is a hard fault (like a net block during the rally phase)");
         assert_eq!(umpire.state(), GameStates::WaitingForService { attempt: 1 }, "After the 3rd failed attempt, the opponent wins a point and should service");
         assert_eq!(umpire.score, MatchScore { limit: 2, oneself: 0, opponent: 1 }, "wrong scores were computed after a hard fault when servicing");
@@ -228,7 +230,7 @@ mod tests {
 
         // serviced straight into a hard fault
         assert_eq!(umpire.process_turn(Players::Opponent, &PlayerAction { lucky_number: config.ball_out_probability }),
-                   PingPongEvent::Score { point_winning_player: Players::OneSelf, opponent_fault: FaultEvents::BallOut },
+                   PingPongEvent::Score { point_winning_player: Players::OneSelf, last_fault: FaultEvents::BallOut },
                    "Servicing the ball out wasn't identified");
         assert_eq!(umpire.score, MatchScore { limit: 2, oneself: 1, opponent: 1 }, "Servicing the ball out should give a score to the opponent");
         assert_eq!(umpire.turn_player, Players::OneSelf, "next turn's Player is wrong");
@@ -340,8 +342,8 @@ mod tests {
     /// (each one recruited for each player) are not in contradiction to each other
     fn assert_game_events(umpire_1_event: PingPongEvent, umpire_2_event: PingPongEvent) {
         match umpire_1_event {
-            PingPongEvent::Score { point_winning_player: point_winning_player_1, opponent_fault: opponent_fault_1 } => {
-                if let PingPongEvent::Score { point_winning_player: point_winning_player_2, opponent_fault: opponent_fault_2 } = umpire_2_event {
+            PingPongEvent::Score { point_winning_player: point_winning_player_1, last_fault: opponent_fault_1 } => {
+                if let PingPongEvent::Score { point_winning_player: point_winning_player_2, last_fault: opponent_fault_2 } = umpire_2_event {
                     assert_eq!(next_turn_player(point_winning_player_2), point_winning_player_1, "Umpires disagree on who scored last");
                     assert_eq!(opponent_fault_2, opponent_fault_1, "Umpires disagree on what was the fault for the last score");
                 } else {
