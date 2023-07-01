@@ -28,7 +28,7 @@ const LISTENING_PORT:      u16  = 1234;
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
 
-    println!("Ping-Pong server starting at {LISTENING_INTERFACE}:{LISTENING_PORT}");
+    warn!("Ping-Pong server starting at {LISTENING_INTERFACE}:{LISTENING_PORT}");
 
     let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);

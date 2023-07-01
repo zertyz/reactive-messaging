@@ -21,6 +21,9 @@ pub struct Umpire {
 
 impl Umpire {
 
+    /// The maximum number of [PingPongEvent::SoftFault]s a player may commit while servicing, before the turn is flipped to the opponent
+    pub const SERVICING_ATTEMPTS: u32 = 3;
+
     /// Creates a new Ping-Pong match to be managed according to the given `config`, where the player to service the first ball is designated by `server_player`
     pub fn new(config: &MatchConfig, first_service_player: Players) -> Self {
         let score = MatchScore {
@@ -100,7 +103,7 @@ impl Umpire {
     /// either end the game (if the score limit was reached) or compute the score to the opponent, setting it to service the next ball
     fn compute_lost_score(&mut self, hard_fault: FaultEvents, action: PlayerAction) -> PingPongEvent {
         match self.turn_player {
-            Players::OneSelf => self.score.opponent += 1,
+            Players::Ourself => self.score.opponent += 1,
             Players::Opponent => self.score.oneself += 1,
         }
         if self.score.oneself >= self.config.score_limit ||
@@ -126,14 +129,14 @@ impl Umpire {
     /// switches the player expected to play the next turn
     fn next_turn_player(&mut self) {
         self.turn_player = match self.turn_player {
-            Players::OneSelf  => Players::Opponent,
-            Players::Opponent => Players::OneSelf,
+            Players::Ourself => Players::Opponent,
+            Players::Opponent => Players::Ourself,
         }
     }
 
     /// soft [FaultEvents] are faults that cause the servicing to repeat up to the 3rd attempt -- returns `None` if there was no such fault
     fn consider_service_soft_fault(&self, action: &PlayerAction, attempt: u32) -> Option<FaultEvents> {
-        if attempt < 3 {
+        if attempt < Self::SERVICING_ATTEMPTS {
             if action.lucky_number <= self.config.mishit_probability {
                 return Some(FaultEvents::Mishit)
             } else if action.lucky_number <= self.config.net_touch_probability {
@@ -200,28 +203,28 @@ mod tests {
             net_block_probability:  0.06,
             ball_out_probability:   0.07,
         };
-        let mut umpire = Umpire::new(&config, Players::OneSelf);
+        let mut umpire = Umpire::new(&config, Players::Ourself);
 
         // ready to start
         assert_eq!(umpire.state(), GameStates::WaitingForService { attempt: 1 }, "Wrong state when starting the game");
-        assert_eq!(umpire.turn_player, Players::OneSelf, "next turn's Player is wrong");
+        assert_eq!(umpire.turn_player, Players::Ourself, "next turn's Player is wrong");
 
         // serviced on the net
-        assert_eq!(umpire.process_turn(Players::OneSelf, &PlayerAction { lucky_number: config.net_touch_probability }),
+        assert_eq!(umpire.process_turn(Players::Ourself, &PlayerAction { lucky_number: config.net_touch_probability }),
                    PingPongEvent::SoftFault(FaultEvents::NetTouch),
                    "Touching the net is a soft fault when attempting to servicing for the first time");
         assert_eq!(umpire.state(), GameStates::WaitingForService { attempt: 2 }, "There should be allowed 3 service attempts when only soft faults happen -- in this case, due to a net touch");
-        assert_eq!(umpire.turn_player, Players::OneSelf, "next turn's Player is wrong");
+        assert_eq!(umpire.turn_player, Players::Ourself, "next turn's Player is wrong");
 
         // missed the ball when servicing on attempt #2
-        assert_eq!(umpire.process_turn(Players::OneSelf, &PlayerAction { lucky_number: config.mishit_probability }),
+        assert_eq!(umpire.process_turn(Players::Ourself, &PlayerAction { lucky_number: config.mishit_probability }),
                    PingPongEvent::SoftFault(FaultEvents::Mishit),
                    "Not hitting the ball is a soft fault when attempting to servicing for the second time");
         assert_eq!(umpire.state(), GameStates::WaitingForService { attempt: 3 }, "There should be allowed 3 service attempts when only soft faults happen -- in this case, due to missing the ball");
-        assert_eq!(umpire.turn_player, Players::OneSelf, "next turn's Player is wrong");
+        assert_eq!(umpire.turn_player, Players::Ourself, "next turn's Player is wrong");
 
         // serviced on the net for the 3rd attempt
-        assert_eq!(umpire.process_turn(Players::OneSelf, &PlayerAction { lucky_number: config.net_touch_probability }),
+        assert_eq!(umpire.process_turn(Players::Ourself, &PlayerAction { lucky_number: config.net_touch_probability }),
                    PingPongEvent::Score { point_winning_player: Players::Opponent, last_fault: FaultEvents::NetBlock },
                    "Touching the net on the 3rd service attempt is a hard fault (like a net block during the rally phase)");
         assert_eq!(umpire.state(), GameStates::WaitingForService { attempt: 1 }, "After the 3rd failed attempt, the opponent wins a point and should service");
@@ -230,14 +233,14 @@ mod tests {
 
         // serviced straight into a hard fault
         assert_eq!(umpire.process_turn(Players::Opponent, &PlayerAction { lucky_number: config.ball_out_probability }),
-                   PingPongEvent::Score { point_winning_player: Players::OneSelf, last_fault: FaultEvents::BallOut },
+                   PingPongEvent::Score { point_winning_player: Players::Ourself, last_fault: FaultEvents::BallOut },
                    "Servicing the ball out wasn't identified");
         assert_eq!(umpire.score, MatchScore { limit: 2, oneself: 1, opponent: 1 }, "Servicing the ball out should give a score to the opponent");
-        assert_eq!(umpire.turn_player, Players::OneSelf, "next turn's Player is wrong");
+        assert_eq!(umpire.turn_player, Players::Ourself, "next turn's Player is wrong");
         assert_eq!(umpire.state, GameStates::WaitingForService { attempt: 1 }, "A new rally wasn't correctly initiated");
 
         // a successful service
-        assert_eq!(umpire.process_turn(Players::OneSelf, &PlayerAction { lucky_number: 1.0 }),
+        assert_eq!(umpire.process_turn(Players::Ourself, &PlayerAction { lucky_number: 1.0 }),
                    PingPongEvent::TurnFlip(TurnFlipEvents::SuccessfulService(PlayerAction { lucky_number: 1.0 })),
                    "A successful Service wasn't identified");
         assert_eq!(umpire.score, MatchScore { limit: 2, oneself: 1, opponent: 1 }, "The score should have remained unchanged");
@@ -249,11 +252,11 @@ mod tests {
                    PingPongEvent::TurnFlip(TurnFlipEvents::SuccessfulRebate(PlayerAction { lucky_number: 1.0 })),
                    "A successful Ping wasn't identified");
         assert_eq!(umpire.score, MatchScore { limit: 2, oneself: 1, opponent: 1 }, "The score should have remained unchanged");
-        assert_eq!(umpire.turn_player, Players::OneSelf, "next turn's Player is wrong");
+        assert_eq!(umpire.turn_player, Players::Ourself, "next turn's Player is wrong");
         assert_eq!(umpire.state(), GameStates::Rally, "Wrong game state");
 
         // a pong
-        assert_eq!(umpire.process_turn(Players::OneSelf, &PlayerAction { lucky_number: 1.0 }),
+        assert_eq!(umpire.process_turn(Players::Ourself, &PlayerAction { lucky_number: 1.0 }),
                    PingPongEvent::TurnFlip(TurnFlipEvents::SuccessfulRebate(PlayerAction { lucky_number: 1.0 })),
                    "A successful Pong wasn't identified");
         assert_eq!(umpire.score, MatchScore { limit: 2, oneself: 1, opponent: 1 }, "The score should have remained unchanged");
@@ -286,7 +289,7 @@ mod tests {
         };
 
         // wrong player action
-        let mut umpire = Umpire::new(config, Players::OneSelf);
+        let mut umpire = Umpire::new(config, Players::Ourself);
         let expected_game_over_state = GameOverStates::GameCancelled { partial_score: MatchScore { limit: 2, oneself: 0, opponent: 0 }, broken_rule_description: format!("The expected player for this turn was OneSelf, but Opponent claimed it instead") };
         assert_eq!(umpire.process_turn(Players::Opponent, PlayerAction { lucky_number: 1.0 }),
                    PingPongEvent::GameOver(expected_game_over_state.clone()),
@@ -316,7 +319,7 @@ mod tests {
             net_block_probability:  0.006,
             ball_out_probability:   0.007,
         };
-        let mut player_1_umpire = Umpire::new(&config, Players::OneSelf);
+        let mut player_1_umpire = Umpire::new(&config, Players::Ourself);
         let mut player_2_umpire = Umpire::new(&config, Players::Opponent);
 
 //println!("\n");
@@ -387,8 +390,8 @@ mod tests {
 
     fn next_turn_player(player: Players) -> Players {
         match player {
-            Players::OneSelf  => Players::Opponent,
-            Players::Opponent => Players::OneSelf,
+            Players::Ourself => Players::Opponent,
+            Players::Opponent => Players::Ourself,
         }
     }
 

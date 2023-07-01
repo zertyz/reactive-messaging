@@ -88,7 +88,8 @@ pub enum ClientMessages {
     Version,
     /// States that the last command wasn't correctly processed or was not recognized as valid
     Error(/*reason: */String),
-    /// Issued by the client's local processor when no answer should be sent back to the server
+    /// Issued by the client's local processor when no answer should be sent back to the server\
+    /// -- we don't use this, as our processor is no longer a 1->1 map, but a 1->* flat_map
     NoAnswer,
     /// Sent at any time, when the client request an immediate termination of the communications.\
     /// It is elegant to send it before abruptly closing the connection, even if we are in the middle of a transaction

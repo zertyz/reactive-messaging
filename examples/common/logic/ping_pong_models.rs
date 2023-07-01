@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 
 
 /// Events that may happen on a ping-pong match
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone,   Serialize, Deserialize)]
 pub enum PingPongEvent {
     /// The ball hit the opponent's field without any hard faults, causing the turn to flip
     /// --requiring the opponent to react to it in order not to lose the score opportunity
@@ -125,6 +125,6 @@ pub struct MatchScore {
 
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum Players {
-    OneSelf,
+    Ourself,
     Opponent,
 }
