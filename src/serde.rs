@@ -1,16 +1,9 @@
 //! SERializers & DEserializers (traits & implementations) for our [SocketServer]
 
 
-use crate::{
-    socket_connection_handler::Peer,
-};
 use std::{
-    sync::Arc,
-    fmt::Write,
     fmt::Debug,
 };
-use futures::future::BoxFuture;
-use ron::{Options, ser::PrettyConfig, Serializer};
 use serde::{Serialize, Deserialize};
 use once_cell::sync::Lazy;
 
@@ -57,18 +50,16 @@ pub trait SocketServerDeserializer<T> {
 // RON SERDE
 ////////////
 
-static RON_DESERIALIZER_CONFIG: Lazy<Options> = Lazy::new(|| ron::Options::default());
+static RON_DESERIALIZER_CONFIG: Lazy<ron::Options> = Lazy::new(ron::Options::default);
 
 /// RON serializer
 #[inline(always)]
 pub fn ron_serializer<T: ?Sized + Serialize>(message: &T, buffer: &mut Vec<u8>) -> Result<(), ron::Error> {
     buffer.clear();
-    let mut serializer = Serializer::with_options(buffer, None, ron::Options::default())?;
+    let mut serializer = ron::Serializer::with_options(buffer, None, ron::Options::default())?;
     message.serialize(&mut serializer)?;
     Ok(())
 }
-
-// TODO 2023-06-21: explore any performance improvements of making a `ron_serialize_into()`, receiving a reusable String
 
 /// RON deserializer
 #[inline(always)]

@@ -142,19 +142,12 @@ impl SocketServerSerializer<ClientMessages> for ClientMessages {
 
     #[inline(always)]
     fn is_disconnect_message(processor_answer: &ClientMessages) -> bool {
-        match processor_answer {
-            ClientMessages::Quit => true,
-            _ => false,
-        }
+        matches!(processor_answer, ClientMessages::Quit)
     }
 
     #[inline(always)]
     fn is_no_answer_message(processor_answer: &ClientMessages) -> bool {
-        if let ClientMessages::NoAnswer = processor_answer {
-            true
-        } else {
-            false
-        }
+        matches!(processor_answer, ClientMessages::NoAnswer)
     }
 }
 
@@ -182,19 +175,12 @@ impl SocketServerSerializer<ServerMessages> for ServerMessages {
     /// Disconnects when our processor issues either of "GoodBye" or "GameCancelled"
     #[inline(always)]
     fn is_disconnect_message(processor_answer: &ServerMessages) -> bool {
-        match processor_answer {
-            ServerMessages::GoodBye | ServerMessages::PingPongEvent(PingPongEvent::GameOver(GameOverStates::GameCancelled { .. })) => true,
-            _ => false,
-        }
+        matches!(processor_answer, ServerMessages::GoodBye | ServerMessages::PingPongEvent(PingPongEvent::GameOver(GameOverStates::GameCancelled { .. })))
     }
 
     #[inline(always)]
     fn is_no_answer_message(processor_answer: &ServerMessages) -> bool {
-        if let ServerMessages::NoAnswer = processor_answer {
-            true
-        } else {
-            false
-        }
+        matches!(processor_answer, ServerMessages::NoAnswer)
     }
 }
 

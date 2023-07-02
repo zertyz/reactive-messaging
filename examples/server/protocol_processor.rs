@@ -8,14 +8,15 @@ use reactive_messaging::{
         ProcessorRemoteStreamType
     },
 };
-use crate::common::logic::ping_pong_logic::{act, Umpire};
-use crate::common::protocol_model::{ClientMessages, PROTOCOL_VERSION, ServerMessages};
-use crate::common::logic::ping_pong_models::{GameStates, Players, TurnFlipEvents, PingPongEvent, GameOverStates, PlayerAction, FaultEvents};
+use crate::common::{
+    logic::{ping_pong_logic::Umpire,
+    ping_pong_models::{GameStates, Players, TurnFlipEvents, PingPongEvent, GameOverStates},
+    protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault}},
+    protocol_model::{ClientMessages, PROTOCOL_VERSION, ServerMessages}
+};
 use dashmap::DashMap;
-use futures::stream;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::{self, Stream, StreamExt};
 use reactive_messaging::prelude::ConnectionEvent;
-use crate::common::logic::protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault};
 use log::{debug, info, warn, error};
 
 
@@ -45,8 +46,8 @@ impl ServerProtocolProcessor {
                 debug!("Connected: {:?}", peer);
                 self.sessions.insert(peer.peer_id, Arc::new(Session { umpire: UnsafeCell::new(None) }));
             },
-            ConnectionEvent::PeerDisconnected { peer } => {
-                debug!("Disconnected: {:?}", peer);
+            ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
+                debug!("Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
                 //let _ = processor_uni.try_send(|slot| *slot = ClientMessages::Quit);
                 self.sessions.remove(&peer.peer_id);
             }
@@ -56,21 +57,21 @@ impl ServerProtocolProcessor {
         }
     }
 
-    pub fn dialog_processor(&self, client_addr: String, port: u16, peer: Arc<Peer<ServerMessages>>, client_messages_stream: ProcessorRemoteStreamType<ClientMessages>) -> impl Stream<Item=ServerMessages> {
-        let mut session = self.sessions.get(&peer.peer_id)
-                                                   .unwrap_or_else(|| panic!("Server BUG! Peer {:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback", peer))
-                                                   .value()
-                                                   .clone();     // .clone() the Arc, so we are free to move it to the the next closure (and drop it after the Stream closes)
+    pub fn dialog_processor(&self, _client_addr: String, _port: u16, peer: Arc<Peer<ServerMessages>>, client_messages_stream: ProcessorRemoteStreamType<ClientMessages>) -> impl Stream<Item=ServerMessages> {
+        let session = self.sessions.get(&peer.peer_id)
+                                                 .unwrap_or_else(|| panic!("Server BUG! Peer {:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback", peer))
+                                                 .value()
+                                                 .clone();     // .clone() the Arc, so we are free to move it to the the next closure (and drop it after the Stream closes)
         client_messages_stream.map(move |client_message| {
 
             // get the game's umpire instance or expect the first client message to be the one to create the match umpire
             let umpire_option = unsafe { &mut * (session.umpire.get()) };
-            let mut umpire = match umpire_option {
+            let umpire = match umpire_option {
                 Some(umpire) => umpire,
                 None => return {
                     if let ClientMessages::Config(match_config) = &*client_message {
                         // instantiate the game
-                        let umpire = Umpire::new(&match_config, Players::Opponent);
+                        let umpire = Umpire::new(match_config, Players::Opponent);
                         umpire_option.replace(umpire);
                         vec![ServerMessages::GameStarted]
                     } else {
@@ -93,36 +94,36 @@ impl ServerProtocolProcessor {
                         PingPongEvent::TurnFlip { player_action: opponent_action, resulting_event} => {
                             match resulting_event {
                                 TurnFlipEvents::SuccessfulService => vec![
-                                    ServerMessages::PingPongEvent( react_to_rally_event(&mut umpire,
+                                    ServerMessages::PingPongEvent( react_to_rally_event(umpire,
                                                                                         "WaitingForService",
-                                                                                        |rs| if let GameStates::WaitingForService { attempt } = rs {true} else {false},
+                                                                                        |rs| matches!(rs, GameStates::WaitingForService { .. }),
                                                                                         opponent_action,
                                                                                         /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulService } ) )
                                 ],
                                 TurnFlipEvents::SoftFaultService => vec![
-                                    ServerMessages::PingPongEvent( react_to_rally_event(&mut umpire,
+                                    ServerMessages::PingPongEvent( react_to_rally_event(umpire,
                                                                                         "WaitingForService` or `Rally",
-                                                                                        |rs| if let GameStates::WaitingForService { attempt: _ } | GameStates::Rally = rs {true} else {false},
+                                                                                        |rs| matches!(rs, GameStates::WaitingForService { .. } | GameStates::Rally),
                                                                                         opponent_action,
                                                                                         /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SoftFaultService } ) )
                                 ],
                                 TurnFlipEvents::SuccessfulRebate => vec![
-                                    ServerMessages::PingPongEvent( react_to_rally_event(&mut umpire,
+                                    ServerMessages::PingPongEvent( react_to_rally_event(umpire,
                                                                                         "Rally",
-                                                                                        |rs| if let GameStates::Rally = rs {true} else {false},
+                                                                                        |rs| matches!(rs, GameStates::Rally),
                                                                                         opponent_action,
                                                                                         /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulRebate } ) )
                                 ],
                             }
                         }
                         PingPongEvent::HardFault { player_action: opponent_action, resulting_fault_event} => {
-                            react_to_hard_fault(&mut umpire, opponent_action, resulting_fault_event).into_iter()
-                                .map(|ping_pong_event| ServerMessages::PingPongEvent(ping_pong_event))
+                            react_to_hard_fault(umpire, opponent_action, resulting_fault_event).into_iter()
+                                .map(ServerMessages::PingPongEvent)
                                 .collect()
                         },
                         PingPongEvent::SoftFault { player_action: opponent_action, resulting_fault_event} => {
-                            react_to_service_soft_fault(&mut umpire, opponent_action, resulting_fault_event).into_iter()
-                                .map(|ping_pong_event| ServerMessages::PingPongEvent(ping_pong_event))
+                            react_to_service_soft_fault(umpire, opponent_action, resulting_fault_event).into_iter()
+                                .map(ServerMessages::PingPongEvent)
                                 .collect()
                         },
                         PingPongEvent::Score { point_winning_player, last_player_action, last_fault } => {
@@ -131,19 +132,19 @@ impl ServerProtocolProcessor {
                                 vec![ServerMessages::GoodBye]
                             } else {
                                 // our score: opponent's hard fault
-                                react_to_score(&mut umpire, last_player_action, last_fault).into_iter()
-                                    .map(|ping_pong_event| ServerMessages::PingPongEvent(ping_pong_event))
+                                react_to_score(umpire, last_player_action, last_fault).into_iter()
+                                    .map(ServerMessages::PingPongEvent)
                                     .collect()
                             }
                         },
 
                         PingPongEvent::GameOver(game_over_state) => {
                             match game_over_state {
-                                GameOverStates::GracefullyEnded { final_score, last_player_action, last_fault } => {
+                                GameOverStates::GracefullyEnded { final_score, last_player_action: _, last_fault: _ } => {
                                     info!("Game ended: {} Server; {} Client #{} @ {}", final_score.opponent, final_score.oneself, peer.peer_id, peer.peer_address);
                                     vec![ServerMessages::GoodBye]
                                 },
-                                GameOverStates::GameCancelled { partial_score, broken_rule_description } => {
+                                GameOverStates::GameCancelled { partial_score: _, broken_rule_description: _ } => {
                                     vec![ServerMessages::GoodBye]
                                 },
                             }
@@ -177,7 +178,7 @@ impl ServerProtocolProcessor {
                 },
             }
         })
-        .flat_map(|responses| stream::iter(responses))
+        .flat_map(stream::iter)
     }
 
 }

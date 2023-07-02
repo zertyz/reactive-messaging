@@ -2,26 +2,21 @@
 
 
 use super::{
-    config::*,
     types::*,
+    prelude::ProcessorRemoteStreamType,
     socket_connection_handler::{self, Peer},
     serde::{SocketServerSerializer,SocketServerDeserializer}
 };
 use std::{
-    sync::Arc,
-    net::{ToSocketAddrs,SocketAddr},
+    sync::{
+        Arc,
+        atomic::{AtomicI32, Ordering::Relaxed},
+    },
     fmt::Debug,
-    future::Future,
-    marker::PhantomData,
+    future::Future, time::Duration,
 };
-use std::fmt::Formatter;
-use std::sync::atomic::AtomicI32;
-use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
-use reactive_mutiny::prelude::{ChannelCommon, ChannelProducer, Uni};
-use futures::{Stream, stream, StreamExt, future::BoxFuture};
-use log::{trace, debug, info, warn, error};
-use crate::prelude::ProcessorRemoteStreamType;
+use futures::{Stream, future::BoxFuture};
+use log::{warn, error};
 
 
 pub type SenderUniType<RemotePeerMessages> = reactive_mutiny::prelude::advanced::UniZeroCopyAtomic<RemotePeerMessages, 1024>;
@@ -53,12 +48,6 @@ impl SocketServer {
             local_shutdown_signaler: None,
             local_shutdown_receiver: None,
         }
-    }
-
-    fn sender_stream() {
-        // create the uni
-        // let server_messages_stream = self.processor_builder_fn(uni.stream)
-        // return Self::to_client_stream(client_socket: Peer, server_messages_stream)
     }
 
     /// Returns a runner, which you may call to run `Server` and that will only return when

@@ -1,17 +1,27 @@
 //! Resting place of [ClientProtocolProcessor]
 
-use std::cell::UnsafeCell;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering::Relaxed;
-use std::time::Instant;
-use futures::{Stream, stream, StreamExt};
-use reactive_messaging::prelude::{ConnectionEvent, Peer, ProcessorRemoteStreamType, SocketProcessorDerivedType};
-use crate::common::logic::ping_pong_logic::{act, Umpire};
-use crate::common::logic::ping_pong_models::{GameOverStates, GameStates, MatchConfig, PingPongEvent, PlayerAction, Players, TurnFlipEvents};
-use crate::common::protocol_model::{ClientMessages, PROTOCOL_VERSION, ServerMessages};
+use crate::common::{
+    protocol_model::{ClientMessages, PROTOCOL_VERSION, ServerMessages},
+    logic::{
+        ping_pong_logic::{act, Umpire},
+        ping_pong_models::{GameOverStates, GameStates, MatchConfig, PingPongEvent, Players, TurnFlipEvents},
+        protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault},
+    }
+};
+use reactive_messaging::prelude::{
+    ConnectionEvent,
+    Peer,
+    SocketProcessorDerivedType,
+};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering::Relaxed},
+    },
+    time::Instant,
+};
 use reactive_mutiny::prelude::ChannelProducer;
-use crate::common::logic::protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault};
+use futures::{Stream, stream, StreamExt};
 use log::{debug,info,error};
 
 
@@ -47,10 +57,12 @@ impl ClientProtocolProcessor {
                 debug!("Connected: {:?}", peer);
                 peer.sender.try_send(|slot| *slot = ClientMessages::Config(MATCH_CONFIG));
             },
-            ConnectionEvent::PeerDisconnected { peer } => {
+            ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
                 let in_messages_count = self.in_messages_count.load(Relaxed);
-                info!("Disconnected: {:?} -- with {} messages IN & OUT: {:.2}/s",
-                      peer, in_messages_count, in_messages_count as f64 / self.start_instant.elapsed().as_secs_f64());
+                info!("Disconnected: {:?}; stats: {:?} -- with {} messages IN & OUT: {:.2}/s",
+                      peer,
+                      stream_stats,
+                      in_messages_count, in_messages_count as f64 / self.start_instant.elapsed().as_secs_f64());
             }
             ConnectionEvent::ApplicationShutdown { timeout_ms } => {
                 info!("Ping-Pong client shutdown requested. Notifying the server within {timeout_ms}ms...");
@@ -60,7 +72,7 @@ impl ClientProtocolProcessor {
 
     pub fn dialog_processor<RemoteStreamType: Stream<Item=SocketProcessorDerivedType<ServerMessages>>>
                            (self: &Arc<Self>, server_addr: String, port: u16, peer: Arc<Peer<ClientMessages>>, server_messages_stream: RemoteStreamType) -> impl Stream<Item=ClientMessages> {
-        let cloned_self = Arc::clone(&self);
+        let cloned_self = Arc::clone(self);
         let mut umpire = Umpire::new(&MATCH_CONFIG, Players::Ourself);
         server_messages_stream.map(move |server_message| {
             cloned_self.in_messages_count.fetch_add(1, Relaxed);
@@ -78,21 +90,21 @@ impl ClientProtocolProcessor {
                                 TurnFlipEvents::SuccessfulService => vec![
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "WaitingForService",
-                                                                                       |rs| if let GameStates::WaitingForService { attempt } = rs { true } else { false },
+                                                                                       |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
                                                                                        opponent_action,
                                                                                        /*reported_ping_pong_event*/PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulService }))
                                 ],
                                 TurnFlipEvents::SoftFaultService => vec![
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "WaitingForService` or `Rally",
-                                                                                       |rs| if let GameStates::WaitingForService { attempt: _ } | GameStates::Rally = rs { true } else { false },
+                                                                                       |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
                                                                                        opponent_action,
                                                                                        /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SoftFaultService }))
                                 ],
                                 TurnFlipEvents::SuccessfulRebate => vec![
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "Rally",
-                                                                                       |rs| if let GameStates::Rally = rs { true } else { false },
+                                                                                       |rs| matches!(rs, GameStates::Rally),
                                                                                        opponent_action,
                                                                                        /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulRebate }))
                                 ],
@@ -100,12 +112,12 @@ impl ClientProtocolProcessor {
                         },
                         PingPongEvent::HardFault { player_action: opponent_action, resulting_fault_event } => {
                             react_to_hard_fault(&mut umpire, opponent_action, resulting_fault_event).into_iter()
-                                .map(|ping_pong_event| ClientMessages::PingPongEvent(ping_pong_event))
+                                .map(ClientMessages::PingPongEvent)
                                 .collect()
                         },
                         PingPongEvent::SoftFault { player_action: opponent_action, resulting_fault_event } => {
                             react_to_service_soft_fault(&mut umpire, opponent_action, resulting_fault_event).into_iter()
-                                .map(|ping_pong_event| ClientMessages::PingPongEvent(ping_pong_event))
+                                .map(ClientMessages::PingPongEvent)
                                 .collect()
                         },
                         PingPongEvent::Score { point_winning_player, last_player_action, last_fault } => {
@@ -115,17 +127,17 @@ impl ClientProtocolProcessor {
                             } else {
                                 // our score: opponent's hard fault
                                 react_to_score(&mut umpire, last_player_action, last_fault).into_iter()
-                                    .map(|ping_pong_event| ClientMessages::PingPongEvent(ping_pong_event))
+                                    .map(ClientMessages::PingPongEvent)
                                     .collect()
                             }
                         },
                         PingPongEvent::GameOver(game_over_state) => {
                             match game_over_state {
-                                GameOverStates::GracefullyEnded { final_score, last_player_action, last_fault } => {
+                                GameOverStates::GracefullyEnded { final_score, last_player_action: _, last_fault: _ } => {
                                     info!("Game ended: {} Client; {} Server @ {}:{}", final_score.opponent, final_score.oneself, server_addr, port);
                                     vec![ClientMessages::EndorsedScore]
                                 }
-                                GameOverStates::GameCancelled { partial_score, broken_rule_description } => {
+                                GameOverStates::GameCancelled { partial_score: _, broken_rule_description: _ } => {
                                     vec![/*ClientMessages::NoAnswer*/]
                                 }
                             }
@@ -160,7 +172,7 @@ impl ClientProtocolProcessor {
                 },
             }
         })
-        .flat_map(|responses| stream::iter(responses))
+        .flat_map(stream::iter)
     }
 
 }

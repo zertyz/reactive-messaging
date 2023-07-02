@@ -9,25 +9,30 @@
 use super::{
     config::*,
     types::*,
+    prelude::ProcessorRemoteStreamType,
     serde::{SocketServerDeserializer, SocketServerSerializer},
 };
-use crate::{SenderUniType, SocketServer};
-use std::{cell::Cell, collections::VecDeque, fmt::Debug, future, future::Future, marker::PhantomData, net::SocketAddr, ops::Deref, sync::{Arc, atomic::{AtomicBool, AtomicU32, AtomicU8}, atomic::Ordering::Relaxed}, task::{Context, Poll, Waker}, time::Duration};
-use std::fmt::Formatter;
-use std::hash::{Hash, Hasher};
-use std::net::{IpAddr, Ipv4Addr};
-use std::str::FromStr;
-use reactive_mutiny::prelude::advanced::{MutinyStream, UniZeroCopyAtomic, ChannelCommon, ChannelUni, ChannelProducer, Instruments, ChannelUniZeroCopyAtomic, OgreUnique, AllocatorAtomicArray};
-use futures::{StreamExt, Stream, stream, SinkExt};
-use tokio::{
-    io::{self,AsyncWriteExt, AsyncBufReadExt, BufReader, BufWriter, Interest},
-    net::{TcpListener, TcpStream, tcp::WriteHalf},
-    sync::Mutex,
+use std::{
+    fmt::Debug,
+    future,
+    future::Future,
+    net::SocketAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering::Relaxed},
+    },
+    time::Duration,
+    fmt::Formatter,
+    net::{IpAddr, Ipv4Addr},
+    str::FromStr,
 };
-use tokio::sync::oneshot::error::RecvError;
+use reactive_mutiny::prelude::advanced::{ChannelCommon, ChannelUni, ChannelProducer};
+use futures::{StreamExt, Stream};
+use tokio::{
+    io::{self,AsyncReadExt,AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+};
 use log::{trace, debug, warn, error};
-use tokio::io::AsyncReadExt;
-use crate::prelude::ProcessorRemoteStreamType;
 
 
 // base functions
@@ -100,7 +105,6 @@ pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:         
 
         // prepares for the dialog to come with the (just accepted) connection
         let sender = SenderChannel::<ServerMessages, SENDER_BUFFER_SIZE>::new(format!("Sender for client {addr}"));
-        let (mut sender_stream, _) = Arc::clone(&sender).create_stream();
         let peer = Arc::new(Peer::new(sender, addr));
         let peer_ref1 = Arc::clone(&peer);
         let peer_ref2 = Arc::clone(&peer);
@@ -119,7 +123,7 @@ pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:         
                                                        |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
                                                        move |executor| {
                                                            // issue the async disconnect event
-                                                           futures::executor::block_on(connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2 }));
+                                                           futures::executor::block_on(connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }));
                                                            future::ready(())
                                                        });
 
@@ -148,7 +152,7 @@ pub async fn client_for_unresponsive_text_protocol<ClientMessages:              
 
                                                   (server_ipv4_addr:            String,
                                                    port:                        u16,
-                                                   mut shutdown_signaler:       tokio::sync::oneshot::Receiver<u32>,
+                                                   shutdown_signaler:           tokio::sync::oneshot::Receiver<u32>,
                                                    connection_events_callback:  ConnectionEventsCallback,
                                                    dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -172,7 +176,7 @@ pub async fn client_for_unresponsive_text_protocol<ClientMessages:              
                                                    |in_stream| dialog_processor_builder_fn(server_ipv4_addr.clone(), port, peer_ref1.clone(), in_stream),
                                                    move |executor| {
                                                        // issue the async disconnect event
-                                                       futures::executor::block_on(connection_events_callback(ConnectionEvent::PeerDisconnected { peer: peer_ref2 }));
+                                                       futures::executor::block_on(connection_events_callback(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }));
                                                        future::ready(())
                                                    });
 
@@ -232,7 +236,7 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
                 match to_send {
                     Some(to_send) => {
                         LocalMessages::serialize(&to_send, &mut serialization_buffer);
-                        serialization_buffer.push('\n' as u8);
+                        serialization_buffer.push(b'\n');
                         if let Err(err) = textual_socket.write_all(&serialization_buffer).await {
                             warn!("reactive-messaging: PROBLEM in the connection with {:#?} while WRITING: '{:?}' -- dropping it", peer, err);
                             peer.sender.cancel_all_streams();
@@ -253,10 +257,10 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
                         let mut next_line_index = 0;
                         let mut this_line_search_start = read_buffer.len() - n;
                         loop {
-                            if let Some(mut eol_pos) = read_buffer[next_line_index+this_line_search_start..].iter().position(|&b| b == '\n' as u8) {
+                            if let Some(mut eol_pos) = read_buffer[next_line_index+this_line_search_start..].iter().position(|&b| b == b'\n') {
                                 eol_pos += next_line_index+this_line_search_start;
                                 let line_bytes = &read_buffer[next_line_index..eol_pos];
-                                match RemoteMessages::deserialize(&line_bytes) {
+                                match RemoteMessages::deserialize(line_bytes) {
                                     Ok(client_message) => {
                                         if !processor_uni.try_send(|slot| unsafe { std::ptr::write(slot, client_message) }) {
                                             // breach in protocol: we cannot process further messages (they were received too fast)
@@ -268,8 +272,8 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
                                     },
                                     Err(err) => {
                                         let stripped_line = String::from_utf8_lossy(line_bytes);
-                                        let error_message = format!("Unknown command received from {:?} (peer id {}): '{}'",
-                                                                           peer.peer_address, peer.peer_id, stripped_line);
+                                        let error_message = format!("Unknown command received from {:?} (peer id {}): '{}': {}",
+                                                                           peer.peer_address, peer.peer_id, stripped_line, err);
                                         warn!("reactive-messaging: {error_message}");
                                         let outgoing_error = LocalMessages::processor_error_message(error_message);
                                         let sent = peer.sender.try_send(|slot| unsafe { std::ptr::write(slot, outgoing_error) });
@@ -309,8 +313,8 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
 
     }
     let _ = processor_uni.close(GRACEFUL_STREAM_ENDING_TIMEOUT_DURATION).await;
-    textual_socket.flush().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}", peer.peer_address, peer.peer_id))?;
-    textual_socket.shutdown().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}", peer.peer_address, peer.peer_id))?;
+    textual_socket.flush().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
+    textual_socket.shutdown().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
     Ok(())
 }
 
@@ -330,7 +334,7 @@ pub async fn server_loop_for_responsive_text_protocol<ClientMessages:           
 
                                                      (listening_interface:         String,
                                                       listening_port:              u16,
-                                                      mut shutdown_signaler:       tokio::sync::oneshot::Receiver<u32>,
+                                                      shutdown_signaler:           tokio::sync::oneshot::Receiver<u32>,
                                                       connection_events_callback:  ConnectionEventsCallback,
                                                       dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -357,7 +361,7 @@ pub async fn client_for_responsive_text_protocol<ClientMessages:                
 
                                                 (server_ipv4_addr:            String,
                                                  port:                        u16,
-                                                 mut shutdown_signaler:       tokio::sync::oneshot::Receiver<u32>,
+                                                 shutdown_signaler:           tokio::sync::oneshot::Receiver<u32>,
                                                  connection_events_callback:  ConnectionEventsCallback,
                                                  dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -449,9 +453,13 @@ Peer<MessagesType> {
 /// Unit tests the [tokio_message_io](self) module
 #[cfg(any(test,doc))]
 mod tests {
-    use std::time::SystemTime;
-    use futures::future::BoxFuture;
+    use futures::stream;
+    use tokio::sync::Mutex;
+
     use super::*;
+    use std::{
+        time::SystemTime, sync::atomic::AtomicBool,
+    };
 
     #[cfg(debug_assertions)]
     const DEBUG: bool = true;
@@ -481,60 +489,61 @@ mod tests {
         let server_secret_ref = server_secret.clone();
         tokio::spawn(server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                                 |connection_event| {
-               match connection_event {
-                   ConnectionEvent::PeerConnected { peer } => {
-                       assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
-                   },
-                   ConnectionEvent::PeerDisconnected { peer } => {},
-                   ConnectionEvent::ApplicationShutdown { timeout_ms } => {
-                       println!("Test Server: shutdown was requested ({timeout_ms}ms timeout)... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
-                   }
-               }
-               future::ready(())
-           },
-                                                                move |client_addr, client_port, peer, client_messages_stream| {
-               let client_secret_ref = client_secret_ref.clone();
-               let server_secret_ref = server_secret_ref.clone();
-               client_messages_stream.inspect(move |client_message| {
-                   assert!(peer.sender.try_send_movable(format!("Client just sent '{}'", client_message)), "couldn't send");
-                   if &*client_message == &client_secret_ref {
-                       assert!(peer.sender.try_send_movable(format!("{}", server_secret_ref)), "couldn't send");
-                   } else {
-                       panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
-                   }
-               })
-            }));
+                                                                    match connection_event {
+                                                                        ConnectionEvent::PeerConnected { peer } => {
+                                                                            assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
+                                                                        },
+                                                                        ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => {},
+                                                                        ConnectionEvent::ApplicationShutdown { timeout_ms } => {
+                                                                            println!("Test Server: shutdown was requested ({timeout_ms}ms timeout)... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
+                                                                        }
+                                                                    }
+                                                                    future::ready(())
+                                                                },
+                                                                move |_client_addr, _client_port, peer, client_messages_stream| {
+                                                                    let client_secret_ref = client_secret_ref.clone();
+                                                                    let server_secret_ref = server_secret_ref.clone();
+                                                                    client_messages_stream.inspect(move |client_message| {
+                                                                        assert!(peer.sender.try_send_movable(format!("Client just sent '{}'", client_message)), "couldn't send");
+                                                                        if *client_message == client_secret_ref {
+                                                                            assert!(peer.sender.try_send_movable(server_secret_ref.clone()), "couldn't send");
+                                                                        } else {
+                                                                            panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
+                                                                        }
+                                                                    })
+                                                                }
+        ));
 
         println!("### Waiting a little for the server to start...");
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // client
-        let client_secret_ref1 = client_secret.clone();
-        let server_secret_ref = server_secret.clone();
+        let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
         client_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
                                               move |connection_event| {
-                match connection_event {
-                    ConnectionEvent::PeerConnected { peer } => {
-                        assert!(peer.sender.try_send_movable(format!("{}", client_secret_ref1)), "couldn't send");
-                    },
-                    ConnectionEvent::PeerDisconnected { peer } => {
-                        println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
-                    },
-                    ConnectionEvent::ApplicationShutdown { timeout_ms } => {}
-                }
-                future::ready(())
-            },
-                                              move |client_addr, client_port, peer, server_messages_stream: ProcessorRemoteStreamType<String>| {
-                let observed_secret_ref = Arc::clone(&observed_secret_ref);
-                server_messages_stream.then(move |server_message| {
-                    let observed_secret_ref = Arc::clone(&observed_secret_ref);
-                    async move {
-                        println!("Server said: '{}'", server_message);
-                        let _ = observed_secret_ref.lock().await.insert(server_message);
-                    }
-                })
-            }).await.expect("Starting the client");
+                                                  match connection_event {
+                                                      ConnectionEvent::PeerConnected { peer } => {
+                                                          assert!(peer.sender.try_send_movable(client_secret.clone()), "couldn't send");
+                                                      },
+                                                      ConnectionEvent::PeerDisconnected { peer, stream_stats: _ } => {
+                                                          println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
+                                                      },
+                                                      ConnectionEvent::ApplicationShutdown { timeout_ms: _ } => {}
+                                                  }
+                                                  future::ready(())
+                                              },
+                                              move |_client_addr, _client_port, _peer, server_messages_stream: ProcessorRemoteStreamType<String>| {
+                                                  let observed_secret_ref = Arc::clone(&observed_secret_ref);
+                                                  server_messages_stream.then(move |server_message| {
+                                                      let observed_secret_ref = Arc::clone(&observed_secret_ref);
+                                                      async move {
+                                                          println!("Server said: '{}'", server_message);
+                                                          let _ = observed_secret_ref.lock().await.insert(server_message);
+                                                      }
+                                                  })
+                                              }
+        ).await.expect("Starting the client");
         println!("### Started a client -- which is running concurrently, in the background... it has 100ms to do its thing!");
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -563,7 +572,7 @@ mod tests {
         // server
         tokio::spawn(server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                                 |_connection_event| async {},
-                                                                |listening_interface, listening_port, peer, client_messages: ProcessorRemoteStreamType<String>| {
+                                                                |_listening_interface, _listening_port, peer, client_messages: ProcessorRemoteStreamType<String>| {
                 client_messages.inspect(move |client_message| {
                     // Receives: "Ping(n)"
                     let n_str = &client_message[5..(client_message.len() - 1)];
@@ -581,30 +590,31 @@ mod tests {
         // client
         client_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
                                               |connection_event| {
-                match connection_event {
-                    ConnectionEvent::PeerConnected { peer } => {
-                        // conversation starter
-                        assert!(peer.sender.try_send_movable(format!("Ping(0)")), "couldn't send");
-                    },
-                    ConnectionEvent::PeerDisconnected { .. } => {},
-                    ConnectionEvent::ApplicationShutdown { .. } => {},
-                }
-                future::ready(())
-            },
-                                              move |listening_interface, listening_port, peer, server_messages: ProcessorRemoteStreamType<String>| {
-                let counter_ref = Arc::clone(&counter_ref);
-                server_messages.inspect(move |server_message| {
-                    // Receives: "Pong(n)"
-                    let n_str = &server_message[5..(server_message.len()-1)];
-                    let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original server message: '{}'. Parsing error: {:?}", n_str, server_message, err));
-                    let current_count = counter_ref.fetch_add(1, Relaxed);
-                    if n != current_count {
-                        panic!("Received '{}', where Client was expecting 'Pong({})'", server_message, current_count);
-                    }
-                    // Answers: "Ping(n+1)"
-                    assert!(peer.sender.try_send_movable(format!("Ping({})", current_count+1)), "couldn't send");
-                })
-            }).await.expect("Starting the client");
+                                                  match connection_event {
+                                                      ConnectionEvent::PeerConnected { peer } => {
+                                                          // conversation starter
+                                                          assert!(peer.sender.try_send_movable(format!("Ping(0)")), "couldn't send");
+                                                      },
+                                                      ConnectionEvent::PeerDisconnected { .. } => {},
+                                                      ConnectionEvent::ApplicationShutdown { .. } => {},
+                                                  }
+                                                  future::ready(())
+                                              },
+                                              move |_listening_interface, _listening_port, peer, server_messages: ProcessorRemoteStreamType<String>| {
+                                                  let counter_ref = Arc::clone(&counter_ref);
+                                                  server_messages.inspect(move |server_message| {
+                                                      // Receives: "Pong(n)"
+                                                      let n_str = &server_message[5..(server_message.len()-1)];
+                                                      let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original server message: '{}'. Parsing error: {:?}", n_str, server_message, err));
+                                                      let current_count = counter_ref.fetch_add(1, Relaxed);
+                                                      if n != current_count {
+                                                          panic!("Received '{}', where Client was expecting 'Pong({})'", server_message, current_count);
+                                                      }
+                                                      // Answers: "Ping(n+1)"
+                                                      assert!(peer.sender.try_send_movable(format!("Ping({})", current_count+1)), "couldn't send");
+                                                  })
+                                              }
+        ).await.expect("Starting the client");
 
         println!("### Measuring latency for {TEST_DURATION_MS} milliseconds...");
         tokio::time::sleep(Duration::from_millis(TEST_DURATION_MS)).await;
@@ -631,7 +641,6 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     async fn message_flooding_throughput() {
         const TEST_DURATION_MS:    u64  = 2000;
-        const TEST_DURATION_NS:    u64  = TEST_DURATION_MS * 1e6 as u64;
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         const PORT               : u16  = 8572;
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
@@ -643,23 +652,24 @@ mod tests {
         let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaputt
         let received_messages_count_ref = Arc::clone(&received_messages_count);
         let unordered_ref = Arc::clone(&unordered);
-        tokio::spawn(server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
-                                                                |_connection_event: ConnectionEvent<String>| async {},
-                                                                move |listening_interface, listening_port, peer, client_messages: ProcessorRemoteStreamType<String>| {
-                let received_messages_count = Arc::clone(&received_messages_count_ref);
-                let unordered = Arc::clone(&unordered_ref);
-                client_messages.inspect(move |client_message| {
-                    // Message format: DoNotAnswer(n)
-                    let n_str = &client_message[12..(client_message.len()-1)];
-                    let n = str::parse::<u32>(n_str).expect(&format!("could not convert '{}' to number. Original message: '{}'", n_str, client_message));
-                    let count = received_messages_count.fetch_add(1, Relaxed);
-                    if count != n {
-                        if unordered.compare_exchange(0, count, Relaxed, Relaxed).is_ok() {
-                            println!("Server: ERROR: received order of messages broke at message #{}", count);
-                        };
-                    }
-                })
-        }));
+        tokio::spawn(
+            server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
+                                                       |_connection_event: ConnectionEvent<String>| async {},
+                                                       move |_listening_interface, _listening_port, _peer, client_messages: ProcessorRemoteStreamType<String>| {
+                                                           let received_messages_count = Arc::clone(&received_messages_count_ref);
+                                                           let unordered = Arc::clone(&unordered_ref);
+                                                           client_messages.inspect(move |client_message| {
+                                                               // Message format: DoNotAnswer(n)
+                                                               let n_str = &client_message[12..(client_message.len()-1)];
+                                                               let n = str::parse::<u32>(n_str).unwrap_or_else(|_| panic!("could not convert '{}' to number. Original message: '{}'", n_str, client_message));
+                                                               let count = received_messages_count.fetch_add(1, Relaxed);
+                                                               if count != n && unordered.compare_exchange(0, count, Relaxed, Relaxed).is_ok() {
+                                                                   println!("Server: ERROR: received order of messages broke at message #{}", count);
+                                                               }
+                                                           })
+                                                       }
+            )
+        );
 
         println!("### Waiting a little for the server to start...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -670,35 +680,36 @@ mod tests {
         client_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT,
                                               client_shutdown_receiver,
                                               move |connection_event| {
-                let sent_messages_count = Arc::clone(&sent_messages_count_ref);
-                match connection_event {
-                    ConnectionEvent::PeerConnected { peer } => {
-                        tokio::spawn(async move {
-                            let start = SystemTime::now();
-                            let mut n = 0;
-                            loop {
-                                assert!(peer.sender.try_send_movable(format!("DoNotAnswer({})", n)), "couldn't send");
-                                n += 1;
-                                // flush & bailout check for timeout every 1024 messages
-                                if n % (1<<10) == 0 {
-                                    peer.sender.flush(Duration::from_millis(50)).await;
-                                    if start.elapsed().unwrap().as_millis() as u64 >= TEST_DURATION_MS  {
-                                        println!("Client sent {} messages before bailing out", n);
-                                        sent_messages_count.store(n, Relaxed);
-                                        break;
-                                    }
-                                }
-                            }
-                        });
-                    },
-                    ConnectionEvent::PeerDisconnected { .. } => {},
-                    ConnectionEvent::ApplicationShutdown { .. } => {},
-                }
-                future::ready(())
-            },
-                                              move |listening_interface, listening_port, peer, server_messages: ProcessorRemoteStreamType<String>| {
-                server_messages
-            }).await.expect("Starting the client");
+                                                  let sent_messages_count = Arc::clone(&sent_messages_count_ref);
+                                                  match connection_event {
+                                                      ConnectionEvent::PeerConnected { peer } => {
+                                                          tokio::spawn(async move {
+                                                              let start = SystemTime::now();
+                                                              let mut n = 0;
+                                                              loop {
+                                                                  assert!(peer.sender.try_send_movable(format!("DoNotAnswer({})", n)), "couldn't send");
+                                                                  n += 1;
+                                                                  // flush & bailout check for timeout every 1024 messages
+                                                                  if n % (1<<10) == 0 {
+                                                                      peer.sender.flush(Duration::from_millis(50)).await;
+                                                                      if start.elapsed().unwrap().as_millis() as u64 >= TEST_DURATION_MS  {
+                                                                          println!("Client sent {} messages before bailing out", n);
+                                                                          sent_messages_count.store(n, Relaxed);
+                                                                          break;
+                                                                      }
+                                                                  }
+                                                              }
+                                                          });
+                                                      },
+                                                      ConnectionEvent::PeerDisconnected { .. } => {},
+                                                      ConnectionEvent::ApplicationShutdown { .. } => {},
+                                                  }
+                                                  future::ready(())
+                                              },
+                                              move |_listening_interface, _listening_port, _peer, server_messages: ProcessorRemoteStreamType<String>| {
+                                                  server_messages
+                                              }
+        ).await.expect("Starting the client");
         println!("### Measuring latency for 2 seconds...");
 
         tokio::time::sleep(Duration::from_millis(TEST_DURATION_MS)).await;
@@ -743,16 +754,16 @@ mod tests {
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
         tokio::spawn(server_loop_for_responsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
-            |connection_event| future::ready(()),
-            move |client_addr, client_port, peer, client_messages_stream| {
+            |_connection_event| future::ready(()),
+            move |_client_addr, _client_port, peer, client_messages_stream| {
                let client_secret_ref = client_secret_ref.clone();
                let server_secret_ref = server_secret_ref.clone();
                 assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
                 client_messages_stream.flat_map(move |client_message: SocketProcessorDerivedType<String>| {
                    stream::iter([
                        format!("Client just sent '{}'", client_message),
-                       if &*client_message == &client_secret_ref {
-                           format!("{}", server_secret_ref)
+                       if *client_message == client_secret_ref {
+                           server_secret_ref.clone()
                        } else {
                            panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
                        }])
@@ -763,14 +774,13 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // client
-        let client_secret_ref1 = client_secret.clone();
-        let server_secret_ref = server_secret.clone();
+        let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
         client_for_responsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
-            move |connection_event| future::ready(()),
-            move |client_addr, client_port, peer, server_messages_stream: ProcessorRemoteStreamType<String>| {
+            move |_connection_event| future::ready(()),
+            move |_client_addr, _client_port, peer, server_messages_stream: ProcessorRemoteStreamType<String>| {
                 let observed_secret_ref = Arc::clone(&observed_secret_ref);
-                assert!(peer.sender.try_send_movable(format!("{}", client_secret_ref1)), "couldn't send");
+                assert!(peer.sender.try_send_movable(client_secret.clone()), "couldn't send");
                 server_messages_stream
                     .then(move |server_message| {
                         let observed_secret_ref = Arc::clone(&observed_secret_ref);
@@ -779,7 +789,7 @@ mod tests {
                             let _ = observed_secret_ref.lock().await.insert(server_message);
                         }
                     })
-                    .map(|server_message| ".".to_string())
+                    .map(|_server_message| ".".to_string())
             }).await.expect("Starting the client");
         println!("### Started a client -- which is running concurrently, in the background... it has 100ms to do its thing!");
 
@@ -811,13 +821,12 @@ mod tests {
             move |connection_event| {
                 let server_disconnected = Arc::clone(&server_disconnected_ref);
                 async move {
-                    match connection_event {
-                        ConnectionEvent::PeerDisconnected { .. } => server_disconnected.store(true, Relaxed),
-                        _ => {}
+                    if let ConnectionEvent::PeerDisconnected { .. } = connection_event {
+                        server_disconnected.store(true, Relaxed);
                     }
                 }
             },
-            move |client_addr, client_port, peer: Arc<Peer<String>>, client_messages_stream: ProcessorRemoteStreamType<String>| client_messages_stream));
+            move |_client_addr, _client_port, _peer: Arc<Peer<String>>, client_messages_stream: ProcessorRemoteStreamType<String>| client_messages_stream));
 
         // wait a bit for the server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -826,13 +835,13 @@ mod tests {
             move |connection_event| {
                 let client_disconnected = Arc::clone(&client_disconnected_ref);
                 async move {
-                    match connection_event {
-                        ConnectionEvent::PeerDisconnected { .. } => client_disconnected.store(true, Relaxed),
-                        _ => {}
+                    if let ConnectionEvent::PeerDisconnected { .. } = connection_event {
+                        client_disconnected.store(true, Relaxed);
                     }
                 }
             },
-            move |client_addr, client_port, peer: Arc<Peer<String>>, server_messages_stream: ProcessorRemoteStreamType<String>| server_messages_stream).await.expect("Starting the client");
+            move |_client_addr, _client_port, _peer: Arc<Peer<String>>, server_messages_stream: ProcessorRemoteStreamType<String>| server_messages_stream
+        ).await.expect("Starting the client");
 
         // wait a bit for the connection, shutdown the client, wait another bit
         tokio::time::sleep(Duration::from_millis(100)).await;

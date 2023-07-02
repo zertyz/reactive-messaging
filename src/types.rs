@@ -1,12 +1,22 @@
 //! Common types used across this crate
 
-use std::fmt::Debug;
-use std::sync::Arc;
-use super::config::*;
-use std::time::Duration;
-use reactive_mutiny::prelude::advanced::{MutinyStream, UniZeroCopyAtomic, ChannelCommon, ChannelUni, ChannelProducer, Instruments, ChannelUniZeroCopyAtomic, OgreUnique, AllocatorAtomicArray};
-use crate::socket_connection_handler::Peer;
-use crate::SocketServerSerializer;
+use crate::{
+    config::*,
+    socket_connection_handler::Peer,
+    SocketServerSerializer,
+};
+use std::{
+    fmt::Debug,
+    sync::Arc,
+};
+use reactive_mutiny::{
+    prelude::advanced::{
+        UniZeroCopyAtomic,
+        ChannelUniZeroCopyAtomic,
+        OgreUnique,
+        AllocatorAtomicArray,
+    },
+};
 
 
 /// The fastest channel for sender `Stream`s -- see `benches/streamable_channels.rs`
@@ -24,6 +34,6 @@ pub        type SocketProcessorDerivedType<MessagesType> = OgreUnique<MessagesTy
 #[derive(Debug)]
 pub enum ConnectionEvent<LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages>> {
     PeerConnected {peer: Arc<Peer<LocalPeerMessages>>},
-    PeerDisconnected {peer: Arc<Peer<LocalPeerMessages>>},
+    PeerDisconnected {peer: Arc<Peer<LocalPeerMessages>>, stream_stats: Arc<reactive_mutiny::stream_executor::StreamExecutor>},
     ApplicationShutdown {timeout_ms: u32},
 }

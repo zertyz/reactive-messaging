@@ -1,16 +1,21 @@
 //! Reactive client for socket connections
 
 
-use std::fmt::Debug;
-use std::future::Future;
-use std::sync::Arc;
-use futures::{Stream, stream};
+use crate::{
+    types::ConnectionEvent,
+    prelude::ProcessorRemoteStreamType,
+    socket_connection_handler::{self, Peer},
+    SocketServerDeserializer,
+    SocketServerSerializer,
+};
+use std::{
+    fmt::Debug,
+    future::Future,
+    sync::Arc,
+};
+use futures::Stream;
 use tokio::sync::oneshot::Sender;
 use log::warn;
-use crate::socket_connection_handler::Peer;
-use crate::{socket_connection_handler, SocketServerDeserializer, SocketServerSerializer};
-use crate::prelude::ProcessorRemoteStreamType;
-use crate::types::ConnectionEvent;
 
 
 /// The handle to define, start and shutdown a Socket Client

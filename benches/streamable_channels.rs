@@ -8,7 +8,6 @@
 //! Out of the results here, it was decided that the `reactive-mutiny`'s Atomic Channel will be used instead of Tokio's
 //!
 
-use std::future::Future;
 use criterion::{
     criterion_group,
     criterion_main,
@@ -26,9 +25,8 @@ use std::{
         }
     },
 };
-use once_cell::sync::Lazy;
 use reactive_mutiny::prelude::{ChannelCommon, ChannelUni, ChannelProducer};
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::{StreamExt};
 
 
 /// Represents a reasonably sized message, similar to production needs
