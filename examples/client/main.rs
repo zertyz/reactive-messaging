@@ -2,16 +2,19 @@
 
 mod protocol_processor;
 
-use common::protocol_model::{ClientMessages, ServerMessages};
-use crate::common::logic::ping_pong_models::MatchConfig;
+use common::protocol_model::ServerMessages;
 use crate::protocol_processor::ClientProtocolProcessor;
-use reactive_messaging::prelude::ProcessorRemoteStreamType;
-use reactive_messaging::ron_serializer;
-use std::future;
-use std::ops::Deref;
-use std::sync::Arc;
-use std::time::Duration;
-use futures::{Stream, StreamExt};
+use reactive_messaging::{
+    prelude::ProcessorRemoteStreamType,
+    ron_serializer,
+};
+use std::{
+    future,
+    ops::Deref,
+    sync::Arc,
+    time::Duration,
+};
+use futures::StreamExt;
 use log::warn;
 
 
@@ -39,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         let client_processor_ref1 = Arc::new(ClientProtocolProcessor::new());
         let client_processor_ref2 = Arc::clone(&client_processor_ref1);
 
-        let mut socket_client = reactive_messaging::SocketClient::spawn_responsive_processor(SERVER_IP.to_string(), PORT,
+        let socket_client = reactive_messaging::SocketClient::spawn_responsive_processor(SERVER_IP.to_string(), PORT,
             move |connection_event| {
                 client_processor_ref1.client_events_callback(connection_event);
                 future::ready(())
@@ -51,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                         if DEBUG {
                             ron_serializer(server_message.deref(), &mut debug_serializer_buffer)
                                 .expect("`ron_serializer()` of our `ServerMessages`");
-                            print!("<<<< {}\n", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            println!("<<<< {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
                         }
                     });
                 let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
@@ -60,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                         if DEBUG {
                             ron_serializer(client_message, &mut debug_serializer_buffer)
                                 .expect("`ron_serializer()` of the received `ClientMessages`");
-                            print!(">>>> {}\n", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            println!(">>>> {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
                         }
                     });
                 processor_stream
