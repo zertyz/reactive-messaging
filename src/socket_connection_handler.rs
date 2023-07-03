@@ -130,7 +130,7 @@ pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:         
                                                         });
 
             // spawn a task to handle communications with that client
-            tokio::spawn(dialog_loop_for_textual_protocol(socket, peer, processor_sender));
+            tokio::spawn(tokio::task::unconstrained(dialog_loop_for_textual_protocol(socket, peer, processor_sender)));
         }
         debug!("SocketServer: bailing out of network loop -- we should be undergoing a shutdown...");
     });
@@ -183,7 +183,7 @@ pub async fn client_for_unresponsive_text_protocol<ClientMessages:              
                                                    });
 
     // spawn the processor
-    tokio::spawn(dialog_loop_for_textual_protocol(socket, peer, processor_sender));
+    tokio::spawn(tokio::task::unconstrained(dialog_loop_for_textual_protocol(socket, peer, processor_sender)));
     // spawn the shutdown listener
     tokio::spawn(async move {
         let timeout_ms = match shutdown_signaler.await {
@@ -387,25 +387,28 @@ fn to_responsive_stream<LocalMessages: SocketServerSerializer<LocalMessages> + S
 
     request_processor_stream
         .map(move |outgoing| {
+            // wired `if`s ahead to try to get some branch prediction optimizations -- assuming Rust will see the first `if` branches as the "usual case"
+            let is_disconnect = LocalMessages::is_disconnect_message(&outgoing);
+            let is_no_answer = LocalMessages::is_no_answer_message(&outgoing);
             // send the message, skipping messages that are programmed not to generate any response
-            if LocalMessages::is_disconnect_message(&outgoing) {
-                trace!("SocketServer: processor choose to drop connection with {} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
-                if !LocalMessages::is_no_answer_message(&outgoing) {
-                    let _sent = peer.sender.try_send(|slot| unsafe { std::ptr::write(slot,  outgoing) } );
-                }
-                peer.sender.cancel_all_streams();
-            } else if !LocalMessages::is_no_answer_message(&outgoing) {
+            if !is_disconnect && !is_no_answer {
                 // send the answer
                 trace!("Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
                 let sent = peer.sender.try_send(|slot|  unsafe { std::ptr::write(slot,  outgoing) } );
-                if !sent {
+                if sent {
+                    // the usual case -- not stripped out since we want the branch prediction optimization as this is the usual case
+                } else {
                     warn!("Slow reader detected -- {:?} (peer id {}). Closing the connection...", peer.peer_address, peer.peer_id);
                     // peer is slow-reading (and, possibly, fast sending?) -- this is a protocol offence and the connection will be closed (as soon as all messages are sent?? names should be reviewed: gracefully_end_all_streams() & immediately_cancel_all_streams())
                     peer.sender.cancel_all_streams();
                 }
+            } else if is_disconnect {
+                trace!("SocketServer: processor choose to drop connection with {} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
+                if !is_no_answer {
+                    let _sent = peer.sender.try_send(|slot| unsafe { std::ptr::write(slot,  outgoing) } );
+                }
+                peer.sender.cancel_all_streams();
             }
-
-
         })
 }
 
