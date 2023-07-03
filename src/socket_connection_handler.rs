@@ -48,13 +48,13 @@ use log::{trace, debug, warn, error};
 ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
 ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
 #[inline(always)]
-pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:                 SocketServerDeserializer<ClientMessages>              + Send + Sync + PartialEq + Debug + 'static,
-                                                        ServerMessages:                 SocketServerSerializer<ServerMessages>                + Send + Sync + PartialEq + Debug + 'static,
-                                                        PipelineOutputType:                                                                     Send + Sync +             Debug + 'static,
-                                                        OutputStreamType:               Stream<Item=PipelineOutputType>                       + Send                            + 'static,
-                                                        ConnectionEventsCallbackFuture: Future<Output=()>,
-                                                        ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                        ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> OutputStreamType>
+pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:                 SocketServerDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                                        ServerMessages:                 SocketServerSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
+                                                        PipelineOutputType:                                                        Send + Sync +             Debug + 'static,
+                                                        OutputStreamType:               Stream<Item=PipelineOutputType>          + Send                            + 'static,
+                                                        ConnectionEventsCallbackFuture: Future<Output=()>                        + Send,
+                                                        ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>)                                                                                                            -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                        ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> OutputStreamType               + Send + Sync + 'static>
 
                                                        (listening_interface:         String,
                                                         listening_port:              u16,
@@ -67,71 +67,73 @@ pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:         
     let connection_events_callback = Arc::new(connection_events_callback);
     let listener = TcpListener::bind(&format!("{}:{}", listening_interface, listening_port)).await?;
 
-    loop {
+    tokio::spawn( async move {
+        
+        loop {
 
-        // wait for a connection -- or for a shutdown signal
-        let (socket, addr) = if let Some(accepted_connection) = tokio::select! {
-            // incoming connection
-            acceptance_result = listener.accept() => {
-                if let Err(err) = acceptance_result {
-                    error!("PROBLEM while accepting a connection: {:?}", err);
-                    None
-                } else {
-                    Some(acceptance_result.unwrap())
+            // wait for a connection -- or for a shutdown signal
+            let (socket, addr) = if let Some(accepted_connection) = tokio::select! {
+                // incoming connection
+                acceptance_result = listener.accept() => {
+                    if let Err(err) = acceptance_result {
+                        error!("PROBLEM while accepting a connection: {:?}", err);
+                        None
+                    } else {
+                        Some(acceptance_result.unwrap())
+                    }
                 }
-            }
-            // shutdown signal
-            result = &mut shutdown_signaler => {
-                let timeout_ms = match result {
-                    Ok(timeout_millis) => {
-                        trace!("SocketServer: SHUTDOWN requested for server @ {listening_interface}:{listening_port} -- with timeout {}ms -- bailing out from the network loop", timeout_millis);
-                        timeout_millis
-                    },
-                    Err(err) => {
-                        error!("SocketServer: PROBLEM in the `shutdown signaler` for server @ {listening_interface}:{listening_port} (a server shutdown will be commanded now due to this occurrence): {:?}", err);
-                        5000    // consider this as the "problematic shutdown timeout (millis) constant"
-                    },
-                };
-                // issue the shutdown event
-                connection_events_callback(ConnectionEvent::ApplicationShutdown {timeout_ms}).await;
-                break
-            }
-        } {
-            accepted_connection
-        } else {
-            // error accepting -- not fatal: try again
-            continue
-        };
+                // shutdown signal
+                result = &mut shutdown_signaler => {
+                    let timeout_ms = match result {
+                        Ok(timeout_millis) => {
+                            trace!("SocketServer: SHUTDOWN requested for server @ {listening_interface}:{listening_port} -- with timeout {}ms -- bailing out from the network loop", timeout_millis);
+                            timeout_millis
+                        },
+                        Err(err) => {
+                            error!("SocketServer: PROBLEM in the `shutdown signaler` for server @ {listening_interface}:{listening_port} (a server shutdown will be commanded now due to this occurrence): {:?}", err);
+                            5000    // consider this as the "problematic shutdown timeout (millis) constant"
+                        },
+                    };
+                    // issue the shutdown event
+                    connection_events_callback(ConnectionEvent::ApplicationShutdown {timeout_ms}).await;
+                    break
+                }
+            } {
+                accepted_connection
+            } else {
+                // error accepting -- not fatal: try again
+                continue
+            };
 
-        // prepares for the dialog to come with the (just accepted) connection
-        let sender = SenderChannel::<ServerMessages, SENDER_BUFFER_SIZE>::new(format!("Sender for client {addr}"));
-        let peer = Arc::new(Peer::new(sender, addr));
-        let peer_ref1 = Arc::clone(&peer);
-        let peer_ref2 = Arc::clone(&peer);
+            // prepares for the dialog to come with the (just accepted) connection
+            let sender = SenderChannel::<ServerMessages, SENDER_BUFFER_SIZE>::new(format!("Sender for client {addr}"));
+            let peer = Arc::new(Peer::new(sender, addr));
+            let peer_ref1 = Arc::clone(&peer);
+            let peer_ref2 = Arc::clone(&peer);
 
-        // issue the connection event
-        connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
+            // issue the connection event
+            connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
 
-        let (client_ip, client_port) = match addr {
-            SocketAddr::V4(v4) => (v4.ip().to_string(), v4.port()),
-            SocketAddr::V6(v6) => (v6.ip().to_string(), v6.port()),
-        };
+            let (client_ip, client_port) = match addr {
+                SocketAddr::V4(v4) => (v4.ip().to_string(), v4.port()),
+                SocketAddr::V6(v6) => (v6.ip().to_string(), v6.port()),
+            };
 
-        let connection_events_callback_ref = Arc::clone(&connection_events_callback);
-        let processor_sender = SocketProcessorUniType::<ClientMessages>::new(format!("Server processor for remote client {addr} @ {listening_interface}:{listening_port}"))
-            .spawn_non_futures_non_fallibles_executors(1,
-                                                       |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
-                                                       move |executor| {
-                                                           // issue the async disconnect event
-                                                           futures::executor::block_on(connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }));
-                                                           future::ready(())
-                                                       });
+            let connection_events_callback_ref = Arc::clone(&connection_events_callback);
+            let processor_sender = SocketProcessorUniType::<ClientMessages>::new(format!("Server processor for remote client {addr} @ {listening_interface}:{listening_port}"))
+                .spawn_non_futures_non_fallibles_executors(1,
+                                                        |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
+                                                        move |executor| {
+                                                            // issue the async disconnect event
+                                                            futures::executor::block_on(connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }));
+                                                            future::ready(())
+                                                        });
 
-        // spawn a task to handle communications with that client
-        tokio::spawn(dialog_loop_for_textual_protocol(socket, peer, processor_sender));
-    }
-
-    debug!("SocketServer: bailing out of network loop -- we should be undergoing a shutdown...");
+            // spawn a task to handle communications with that client
+            tokio::spawn(dialog_loop_for_textual_protocol(socket, peer, processor_sender));
+        }
+        debug!("SocketServer: bailing out of network loop -- we should be undergoing a shutdown...");
+    });
 
     Ok(())
 }
@@ -325,12 +327,12 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
 /// Similar to [server_loop_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
 /// answers of type `ServerMessages`, which will be automatically routed to the clients.
 #[inline(always)]
-pub async fn server_loop_for_responsive_text_protocol<ClientMessages:                 SocketServerDeserializer<ClientMessages>              + Send + Sync + PartialEq + Debug + 'static,
-                                                      ServerMessages:                 SocketServerSerializer<ServerMessages>                + Send + Sync + PartialEq + Debug + 'static,
-                                                      OutputStreamType:               Stream<Item=ServerMessages>                           + Send + 'static,
-                                                      ConnectionEventsCallbackFuture: Future<Output=()>,
-                                                      ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                      ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> OutputStreamType>
+pub async fn server_loop_for_responsive_text_protocol<ClientMessages:                 SocketServerDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                                      ServerMessages:                 SocketServerSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
+                                                      OutputStreamType:               Stream<Item=ServerMessages>              + Send                            + 'static,
+                                                      ConnectionEventsCallbackFuture: Future<Output=()>                        + Send,
+                                                      ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>)                                                                                                            -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                      ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> OutputStreamType               + Send + Sync + 'static>
 
                                                      (listening_interface:         String,
                                                       listening_port:              u16,
@@ -341,9 +343,9 @@ pub async fn server_loop_for_responsive_text_protocol<ClientMessages:           
                                                      -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     // upgrade the "unresponsive" streams from `dialog_processor_builder_fn()` to "responsive" streams that will send the outcome to clients
-    let dialog_processor_builder_fn = |client_addr, connected_port, peer, client_messages_stream| {
+    let dialog_processor_builder_fn = move |client_addr, connected_port, peer, client_messages_stream| {
         let dialog_processor_stream = dialog_processor_builder_fn(client_addr, connected_port, Arc::clone(&peer), client_messages_stream);
-        to_responsive_stream(peer, dialog_processor_stream.map(|e| Ok(e)))
+        to_responsive_stream(peer, dialog_processor_stream)
     };
     server_loop_for_unresponsive_text_protocol(listening_interface.clone(), listening_port, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
         .map_err(|err| Box::from(format!("error when starting server @ {listening_interface}:{listening_port} with `server_loop_for_unresponsive_text_protocol()`: {err}")))
@@ -370,31 +372,21 @@ pub async fn client_for_responsive_text_protocol<ClientMessages:                
     // upgrade the "unresponsive" streams from `dialog_processor_builder_fn()` to "responsive" streams that will send the outcome to clients
     let dialog_processor_builder_fn = |server_addr, port, peer, server_messages_stream| {
         let dialog_processor_stream = dialog_processor_builder_fn(server_addr, port, Arc::clone(&peer), server_messages_stream);
-        to_responsive_stream(peer, dialog_processor_stream.map(|e| Ok(e)))
+        to_responsive_stream(peer, dialog_processor_stream)
     };
     client_for_unresponsive_text_protocol(server_ipv4_addr.clone(), port, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
         .map_err(|err| Box::from(format!("error when starting client for server @ {server_ipv4_addr}:{port} with `client_for_unresponsive_text_protocol()`: {err}")))
 }
 
-/// upgrades the `request_processor_stream` to a `Stream` which is also able send answers back to the `peer`
+/// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
+#[inline(always)]
 fn to_responsive_stream<LocalMessages: SocketServerSerializer<LocalMessages> + Send + Sync + PartialEq + Debug + 'static>
                        (peer:                     Arc<Peer<LocalMessages>>,
-                        request_processor_stream: impl Stream<Item = Result<LocalMessages, Box<dyn std::error::Error + Sync + Send>>>)
+                        request_processor_stream: impl Stream<Item = LocalMessages>)
                        -> impl Stream<Item = ()> {
 
     request_processor_stream
-        .map(move |processor_response| {
-            let outgoing = match processor_response {
-                Ok(outgoing) => {
-                    outgoing
-                },
-                Err(err) => {
-                    let err_string = format!("{:?}", err);
-                    error!("SocketServer: processor connected with {} (peer id {}) yielded an error: {}", peer.peer_address, peer.peer_id, err_string);
-                    let error_message = LocalMessages::processor_error_message(err_string);
-                    error_message
-                },
-            };
+        .map(move |outgoing| {
             // send the message, skipping messages that are programmed not to generate any response
             if LocalMessages::is_disconnect_message(&outgoing) {
                 trace!("SocketServer: processor choose to drop connection with {} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
@@ -415,6 +407,33 @@ fn to_responsive_stream<LocalMessages: SocketServerSerializer<LocalMessages> + S
 
 
         })
+}
+
+/// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
+#[inline(always)]
+fn to_responsive_stream_of_fallibles<LocalMessages: SocketServerSerializer<LocalMessages> + Send + Sync + PartialEq + Debug + 'static>
+                                    (peer:                     Arc<Peer<LocalMessages>>,
+                                     request_processor_stream: impl Stream<Item = Result<LocalMessages, Box<dyn std::error::Error + Sync + Send>>>)
+                                    -> impl Stream<Item = ()> {
+
+    let peer_ref1 = peer;
+    let peer_ref2 = Arc::clone(&peer_ref1);
+    // treat any errors
+    let request_processor_stream = request_processor_stream
+        .map(move |processor_response| {
+            match processor_response {
+                Ok(outgoing) => {
+                    outgoing
+                },
+                Err(err) => {
+                    let err_string = format!("{:?}", err);
+                    error!("SocketServer: processor connected with {} (peer id {}) yielded an error: {}", peer_ref1.peer_address, peer_ref1.peer_id, err_string);
+                    LocalMessages::processor_error_message(err_string)
+                },
+            }
+        });
+    // process the answer
+    to_responsive_stream(peer_ref2, request_processor_stream)
 }
 
 
@@ -487,32 +506,32 @@ mod tests {
         // server
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
-        tokio::spawn(server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
-                                                                |connection_event| {
-                                                                    match connection_event {
-                                                                        ConnectionEvent::PeerConnected { peer } => {
-                                                                            assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
-                                                                        },
-                                                                        ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => {},
-                                                                        ConnectionEvent::ApplicationShutdown { timeout_ms } => {
-                                                                            println!("Test Server: shutdown was requested ({timeout_ms}ms timeout)... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
-                                                                        }
-                                                                    }
-                                                                    future::ready(())
-                                                                },
-                                                                move |_client_addr, _client_port, peer, client_messages_stream| {
-                                                                    let client_secret_ref = client_secret_ref.clone();
-                                                                    let server_secret_ref = server_secret_ref.clone();
-                                                                    client_messages_stream.inspect(move |client_message| {
-                                                                        assert!(peer.sender.try_send_movable(format!("Client just sent '{}'", client_message)), "couldn't send");
-                                                                        if *client_message == client_secret_ref {
-                                                                            assert!(peer.sender.try_send_movable(server_secret_ref.clone()), "couldn't send");
-                                                                        } else {
-                                                                            panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
-                                                                        }
-                                                                    })
-                                                                }
-        ));
+        server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
+                                                   |connection_event| {
+                                                       match connection_event {
+                                                           ConnectionEvent::PeerConnected { peer } => {
+                                                               assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
+                                                           },
+                                                           ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => {},
+                                                           ConnectionEvent::ApplicationShutdown { timeout_ms } => {
+                                                               println!("Test Server: shutdown was requested ({timeout_ms}ms timeout)... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
+                                                           }
+                                                       }
+                                                       future::ready(())
+                                                   },
+                                                   move |_client_addr, _client_port, peer, client_messages_stream| {
+                                                       let client_secret_ref = client_secret_ref.clone();
+                                                       let server_secret_ref = server_secret_ref.clone();
+                                                       client_messages_stream.inspect(move |client_message| {
+                                                           assert!(peer.sender.try_send_movable(format!("Client just sent '{}'", client_message)), "couldn't send");
+                                                           if *client_message == client_secret_ref {
+                                                               assert!(peer.sender.try_send_movable(server_secret_ref.clone()), "couldn't send");
+                                                           } else {
+                                                               panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
+                                                           }
+                                                       })
+                                                   }
+        ).await.expect("Starting the server");
 
         println!("### Waiting a little for the server to start...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -570,17 +589,18 @@ mod tests {
         let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
         // server
-        tokio::spawn(server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
-                                                                |_connection_event| async {},
-                                                                |_listening_interface, _listening_port, peer, client_messages: ProcessorRemoteStreamType<String>| {
-                client_messages.inspect(move |client_message| {
-                    // Receives: "Ping(n)"
-                    let n_str = &client_message[5..(client_message.len() - 1)];
-                    let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original client message: '{}'. Parsing error: {:?}", n_str, client_message, err));
-                    // Answers:  "Pong(n)"
-                    assert!(peer.sender.try_send_movable(format!("Pong({})", n)), "couldn't send");
-                })
-            }));
+        server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
+                                                   |_connection_event| async {},
+                                                   |_listening_interface, _listening_port, peer, client_messages: ProcessorRemoteStreamType<String>| {
+                                                       client_messages.inspect(move |client_message| {
+                                                           // Receives: "Ping(n)"
+                                                           let n_str = &client_message[5..(client_message.len() - 1)];
+                                                           let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original client message: '{}'. Parsing error: {:?}", n_str, client_message, err));
+                                                           // Answers:  "Pong(n)"
+                                                           assert!(peer.sender.try_send_movable(format!("Pong({})", n)), "couldn't send");
+                                                       })
+                                                   }
+        ).await.expect("Starting the server");
 
         println!("### Waiting a little for the server to start...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -652,24 +672,22 @@ mod tests {
         let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaputt
         let received_messages_count_ref = Arc::clone(&received_messages_count);
         let unordered_ref = Arc::clone(&unordered);
-        tokio::spawn(
-            server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
-                                                       |_connection_event: ConnectionEvent<String>| async {},
-                                                       move |_listening_interface, _listening_port, _peer, client_messages: ProcessorRemoteStreamType<String>| {
-                                                           let received_messages_count = Arc::clone(&received_messages_count_ref);
-                                                           let unordered = Arc::clone(&unordered_ref);
-                                                           client_messages.inspect(move |client_message| {
-                                                               // Message format: DoNotAnswer(n)
-                                                               let n_str = &client_message[12..(client_message.len()-1)];
-                                                               let n = str::parse::<u32>(n_str).unwrap_or_else(|_| panic!("could not convert '{}' to number. Original message: '{}'", n_str, client_message));
-                                                               let count = received_messages_count.fetch_add(1, Relaxed);
-                                                               if count != n && unordered.compare_exchange(0, count, Relaxed, Relaxed).is_ok() {
-                                                                   println!("Server: ERROR: received order of messages broke at message #{}", count);
-                                                               }
-                                                           })
-                                                       }
-            )
-        );
+        server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
+                                                    |_connection_event: ConnectionEvent<String>| async {},
+                                                    move |_listening_interface, _listening_port, _peer, client_messages: ProcessorRemoteStreamType<String>| {
+                                                        let received_messages_count = Arc::clone(&received_messages_count_ref);
+                                                        let unordered = Arc::clone(&unordered_ref);
+                                                        client_messages.inspect(move |client_message| {
+                                                            // Message format: DoNotAnswer(n)
+                                                            let n_str = &client_message[12..(client_message.len()-1)];
+                                                            let n = str::parse::<u32>(n_str).unwrap_or_else(|_| panic!("could not convert '{}' to number. Original message: '{}'", n_str, client_message));
+                                                            let count = received_messages_count.fetch_add(1, Relaxed);
+                                                            if count != n && unordered.compare_exchange(0, count, Relaxed, Relaxed).is_ok() {
+                                                                println!("Server: ERROR: received order of messages broke at message #{}", count);
+                                                            }
+                                                        })
+                                                    }
+        ).await.expect("Starting the server");
 
         println!("### Waiting a little for the server to start...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -753,7 +771,7 @@ mod tests {
         // server
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
-        tokio::spawn(server_loop_for_responsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
+        server_loop_for_responsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
             |_connection_event| future::ready(()),
             move |_client_addr, _client_port, peer, client_messages_stream| {
                let client_secret_ref = client_secret_ref.clone();
@@ -768,7 +786,8 @@ mod tests {
                            panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
                        }])
                })
-            }));
+            }
+        ).await.expect("Starting the server");
 
         println!("### Waiting a little for the server to start...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -790,7 +809,8 @@ mod tests {
                         }
                     })
                     .map(|_server_message| ".".to_string())
-            }).await.expect("Starting the client");
+            }
+        ).await.expect("Starting the client");
         println!("### Started a client -- which is running concurrently, in the background... it has 100ms to do its thing!");
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -817,7 +837,7 @@ mod tests {
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
-        tokio::spawn(server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
+        server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
             move |connection_event| {
                 let server_disconnected = Arc::clone(&server_disconnected_ref);
                 async move {
@@ -826,7 +846,8 @@ mod tests {
                     }
                 }
             },
-            move |_client_addr, _client_port, _peer: Arc<Peer<String>>, client_messages_stream: ProcessorRemoteStreamType<String>| client_messages_stream));
+            move |_client_addr, _client_port, _peer: Arc<Peer<String>>, client_messages_stream: ProcessorRemoteStreamType<String>| client_messages_stream
+        ).await.expect("Starting the server");
 
         // wait a bit for the server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -856,7 +877,7 @@ mod tests {
     }
 
 
-        /// Test implementation for our text-only protocol
+    /// Test implementation for our text-only protocol
     impl SocketServerSerializer<String> for String {
         #[inline(always)]
         fn serialize(message: &String, buffer: &mut Vec<u8>) {

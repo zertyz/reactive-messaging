@@ -2,7 +2,7 @@
 name          = "reactive-messaging"
 version       = "0.1.0"
 edition       = "2021"
-description   = "Provides reactive client/server communications for Rust -- through sockets, shared mem IPCs and other goodies "
+description   = "Reactive client/server communications, focused on high performance"
 keywords      = ["reactive", "event-driven", "socket", "messaging", "transport"]
 categories    = ["asynchronous", "concurrency", "rust-patterns"]
 readme        = "README.md"

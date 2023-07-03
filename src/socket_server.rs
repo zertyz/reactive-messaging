@@ -1,4 +1,4 @@
-//! Reactive server for socket connections
+//! Resting place for [SocketServer]
 
 
 use super::{
@@ -21,7 +21,7 @@ use log::{warn, error};
 
 pub type SenderUniType<RemotePeerMessages> = reactive_mutiny::prelude::advanced::UniZeroCopyAtomic<RemotePeerMessages, 1024>;
 
-/// The handle to define, start and shutdown a Socket Server
+/// The handle to define, start and shutdown a Reactive Server for Socket Connections
 pub struct SocketServer {
     interface_ip:                String,
     port:                        u16,
@@ -50,26 +50,22 @@ impl SocketServer {
         }
     }
 
-    /// Returns a runner, which you may call to run `Server` and that will only return when
-    /// the service is over.\
-    /// When the returned closure is called, it will run the server by applying the `Stream`s returned by
-    /// `dialog_processor_builder_fn()` for each connected client, where the output of the generated `Stream`s
-    /// will be sent back to the clients.\
-    /// Example:
-    /// ```no_compile
-    ///     self.responsive_starter()().await;
-    pub fn responsive_starter<RemotePeerMessages:             SocketServerDeserializer<RemotePeerMessages> + Send + Sync + PartialEq + Debug + 'static,
-                              LocalPeerMessages:              SocketServerSerializer<LocalPeerMessages>    + Send + Sync + PartialEq + Debug + 'static,
-                              LocalStreamType:                Stream<Item=LocalPeerMessages>               + Send + 'static,
-                              ConnectionEventsCallbackFuture: Future<Output=()> + Send,
-                              ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<LocalPeerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                              ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<LocalPeerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<RemotePeerMessages>) -> LocalStreamType + Send + Sync + 'static>
+    /// Spawns a task to run the Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
+    /// an object through which the caller may inquire some stats (if opted in) and request the server to shutdown.\
+    /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `reactive-mutiny` Stream
+    /// that will produce non-futures & non-fallibles `ServerMessages` that will be sent to the clients.
+    pub async fn spawn_responsive_processor<RemotePeerMessages:             SocketServerDeserializer<RemotePeerMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                            LocalPeerMessages:              SocketServerSerializer<LocalPeerMessages>    + Send + Sync + PartialEq + Debug + 'static,
+                                            LocalStreamType:                Stream<Item=LocalPeerMessages>               + Send + 'static,
+                                            ConnectionEventsCallbackFuture: Future<Output=()> + Send,
+                                            ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<LocalPeerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                            ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<LocalPeerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<RemotePeerMessages>) -> LocalStreamType + Send + Sync + 'static>
 
-                             (&mut self,
-                              server_events_callback: ConnectionEventsCallback,
-                              dialog_processor_builder_fn: ProcessorBuilderFn)
+                                           (&mut self,
+                                            server_events_callback: ConnectionEventsCallback,
+                                            dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                             -> impl FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Sync + Send + 'static>>> {
+                                           -> Result<(), Box<dyn std::error::Error + Sync + Send + 'static>> {
 
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
@@ -79,48 +75,12 @@ impl SocketServer {
         let listening_interface = self.interface_ip.to_string();
         let port = self.port;
 
-        let runner = move || -> BoxFuture<'_, Result<(), Box<dyn std::error::Error + Sync + Send>>> {
-            Box::pin(async move {
-                let started_state = Arc::new(AtomicI32::new(0));     // 0: not started; 1: started; -1: error starting
-                let join_handler = tokio::spawn({
-                    let started_state = Arc::clone(&started_state);
-                    let listening_interface = listening_interface.clone();
-                    async move {
-                        started_state.store(1, Relaxed);
-                        let result = socket_connection_handler::server_loop_for_responsive_text_protocol(listening_interface.to_string(),
-                                                                                                         port,
-                                                                                                         server_shutdown_receiver,
-                                                                                                         server_events_callback,
-                                                                                                         dialog_processor_builder_fn).await;
-                        if let Err(err) = result {
-                            started_state.store(-1, Relaxed);
-                            let msg = format!("Error starting SocketServer @ {listening_interface}:{port}: {:?}", err);
-                            error!("{}", msg);
-                            Err(msg)
-                        } else {
-                            Ok(())
-                        }
-                    }
-                });
-
-                // wait for up to 1 second to have any server starting errors to propagate to the caller
-                let mut i = 1000;
-                loop {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                    match started_state.load(Relaxed) {
-                        0 => break Err(Box::from(join_handler.await.unwrap_err().to_string())),
-                        1 => break Ok(()),
-                        _ => (),
-                    }
-                    i -= 1;
-                    if i == 0 {
-                        break Err(Box::from(format!("SocketServer @ {listening_interface}:{port} didn't start within 1 second")))
-                    }
-                }
-            })
-        };
-
-        runner
+        socket_connection_handler::server_loop_for_responsive_text_protocol(listening_interface.to_string(),
+                                                                            port,
+                                                                            server_shutdown_receiver,
+                                                                            server_events_callback,
+                                                                            dialog_processor_builder_fn).await
+            .map_err(|err| Box::from(format!("Error starting SocketServer @ {listening_interface}:{port}: {:?}", err)))
     }
 
     /// Returns an async closure that blocks until [shutdown()] is called.

@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut socket_server = reactive_messaging::SocketServer::new(LISTENING_INTERFACE.to_string(), LISTENING_PORT);
 
-    let start_server = socket_server.responsive_starter(
+    socket_server.spawn_responsive_processor(
         move |connection_events| {
             server_processor_ref1.server_events_callback(connection_events);
             future::ready(())
@@ -32,8 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         move |client_addr, port, peer, client_messages_stream: ProcessorRemoteStreamType<ClientMessages>| {
             server_processor_ref2.dialog_processor(client_addr, port, peer, client_messages_stream)
         }
-    );
-    start_server().await?;
+    ).await?;
 
     let wait_for_shutdown = socket_server.shutdown_waiter();
 tokio::spawn( async move {

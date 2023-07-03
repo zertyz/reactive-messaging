@@ -1,4 +1,4 @@
-//! Reactive client for socket connections
+//! Resting place for [SocketClient]
 
 
 use crate::{
@@ -18,7 +18,7 @@ use tokio::sync::oneshot::Sender;
 use log::warn;
 
 
-/// The handle to define, start and shutdown a Socket Client
+/// The handle to define, start and shutdown a Reactive Client for Socket Connections
 pub struct SocketClient {
     ip: String,
     port: u16,
@@ -31,7 +31,7 @@ impl SocketClient {
     /// Spawns a task to connect to the server @ `ip` & `port` and returns, immediately,
     /// an object through which the caller may inquire some stats (if opted in) and request
     /// the client to disconnect.\
-    /// The given `dialog_processor` will produce non-futures & non-fallibles `ServerMessages` that will be sent to the server.
+    /// The given `dialog_processor` will produce non-futures & non-fallibles `ClientMessages` that will be sent to the server.
     pub async fn spawn_responsive_processor<ServerMessages:                 SocketServerDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug + 'static,
                                             ClientMessages:                 SocketServerSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
                                             ConnectionEventsCallbackFuture: Future<Output=()>                        + Send,
