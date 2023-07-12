@@ -8,20 +8,18 @@ use super::{
     serde::{SocketServerSerializer,SocketServerDeserializer}
 };
 use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicI32, Ordering::Relaxed},
-    },
+    sync::Arc,
     fmt::Debug,
-    future::Future, time::Duration,
+    future::Future,
 };
 use futures::{Stream, future::BoxFuture};
-use log::{warn, error};
+use log::warn;
 
 
 pub type SenderUniType<RemotePeerMessages> = reactive_mutiny::prelude::advanced::UniZeroCopyAtomic<RemotePeerMessages, 1024>;
 
 /// The handle to define, start and shutdown a Reactive Server for Socket Connections
+#[derive(Debug)]
 pub struct SocketServer {
     interface_ip:                String,
     port:                        u16,

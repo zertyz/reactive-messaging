@@ -9,13 +9,11 @@ use std::{
     fmt::Debug,
     sync::Arc,
 };
-use reactive_mutiny::{
-    prelude::advanced::{
-        UniZeroCopyAtomic,
-        ChannelUniZeroCopyAtomic,
-        OgreUnique,
-        AllocatorAtomicArray,
-    },
+use reactive_mutiny::prelude::advanced::{
+    UniZeroCopyAtomic,
+    ChannelUniZeroCopyAtomic,
+    OgreUnique,
+    AllocatorAtomicArray,
 };
 
 
