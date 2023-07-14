@@ -2,3 +2,4 @@ Cargo.lock
 target/
 target_*/
 .idea/
+.vscode/settings.json

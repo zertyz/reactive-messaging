@@ -3,7 +3,7 @@
 use crate::{
     config::*,
     socket_connection_handler::Peer,
-    SocketServerSerializer,
+    ReactiveMessagingSerializer,
 };
 use std::{
     fmt::Debug,
@@ -30,7 +30,7 @@ pub        type SocketProcessorDerivedType<MessagesType> = OgreUnique<MessagesTy
 /// Note that the `Peer` objects received in those events may be used, at any time, to send messages to the clients -- like "Shutting down. Goodbye".
 /// *When doing this on other occasions, make sure you won't break your own protocol.*
 #[derive(Debug)]
-pub enum ConnectionEvent<LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<LocalPeerMessages>> {
+pub enum ConnectionEvent<LocalPeerMessages:  'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<LocalPeerMessages>> {
     PeerConnected {peer: Arc<Peer<LocalPeerMessages>>},
     PeerDisconnected {peer: Arc<Peer<LocalPeerMessages>>, stream_stats: Arc<reactive_mutiny::stream_executor::StreamExecutor>},
     ApplicationShutdown {timeout_ms: u32},

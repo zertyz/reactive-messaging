@@ -58,7 +58,7 @@
 use std::error::Error;
 use super::logic::ping_pong_models::*;
 use serde::{Serialize, Deserialize};
-use reactive_messaging::{ron_deserializer, ron_serializer, SocketServerDeserializer, SocketServerSerializer};
+use reactive_messaging::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ResponsiveMessages, ReactiveMessagingSerializer};
 
 
 pub const PROTOCOL_VERSION: &str = "2023-06-21";
@@ -124,10 +124,10 @@ pub enum ServerMessages {
 
 }
 
-// implementation of the RON SerDe
-//////////////////////////////////
+// implementation of the RON SerDe & Responsive traits
+//////////////////////////////////////////////////////
 
-impl SocketServerSerializer<ClientMessages> for ClientMessages {
+impl ReactiveMessagingSerializer<ClientMessages> for ClientMessages {
 
     #[inline(always)]
     fn serialize(remote_message: &ClientMessages, buffer: &mut Vec<u8>) {
@@ -139,6 +139,17 @@ impl SocketServerSerializer<ClientMessages> for ClientMessages {
     fn processor_error_message(err: String) -> ClientMessages {
         ClientMessages::Error(err)
     }
+}
+
+impl ReactiveMessagingDeserializer<ClientMessages> for ClientMessages {
+
+    #[inline(always)]
+    fn deserialize(local_message: &[u8]) -> Result<ClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+        ron_deserializer(local_message)
+    }
+}
+
+impl ResponsiveMessages<ClientMessages> for ClientMessages {
 
     #[inline(always)]
     fn is_disconnect_message(processor_answer: &ClientMessages) -> bool {
@@ -151,15 +162,7 @@ impl SocketServerSerializer<ClientMessages> for ClientMessages {
     }
 }
 
-impl SocketServerDeserializer<ClientMessages> for ClientMessages {
-
-    #[inline(always)]
-    fn deserialize(local_message: &[u8]) -> Result<ClientMessages, Box<dyn Error + Sync + Send + 'static>> {
-        ron_deserializer(local_message)
-    }
-}
-
-impl SocketServerSerializer<ServerMessages> for ServerMessages {
+impl ReactiveMessagingSerializer<ServerMessages> for ServerMessages {
 
     #[inline(always)]
     fn serialize(remote_message: &ServerMessages, buffer: &mut Vec<u8>) {
@@ -171,6 +174,9 @@ impl SocketServerSerializer<ServerMessages> for ServerMessages {
     fn processor_error_message(err: String) -> ServerMessages {
         ServerMessages::Error(err)
     }
+}
+
+impl ResponsiveMessages<ServerMessages> for ServerMessages {
 
     /// Disconnects when our processor issues either of "GoodBye" or "GameCancelled"
     #[inline(always)]
@@ -184,7 +190,7 @@ impl SocketServerSerializer<ServerMessages> for ServerMessages {
     }
 }
 
-impl SocketServerDeserializer<ServerMessages> for ServerMessages {
+impl ReactiveMessagingDeserializer<ServerMessages> for ServerMessages {
     fn deserialize(local_message: &[u8]) -> Result<ServerMessages, Box<dyn Error + Sync + Send>> {
         ron_deserializer(local_message)
     }

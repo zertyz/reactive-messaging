@@ -6,11 +6,13 @@
 //! 4) `message-io` uses ~3x more CPU and is single threaded -- throughput couldn't be measured for the network speed was the bottleneck; latency was not measured at all
 
 
+use crate::ReactiveMessagingSerializer;
+
 use super::{
     config::*,
     types::*,
     prelude::ProcessorRemoteStreamType,
-    serde::{SocketServerDeserializer, SocketServerSerializer},
+    serde::ReactiveMessagingDeserializer,
 };
 use std::{
     fmt::Debug,
@@ -48,11 +50,11 @@ use log::{trace, debug, warn, error};
 ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
 ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
 #[inline(always)]
-pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:                 SocketServerDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                                        ServerMessages:                 SocketServerSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
-                                                        PipelineOutputType:                                                        Send + Sync +             Debug + 'static,
-                                                        OutputStreamType:               Stream<Item=PipelineOutputType>          + Send                            + 'static,
-                                                        ConnectionEventsCallbackFuture: Future<Output=()>                        + Send,
+pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:                 ReactiveMessagingDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                                        ServerMessages:                 ReactiveMessagingSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
+                                                        PipelineOutputType:                                                             Send + Sync +             Debug + 'static,
+                                                        OutputStreamType:               Stream<Item=PipelineOutputType>               + Send                            + 'static,
+                                                        ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
                                                         ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>)                                                                                                            -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                                         ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> OutputStreamType               + Send + Sync + 'static>
 
@@ -144,10 +146,10 @@ pub async fn server_loop_for_unresponsive_text_protocol<ClientMessages:         
 ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
 ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
 #[inline(always)]
-pub async fn client_for_unresponsive_text_protocol<ClientMessages:                 SocketServerSerializer<ClientMessages>                + Send + Sync + PartialEq + Debug + 'static,
-                                                   ServerMessages:                 SocketServerDeserializer<ServerMessages>              + Send + Sync + PartialEq + Debug + 'static,
-                                                   PipelineOutputType:                                                              Send + Sync +             Debug + 'static,
-                                                   OutputStreamType:               Stream<Item=PipelineOutputType>                       + Send + 'static,
+pub async fn client_for_unresponsive_text_protocol<ClientMessages:                 ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
+                                                   ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                                   PipelineOutputType:                                                             Send + Sync +             Debug + 'static,
+                                                   OutputStreamType:               Stream<Item=PipelineOutputType>               + Send + 'static,
                                                    ConnectionEventsCallbackFuture: Future<Output=()>,
                                                    ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                                    ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ClientMessages>>, /*server_messages_stream: */ProcessorRemoteStreamType<ServerMessages>) -> OutputStreamType>
@@ -210,8 +212,8 @@ pub async fn client_for_unresponsive_text_protocol<ClientMessages:              
 ///   - `processor_sender` is a [reactive_mutiny::Uni], to which incoming messages will be sent;
 ///   - conversely, `peer.sender` is the [reactive_mutiny::Uni] to receive outgoing messages.
 #[inline(always)]
-async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                          LocalMessages:  SocketServerSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static>
+async fn dialog_loop_for_textual_protocol<RemoteMessages: ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                          LocalMessages:  ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static>
 
                                          (mut textual_socket: TcpStream,
                                           peer:               Arc<Peer<LocalMessages>>,
@@ -327,10 +329,11 @@ async fn dialog_loop_for_textual_protocol<RemoteMessages: SocketServerDeserializ
 /// Similar to [server_loop_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
 /// answers of type `ServerMessages`, which will be automatically routed to the clients.
 #[inline(always)]
-pub async fn server_loop_for_responsive_text_protocol<ClientMessages:                 SocketServerDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                                      ServerMessages:                 SocketServerSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
-                                                      OutputStreamType:               Stream<Item=ServerMessages>              + Send                            + 'static,
-                                                      ConnectionEventsCallbackFuture: Future<Output=()>                        + Send,
+pub async fn server_loop_for_responsive_text_protocol<ClientMessages:                 ReactiveMessagingDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                                      ServerMessages:                 ReactiveMessagingSerializer<ServerMessages>   +
+                                                                                      ResponsiveMessages<ServerMessages>            + Send + Sync + PartialEq + Debug + 'static,
+                                                      OutputStreamType:               Stream<Item=ServerMessages>                   + Send                            + 'static,
+                                                      ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
                                                       ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>)                                                                                                            -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                                       ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> OutputStreamType               + Send + Sync + 'static>
 
@@ -354,9 +357,10 @@ pub async fn server_loop_for_responsive_text_protocol<ClientMessages:           
 /// Similar to [client_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
 /// answers of type `ClientMessages`, which will be automatically routed to the server.
 #[inline(always)]
-pub async fn client_for_responsive_text_protocol<ClientMessages:                 SocketServerSerializer<ClientMessages>                + Send + Sync + PartialEq + Debug + 'static,
-                                                 ServerMessages:                 SocketServerDeserializer<ServerMessages>              + Send + Sync + PartialEq + Debug + 'static,
-                                                 OutputStreamType:               Stream<Item=ClientMessages>                           + Send + 'static,
+pub async fn client_for_responsive_text_protocol<ClientMessages:                 ReactiveMessagingSerializer<ClientMessages> +
+                                                                                 ResponsiveMessages<ClientMessages>                + Send + Sync + PartialEq + Debug + 'static,
+                                                 ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages>     + Send + Sync + PartialEq + Debug + 'static,
+                                                 OutputStreamType:               Stream<Item=ClientMessages>                       + Send + 'static,
                                                  ConnectionEventsCallbackFuture: Future<Output=()>,
                                                  ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                                  ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ClientMessages>>, /*server_messages_stream: */ProcessorRemoteStreamType<ServerMessages>) -> OutputStreamType>
@@ -380,7 +384,8 @@ pub async fn client_for_responsive_text_protocol<ClientMessages:                
 
 /// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
 #[inline(always)]
-fn to_responsive_stream<LocalMessages: SocketServerSerializer<LocalMessages> + Send + Sync + PartialEq + Debug + 'static>
+fn to_responsive_stream<LocalMessages: ReactiveMessagingSerializer<LocalMessages> + 
+                                       ResponsiveMessages<LocalMessages>          + Send + Sync + PartialEq + Debug + 'static>
                        (peer:                     Arc<Peer<LocalMessages>>,
                         request_processor_stream: impl Stream<Item = LocalMessages>)
                        -> impl Stream<Item = ()> {
@@ -414,7 +419,8 @@ fn to_responsive_stream<LocalMessages: SocketServerSerializer<LocalMessages> + S
 
 /// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
 #[inline(always)]
-fn to_responsive_stream_of_fallibles<LocalMessages: SocketServerSerializer<LocalMessages> + Send + Sync + PartialEq + Debug + 'static>
+fn to_responsive_stream_of_fallibles<LocalMessages: ReactiveMessagingSerializer<LocalMessages> +
+                                                    ResponsiveMessages<LocalMessages>          + Send + Sync + PartialEq + Debug + 'static>
                                     (peer:                     Arc<Peer<LocalMessages>>,
                                      request_processor_stream: impl Stream<Item = Result<LocalMessages, Box<dyn std::error::Error + Sync + Send>>>)
                                     -> impl Stream<Item = ()> {
@@ -443,13 +449,13 @@ fn to_responsive_stream_of_fallibles<LocalMessages: SocketServerSerializer<Local
 static PEER_COUNTER: AtomicU32 = AtomicU32::new(0);
 pub type PeerId = u32;
 /// Represents a channel to a peer able to send out `MessageType` kinds of messages from "here" to "there"
-pub struct Peer<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>> {
+pub struct Peer<MessagesType: 'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>> {
     pub peer_id:      PeerId,
     pub sender:       Arc<SenderChannel<MessagesType, SENDER_BUFFER_SIZE>>,
     pub peer_address: SocketAddr,
 }
 
-impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>>
+impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>>
 Peer<MessagesType> {
 
     pub fn new(sender: Arc<SenderChannel<MessagesType, SENDER_BUFFER_SIZE>>, peer_address: SocketAddr) -> Self {
@@ -462,13 +468,29 @@ Peer<MessagesType> {
 
 }
 
-impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + SocketServerSerializer<MessagesType>>
+impl<MessagesType: 'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>>
 Debug for
 Peer<MessagesType> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Peer {{peer_id: {}, peer_address: '{}', sender: {} pending messages}}",
                   self.peer_id, self.peer_address, self.sender.pending_items_count())
     }
+}
+
+/// Adherents will, typically, also implement [ReactiveMessagingUnresponsiveSerializer].\
+/// By upgrading your type with this trait, it is possible to build a "Responsive Processor", where the returned `Stream`
+/// contains the messages to be sent as an answer to the remote peer.\
+/// This trait, therefore, specifies (to the internal sender) how to handle special response cases, like "no answer" and "disconnection" messages.
+pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMessages> + Send + PartialEq + Debug> {
+
+    /// Informs the internal sender if the given `processor_answer` is a "disconnect" message & command (issued by the messages processor logic)\
+    /// -- in which case, the network processor will send it and, immediately, close the connection.\
+    /// IMPLEMENTORS: #[inline(always)]
+    fn is_disconnect_message(processor_answer: &LocalPeerMessages) -> bool;
+
+    /// Tells if internal sender if the given `processor_answer` represents a "no message" -- a message that should produce no answer to the peer.\
+    /// IMPLEMENTORS: #[inline(always)]
+    fn is_no_answer_message(processor_answer: &LocalPeerMessages) -> bool;
 }
 
 
@@ -879,9 +901,8 @@ mod tests {
         server_shutdown_sender.send(50).expect("sending server shutdown signal");
     }
 
-
     /// Test implementation for our text-only protocol
-    impl SocketServerSerializer<String> for String {
+    impl ReactiveMessagingSerializer<String> for String {
         #[inline(always)]
         fn serialize(message: &String, buffer: &mut Vec<u8>) {
             buffer.clear();
@@ -893,6 +914,10 @@ mod tests {
             panic!("SocketServerSerializer<String>::processor_error_message(): {}", msg);
             // msg
         }
+    }
+
+    /// Our test text-only protocol's messages may also be used by "Responsive Processors"
+    impl ResponsiveMessages<String> for String {
         #[inline(always)]
         fn is_disconnect_message(processor_answer: &String) -> bool {
             // for String communications, an empty line sent by the messages processor signals that the connection should be closed
@@ -905,7 +930,7 @@ mod tests {
     }
 
     /// Testable implementation for our text-only protocol
-    impl SocketServerDeserializer<String> for String {
+    impl ReactiveMessagingDeserializer<String> for String {
         #[inline(always)]
         fn deserialize(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send + 'static>> {
             Ok(String::from_utf8_lossy(message).to_string())

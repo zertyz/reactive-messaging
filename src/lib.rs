@@ -1,8 +1,15 @@
 mod config;
+
 mod socket_connection_handler;
+pub use crate::socket_connection_handler::ResponsiveMessages;
 
 mod serde;
-pub use crate::serde::{SocketServerDeserializer, SocketServerSerializer, ron_serializer, ron_deserializer};
+pub use crate::serde::{
+    ReactiveMessagingSerializer,
+    ReactiveMessagingDeserializer,
+    ron_serializer,
+    ron_deserializer,
+};
 
 mod types;
 

@@ -1,11 +1,14 @@
 //! Resting place for [SocketServer]
 
 
+use crate::ReactiveMessagingSerializer;
+
 use super::{
+    ResponsiveMessages,
     types::*,
     prelude::ProcessorRemoteStreamType,
     socket_connection_handler::{self, Peer},
-    serde::{SocketServerSerializer,SocketServerDeserializer}
+    serde::ReactiveMessagingDeserializer,
 };
 use std::{
     sync::Arc,
@@ -48,19 +51,20 @@ impl SocketServer {
         }
     }
 
-    /// Spawns a task to run the Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
+    /// Spawns a task to run a Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
     /// an object through which the caller may inquire some stats (if opted in) and request the server to shutdown.\
     /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `reactive-mutiny` Stream
     /// that will produce non-futures & non-fallibles `ServerMessages` that will be sent to the clients.
-    pub async fn spawn_responsive_processor<RemotePeerMessages:             SocketServerDeserializer<RemotePeerMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                            LocalPeerMessages:              SocketServerSerializer<LocalPeerMessages>    + Send + Sync + PartialEq + Debug + 'static,
-                                            LocalStreamType:                Stream<Item=LocalPeerMessages>               + Send + 'static,
+    pub async fn spawn_responsive_processor<ClientMessages:                 ReactiveMessagingDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                            ServerMessages:                 ReactiveMessagingSerializer<ServerMessages>   +
+                                                                            ResponsiveMessages<ServerMessages>            + Send + Sync + PartialEq + Debug + 'static,
+                                            ServerStreamType:               Stream<Item=ServerMessages>                   + Send + 'static,
                                             ConnectionEventsCallbackFuture: Future<Output=()> + Send,
-                                            ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<LocalPeerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                            ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<LocalPeerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<RemotePeerMessages>) -> LocalStreamType + Send + Sync + 'static>
+                                            ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                            ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> ServerStreamType + Send + Sync + 'static>
 
                                            (&mut self,
-                                            server_events_callback: ConnectionEventsCallback,
+                                            server_events_callback:      ConnectionEventsCallback,
                                             dialog_processor_builder_fn: ProcessorBuilderFn)
 
                                            -> Result<(), Box<dyn std::error::Error + Sync + Send + 'static>> {
@@ -78,6 +82,41 @@ impl SocketServer {
                                                                             server_shutdown_receiver,
                                                                             server_events_callback,
                                                                             dialog_processor_builder_fn).await
+            .map_err(|err| Box::from(format!("Error starting SocketServer @ {listening_interface}:{port}: {:?}", err)))
+    }
+
+    /// Spawns a task to run a Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
+    /// an object through which the caller may inquire some stats (if opted in) and request the server to shutdown.\
+    /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `reactive-mutiny` Stream
+    /// that will produce non-futures & non-fallibles items that won't be sent to the clients
+    /// -- if you want the processor to produce "answer messages" to the clients, see [SocketServer::spawn_responsive_processor()].
+    pub async fn spawn_unresponsive_processor<ClientMessages:                 ReactiveMessagingDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                              ServerMessages:                 ReactiveMessagingSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
+                                              OutputStreamItemsType:                                                          Send + Sync             + Debug + 'static,
+                                              ServerStreamType:               Stream<Item=OutputStreamItemsType>            + Send + 'static,
+                                              ConnectionEventsCallbackFuture: Future<Output=()> + Send,
+                                              ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<ServerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                              ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<ClientMessages>) -> ServerStreamType + Send + Sync + 'static>
+
+                                             (&mut self,
+                                              server_events_callback:      ConnectionEventsCallback,
+                                              dialog_processor_builder_fn: ProcessorBuilderFn)
+
+                                             -> Result<(), Box<dyn std::error::Error + Sync + Send + 'static>> {
+
+        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
+        self.server_shutdown_signaler = Some(server_shutdown_sender);
+        self.local_shutdown_signaler = Some(local_shutdown_sender);
+        self.local_shutdown_receiver = Some(local_shutdown_receiver);
+        let listening_interface = self.interface_ip.to_string();
+        let port = self.port;
+
+        socket_connection_handler::server_loop_for_unresponsive_text_protocol(listening_interface.to_string(),
+                                                                              port,
+                                                                              server_shutdown_receiver,
+                                                                              server_events_callback,
+                                                                              dialog_processor_builder_fn).await
             .map_err(|err| Box::from(format!("Error starting SocketServer @ {listening_interface}:{port}: {:?}", err)))
     }
 
