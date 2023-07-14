@@ -1,6 +1,6 @@
 [package]
 name          = "reactive-messaging"
-version       = "0.1.3"
+version       = "0.1.4"
 edition       = "2021"
 description   = "Reactive client/server communications, focused on high performance"
 keywords      = ["reactive", "event-driven", "socket", "messaging", "transport"]
