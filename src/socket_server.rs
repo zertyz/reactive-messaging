@@ -136,7 +136,7 @@ impl SocketServer {
                         Err(err) => Err(Box::from(format!("SocketServer::wait_for_shutdown(): It is no longer possible to tell when the server will be shutdown: `one_shot` signal error: {err}")))
                     }
                 } else {
-                    Err(Box::from(format!("SocketServer: \"wait for shutdown\" requested, but the service was not started (or a previous shutdown was commanded) at the moment `shutdown_waiter()` was called")))
+                    Err(Box::from("SocketServer: \"wait for shutdown\" requested, but the service was not started (or a previous shutdown was commanded) at the moment `shutdown_waiter()` was called"))
                 }
             }
         })
@@ -148,15 +148,15 @@ impl SocketServer {
             Some((server_sender, local_sender)) => {
                 warn!("Socket Server: Shutdown asked & initiated for server @ {}:{} -- timeout: {TIMEOUT_MILLIS}ms", self.interface_ip, self.port);
                 if let Err(_err) = server_sender.send(TIMEOUT_MILLIS) {
-                    Err(Box::from(format!("Socket Server BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix")))
+                    Err(Box::from("Socket Server BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix"))
                 } else if let Err(_err) = local_sender.send(()) {
-                    Err(Box::from(format!("Socket Server BUG: couldn't send shutdown signal to the local `one_shot` channel. Program is, likely, hanged. Please, investigate and fix")))
+                    Err(Box::from("Socket Server BUG: couldn't send shutdown signal to the local `one_shot` channel. Program is, likely, hanged. Please, investigate and fix"))
                 } else {
                     Ok(())
                 }
             }
             None => {
-                Err(Box::from(format!("Socket Server: Shutdown requested, but the service was not started. Ignoring...")))
+                Err(Box::from("Socket Server: Shutdown requested, but the service was not started. Ignoring..."))
             }
         }
     }

@@ -1,8 +1,6 @@
 //! Implementation of the Ping-Pong game logic as described in [protocol_model]
 
-use super::{
-    ping_pong_models::*,
-};
+use super::ping_pong_models::*;
 use rand::Rng;
 
 
@@ -200,6 +198,8 @@ mod tests {
             ball_out_probability:   0.07,
         };
         let mut umpire = Umpire::new(&config, Players::Ourself);
+        let registered_config = umpire.config();
+        assert_eq!(registered_config, config, "Initial config not registered correctly");
 
         // ready to start
         assert_eq!(umpire.state(), GameStates::WaitingForService { attempt: 1 }, "Wrong state when starting the game");
@@ -221,7 +221,7 @@ mod tests {
 
         // serviced on the net for the 3rd attempt
         assert_eq!(umpire.process_turn(Players::Ourself, &PlayerAction { lucky_number: config.net_touch_probability }),
-                   PingPongEvent::Score { point_winning_player: Players::Opponent, last_player_action: _, last_fault: FaultEvents::NetBlock },
+                   PingPongEvent::Score { point_winning_player: Players::Opponent, last_player_action, last_fault: FaultEvents::NetBlock },
                    "Touching the net on the 3rd service attempt is a hard fault (like a net block during the rally phase)");
         assert_eq!(umpire.state(), GameStates::WaitingForService { attempt: 1 }, "After the 3rd failed attempt, the opponent wins a point and should service");
         assert_eq!(umpire.score, MatchScore { limit: 2, oneself: 0, opponent: 1 }, "wrong scores were computed after a hard fault when servicing");
@@ -229,7 +229,7 @@ mod tests {
 
         // serviced straight into a hard fault
         assert_eq!(umpire.process_turn(Players::Opponent, &PlayerAction { lucky_number: config.ball_out_probability }),
-                   PingPongEvent::Score { point_winning_player: Players::Ourself, last_player_action: _, last_fault: FaultEvents::BallOut },
+                   PingPongEvent::Score { point_winning_player: Players::Ourself, last_player_action, last_fault: FaultEvents::BallOut },
                    "Servicing the ball out wasn't identified");
         assert_eq!(umpire.score, MatchScore { limit: 2, oneself: 1, opponent: 1 }, "Servicing the ball out should give a score to the opponent");
         assert_eq!(umpire.turn_player, Players::Ourself, "next turn's Player is wrong");

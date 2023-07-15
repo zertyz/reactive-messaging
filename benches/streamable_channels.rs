@@ -15,18 +15,16 @@ use criterion::{
     BenchmarkGroup,
     measurement::WallTime,
 };
-use std::{
-    sync::{
+use std::sync::{
         Arc,
         atomic::{
             AtomicBool,
             AtomicU8,
             Ordering::Relaxed,
         }
-    },
-};
+    };
 use reactive_mutiny::prelude::{ChannelCommon, ChannelUni, ChannelProducer};
-use tokio_stream::{StreamExt};
+use tokio_stream::StreamExt;
 
 
 /// Represents a reasonably sized message, similar to production needs
@@ -56,13 +54,13 @@ fn bench_same_thread_latency(criterion: &mut Criterion) {
     let (tokio_sender, tokio_receiver) = tokio::sync::mpsc::channel::<ItemType>(BUFFER_SIZE);
     let mut tokio_stream = tokio_stream::wrappers::ReceiverStream::new(tokio_receiver);
 
-    let bench_id = format!("reactive-mutiny's Atomic Stream");
+    let bench_id = "reactive-mutiny's Atomic Stream";
     group.bench_function(bench_id, |bencher| bencher.iter(|| {
         while !atomic_sender.try_send(|slot| *slot = ItemType::default()) {}
         while futures::executor::block_on(atomic_stream.next()).is_none() {}
     }));
 
-    let bench_id = format!("Tokio MPSC Stream");
+    let bench_id = "Tokio MPSC Stream";
     group.bench_function(bench_id, |bencher| bencher.iter(|| {
         while tokio_sender.try_send(ItemType::default()).is_err() {}
         while futures::executor::block_on(tokio_stream.next()).is_none() {}
@@ -90,7 +88,7 @@ fn bench_inter_thread_latency(criterion: &mut Criterion) {
     let mut tokio_stream = tokio_stream::wrappers::ReceiverStream::new(tokio_receiver);
 
     fn baseline_it(group: &mut BenchmarkGroup<WallTime>) {
-        let bench_id = format!("Baseline -- thread signaling time");
+        let bench_id = "Baseline -- thread signaling time";
         crossbeam::scope(|scope| {
             let keep_running = Arc::new(AtomicBool::new(true));
             let keep_running_ref = keep_running.clone();
@@ -116,7 +114,7 @@ fn bench_inter_thread_latency(criterion: &mut Criterion) {
     }
 
     fn bench_it(group:          &mut BenchmarkGroup<WallTime>,
-                bench_id:       String,
+                bench_id:       &str,
                 mut send_fn:    impl FnMut() + Send,
                 mut receive_fn: impl FnMut()) {
         crossbeam::scope(move |scope| {
@@ -142,12 +140,12 @@ fn bench_inter_thread_latency(criterion: &mut Criterion) {
     baseline_it(&mut group);
 
     bench_it(&mut group,
-             format!("reactive-mutiny's Atomic Stream"),
+             "reactive-mutiny's Atomic Stream",
              || while !atomic_sender.try_send(|slot| *slot = ItemType::default()) {std::hint::spin_loop()},
              || while futures::executor::block_on(atomic_stream.next()).is_none() {std::hint::spin_loop()});
 
     bench_it(&mut group,
-             format!("Tokio MPSC Stream"),
+             "Tokio MPSC Stream",
              || while tokio_sender.try_send(ItemType::default()).is_err() {std::hint::spin_loop()},
              || while futures::executor::block_on(tokio_stream.next()).is_none() {std::hint::spin_loop()});
 
@@ -166,7 +164,7 @@ fn bench_same_thread_throughput(criterion: &mut Criterion) {
     let (tokio_sender, tokio_receiver) = tokio::sync::mpsc::channel::<ItemType>(BUFFER_SIZE);
     let mut tokio_stream = tokio_stream::wrappers::ReceiverStream::new(tokio_receiver);
 
-    let bench_id = format!("reactive-mutiny's Atomic Stream");
+    let bench_id = "reactive-mutiny's Atomic Stream";
     group.bench_function(bench_id, |bencher| bencher.iter(|| {
         for _ in 0..BUFFER_SIZE {
             while !atomic_sender.try_send(|slot| *slot = ItemType::default()) {};
@@ -176,7 +174,7 @@ fn bench_same_thread_throughput(criterion: &mut Criterion) {
         }
     }));
 
-    let bench_id = format!("Tokio MPSC Stream");
+    let bench_id = "Tokio MPSC Stream";
     group.bench_function(bench_id, |bencher| bencher.iter(|| {
         for _ in 0..BUFFER_SIZE {
             while tokio_sender.try_send(ItemType::default()).is_err() {};
@@ -203,7 +201,7 @@ fn bench_inter_thread_throughput(criterion: &mut Criterion) {
     let mut tokio_stream = tokio_stream::wrappers::ReceiverStream::new(tokio_receiver);
 
     fn bench_it(group:          &mut BenchmarkGroup<WallTime>,
-                bench_id:       String,
+                bench_id:       &str,
                 mut send_fn:    impl FnMut() + Send,
                 mut receive_fn: impl FnMut()) {
         crossbeam::scope(move |scope| {
@@ -222,14 +220,14 @@ fn bench_inter_thread_throughput(criterion: &mut Criterion) {
     }
 
     bench_it(&mut group,
-             format!("reactive-mutiny's Atomic Stream"),
+             "reactive-mutiny's Atomic Stream",
              || for _ in 0..BUFFER_SIZE {
                             if !atomic_sender.try_send(|slot| *slot = ItemType::default()) {std::hint::spin_loop();std::hint::spin_loop();std::hint::spin_loop()}
                         },
              || for _ in 0..(BUFFER_SIZE>>5) { while futures::executor::block_on(atomic_stream.next()).is_none() {std::hint::spin_loop()} });
 
     bench_it(&mut group,
-             format!("Tokio MPSC Stream"),
+             "Tokio MPSC Stream",
              || for _ in 0..BUFFER_SIZE {
                             if tokio_sender.try_send(ItemType::default()).is_err() {std::hint::spin_loop();std::hint::spin_loop();std::hint::spin_loop()};
                         },

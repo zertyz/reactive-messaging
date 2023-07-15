@@ -90,7 +90,7 @@ impl SocketClient {
         const TIMEOUT_MILLIS: u32 = 5000;
         warn!("Socket Client: Shutdown asked & initiated for client connected @ {}:{} -- timeout: {TIMEOUT_MILLIS}ms", self.ip, self.port);
         if let Err(_err) = self.processor_shutdown_signaler.send(TIMEOUT_MILLIS) {
-            Err(Box::from(format!("Socket Client BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix")))
+            Err(Box::from("Socket Client BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix"))
         } else {
             Ok(())
         }

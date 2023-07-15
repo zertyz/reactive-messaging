@@ -58,15 +58,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                         }
                     });
                 let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
-                let processor_stream = client_processor_ref2.dialog_processor(client_addr, port, peer, server_messages_stream)
+                // processor stream
+                client_processor_ref2.dialog_processor(client_addr, port, peer, server_messages_stream)
                     .inspect(move |client_message| {
                         if DEBUG {
                             ron_serializer(client_message, &mut debug_serializer_buffer)
                                 .expect("`ron_serializer()` of the received `ClientMessages`");
                             println!(">>>> {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
                         }
-                    });
-                processor_stream
+                    })
             }
         ).await?;
 

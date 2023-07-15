@@ -21,8 +21,8 @@ pub fn react_to_rally_event(umpire:                  &mut Umpire,
         if reported_event == expected_event {
             // the opponent successfully sent us the ball. Lets take an action to rebate it!
             let our_action = act();
-            let our_event = umpire.process_turn(Players::Ourself, &our_action);
-            our_event
+            // our event
+            umpire.process_turn(Players::Ourself, &our_action)
         } else {
             // game rule offense: unexpected event
             let broken_rule_description = format!("You said your action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
@@ -117,7 +117,7 @@ pub fn react_to_score(umpire: &mut Umpire, opponent_action: &PlayerAction, repor
 }
 
 /// Returns the oppositor to `player`
-pub fn opposite_player(player: Players) -> Players {
+pub fn _opposite_player(player: Players) -> Players {
     match player {
         Players::Ourself => Players::Opponent,
         Players::Opponent => Players::Ourself,

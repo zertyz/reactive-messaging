@@ -81,13 +81,17 @@ pub enum ClientMessages {
     /// Upon receiving this message, the server must close the connection.
     ContestedScore(MatchScore),
 
-    // `SocketServer` basic messages
-    ////////////////////////////////
+    /// The client may inquire the server about the math's config in place -- once the game has started.
+    /// The server returns with [ServerMessages::MatchConfig]
+    DumpConfig,
+
+    // `SocketServer` common messages
+    /////////////////////////////////
 
     /// Asks the server version, which should cause the server to respond with [ServerMessages::Version]
     Version,
     /// States that the last command wasn't correctly processed or was not recognized as valid
-    Error(/*reason: */String),
+    Error(/*explanation: */String),
     /// Issued by the client's local processor when no answer should be sent back to the server\
     /// -- we don't use this, as our processor is no longer a 1->1 map, but a 1->* flat_map
     NoAnswer,
@@ -105,11 +109,14 @@ pub enum ServerMessages {
     /// Issued after a [ClientMessages::Config] has been received, indicating the client should service the first ball of the game
     GameStarted,
 
+    /// When asked, at any time, through [ClientMessages::DumpConfig], informs the match config in place
+    MatchConfig(MatchConfig),
+
     /// The rally
     PingPongEvent(PingPongEvent),
 
-    // `SocketServer` basic messages
-    ////////////////////////////////
+    // `SocketServer` common messages
+    /////////////////////////////////
 
     /// After being asked by [ClientMessages::Version], tells the client which version of the server we're running
     Version(String),

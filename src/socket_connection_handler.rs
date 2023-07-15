@@ -419,7 +419,7 @@ fn to_responsive_stream<LocalMessages: ReactiveMessagingSerializer<LocalMessages
 
 /// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
 #[inline(always)]
-fn to_responsive_stream_of_fallibles<LocalMessages: ReactiveMessagingSerializer<LocalMessages> +
+fn _to_responsive_stream_of_fallibles<LocalMessages: ReactiveMessagingSerializer<LocalMessages> +
                                                     ResponsiveMessages<LocalMessages>          + Send + Sync + PartialEq + Debug + 'static>
                                     (peer:                     Arc<Peer<LocalMessages>>,
                                      request_processor_stream: impl Stream<Item = Result<LocalMessages, Box<dyn std::error::Error + Sync + Send>>>)
@@ -521,8 +521,8 @@ mod tests {
     async fn unresponsive_dialogs() {
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         const PORT               : u16  = 8570;
-        let client_secret = format!("open, sesame");
-        let server_secret = format!("now the 40 of you may enter");
+        let client_secret = String::from("open, sesame");
+        let server_secret = String::from("now the 40 of you may enter");
         let observed_secret = Arc::new(Mutex::new(None));
 
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
@@ -535,7 +535,7 @@ mod tests {
                                                    |connection_event| {
                                                        match connection_event {
                                                            ConnectionEvent::PeerConnected { peer } => {
-                                                               assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
+                                                               assert!(peer.sender.try_send_movable(String::from("Welcome! State your business!")), "couldn't send");
                                                            },
                                                            ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => {},
                                                            ConnectionEvent::ApplicationShutdown { timeout_ms } => {
@@ -605,6 +605,7 @@ mod tests {
     /// One sends Ping(n); the other receives it and send Pong(n); the first receives it and sends Ping(n+1) and so on...\
     /// Latency is computed dividing the number of seconds per n*2 (we care about the server leg of the latency, while here we measure the round trip client<-->server)
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn latency_measurements() {
         const TEST_DURATION_MS:    u64  = 2000;
         const TEST_DURATION_NS:    u64  = TEST_DURATION_MS * 1e6 as u64;
@@ -638,7 +639,7 @@ mod tests {
                                                   match connection_event {
                                                       ConnectionEvent::PeerConnected { peer } => {
                                                           // conversation starter
-                                                          assert!(peer.sender.try_send_movable(format!("Ping(0)")), "couldn't send");
+                                                          assert!(peer.sender.try_send_movable(String::from("Ping(0)")), "couldn't send");
                                                       },
                                                       ConnectionEvent::PeerDisconnected { .. } => {},
                                                       ConnectionEvent::ApplicationShutdown { .. } => {},
@@ -684,6 +685,7 @@ mod tests {
     /// When a client floods the server with messages, it should, at most, screw just that client up... or, maybe, not even that!\
     /// This test works like the latency test, but we don't wait for the answer to come to send another one -- we just keep sending like crazy\
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn message_flooding_throughput() {
         const TEST_DURATION_MS:    u64  = 2000;
         const LISTENING_INTERFACE: &str = "127.0.0.1";
@@ -767,7 +769,7 @@ mod tests {
         let unordered = unordered.load(Relaxed);
         let sent_messages_count = sent_messages_count.load(Relaxed);
         let received_messages_percent = 100.0 * (received_messages_count as f64 / sent_messages_count as f64);
-        println!("    {} received messages {}", received_messages_count, if unordered == 0 {format!("in order")} else {format!("unordered -- ordering broke at message #{}", unordered)});
+        println!("    {} received messages {}", received_messages_count, if unordered == 0 {"in order".into()} else {format!("unordered -- ordering broke at message #{}", unordered)});
         println!("    {:.2}% of sent ones", received_messages_percent);
 
         assert_eq!(unordered, 0, "Server should have received messages in order, but it was broken at message #{} -- total received was {}", unordered, received_messages_count);
@@ -786,8 +788,8 @@ mod tests {
     async fn responsive_dialogs() {
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         const PORT               : u16  = 8573;
-        let client_secret = format!("open, sesame");
-        let server_secret = format!("now the 40 of you may enter");
+        let client_secret = String::from("open, sesame");
+        let server_secret = String::from("now the 40 of you may enter");
         let observed_secret = Arc::new(Mutex::new(None));
 
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
@@ -801,7 +803,7 @@ mod tests {
             move |_client_addr, _client_port, peer, client_messages_stream| {
                let client_secret_ref = client_secret_ref.clone();
                let server_secret_ref = server_secret_ref.clone();
-                assert!(peer.sender.try_send_movable(format!("Welcome! State your business!")), "couldn't send");
+                assert!(peer.sender.try_send_movable(String::from("Welcome! State your business!")), "couldn't send");
                 client_messages_stream.flat_map(move |client_message: SocketProcessorDerivedType<String>| {
                    stream::iter([
                        format!("Client just sent '{}'", client_message),

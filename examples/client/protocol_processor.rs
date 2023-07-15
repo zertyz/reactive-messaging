@@ -82,6 +82,11 @@ impl ClientProtocolProcessor {
                     vec![ClientMessages::Version]
                 },
 
+                ServerMessages::MatchConfig(match_config) => {
+                    info!("Server told us it is using {:?}", match_config);
+                    vec![/*ClientMessages::NoAnswer*/]
+                }
+
                 ServerMessages::PingPongEvent(reported_ping_pong_event) => {
                     // ClientMessages::PingPongEvent(PingPongEvent::TurnFlip { player_action: PlayerAction { lucky_number: 0.11025572 }, resulting_event: TurnFlipEvents::SuccessfulRebate })
                     match reported_ping_pong_event {

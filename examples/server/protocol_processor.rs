@@ -2,11 +2,9 @@
 
 use std::cell::UnsafeCell;
 use std::sync::Arc;
-use reactive_messaging::{
-    prelude::{
-        Peer,
-        ProcessorRemoteStreamType
-    },
+use reactive_messaging::prelude::{
+    Peer,
+    ProcessorRemoteStreamType
 };
 use crate::common::{
     logic::{ping_pong_logic::Umpire,
@@ -31,13 +29,18 @@ unsafe impl Sync for Session {}
 pub struct ServerProtocolProcessor {
     sessions: Arc<DashMap<u32, Arc<Session>>>,
 }
+impl Default for ServerProtocolProcessor {
+    fn default() -> Self {
+        Self {
+            sessions: Arc::new(DashMap::new()),
+        }
+    }
+}
 
 impl ServerProtocolProcessor {
 
     pub fn new() -> Self {
-        Self {
-            sessions: Arc::new(DashMap::new()),
-        }
+        Self::default()
     }
 
     pub fn server_events_callback(&self, connection_event: ConnectionEvent<ServerMessages>) {
@@ -159,6 +162,10 @@ impl ServerProtocolProcessor {
                 ClientMessages::EndorsedScore => {
                     vec![ServerMessages::GoodBye]
                 },
+
+                ClientMessages::DumpConfig => {
+                    vec![ServerMessages::MatchConfig(*umpire.config())]
+                }
 
                 ClientMessages::Error(err) => {
                     error!("Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
