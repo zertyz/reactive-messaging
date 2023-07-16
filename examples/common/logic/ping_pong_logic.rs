@@ -167,7 +167,7 @@ pub fn act() -> PlayerAction {
 }
 
 
-/// Unit tests the [tokio_message_io](self) module
+/// Unit tests the [ping_ping_logic](self) module
 #[cfg(any(test,doc))]
 mod tests {
     use super::*;

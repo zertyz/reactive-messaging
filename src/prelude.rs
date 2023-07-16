@@ -8,7 +8,7 @@ use crate::types::*;
 
 pub use super::socket_connection_handler::Peer;
 
-use reactive_mutiny::prelude::advanced::{MutinyStream};
+use reactive_mutiny::prelude::advanced::MutinyStream;
 /// Type for the `Stream` we create when reading from the remote peer.\
 /// This type is intended to be used only for the first level of `dialog_processor_builder()`s you pass to
 /// the [SocketClient] or [SocketServer], as Rust Generics isn't able to infer a generic `Stream` type

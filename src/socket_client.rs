@@ -41,16 +41,19 @@ impl SocketClient {
     /// an object through which the caller may inquire some stats (if opted in) and request
     /// the client to disconnect.\
     /// The given `dialog_processor` will produce non-futures & non-fallibles `ClientMessages` that will be sent to the server.
+    #[must_use = "the client won't do a thing if its value isn't hold until the disconnection time"]
     pub async fn spawn_responsive_processor<ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug + 'static,
                                             ClientMessages:                 ReactiveMessagingSerializer<ClientMessages>   +
                                                                             ResponsiveMessages<ClientMessages>            + Send + Sync + PartialEq + Debug + 'static,
                                             ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
-                                            ClientStreamType:               Stream<Item=ClientMessages>                   + Send + 'static>
-                                           (ip:                         String,
+                                            ClientStreamType:               Stream<Item=ClientMessages>                   + Send + 'static,
+                                            IntoString:                     Into<String>>
+                                           (ip:                         IntoString,
                                             port:                       u16,
                                             connection_events_callback: impl Fn(ConnectionEvent<ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                             processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<ClientMessages>>, /*remote_messages_stream: */ProcessorRemoteStreamType<ServerMessages>) -> ClientStreamType + Send + Sync + 'static)
                                            -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let ip = ip.into();
         let (processor_shutdown_sender, processor_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let connected_state = Arc::new(AtomicBool::new(false));
         let connection_events_callback = upgrade_to_connected_state_tracking(&connected_state, connection_events_callback);
@@ -64,16 +67,19 @@ impl SocketClient {
     /// the client to disconnect.\
     /// The given `dialog_processor` will produce non-futures & non-fallibles items that won't be sent to the server
     /// -- if you want the processor to produce "answer messages" to the server, see [SocketClient::spawn_responsive_processor()].
+    #[must_use = "the client won't do a thing if its value isn't hold until the disconnection time"]
     pub async fn spawn_unresponsive_processor<ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug + 'static,
                                               ClientMessages:                 ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
                                               OutputStreamItemsType:                                                          Send + Sync             + Debug + 'static,
                                               OutputStreamType:               Stream<Item=OutputStreamItemsType>            + Send                            + 'static,
-                                              ConnectionEventsCallbackFuture: Future<Output=()>                             + Send>
-                                             (ip:                         String,
+                                              ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
+                                              IntoString:                     Into<String>>
+                                             (ip:                         IntoString,
                                               port:                       u16,
                                               connection_events_callback: impl Fn(ConnectionEvent<ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                               processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<ClientMessages>>, /*remote_messages_stream: */ProcessorRemoteStreamType<ServerMessages>) -> OutputStreamType + Send + Sync + 'static)
                                              -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let ip = ip.into();
         let (processor_shutdown_sender, processor_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let connected_state = Arc::new(AtomicBool::new(false));
         let connection_events_callback = upgrade_to_connected_state_tracking(&connected_state, connection_events_callback);
@@ -86,11 +92,10 @@ impl SocketClient {
         self.connected.load(Relaxed)
     }
 
-    pub fn shutdown(self) -> Result<(), Box<dyn std::error::Error>> {
-        const TIMEOUT_MILLIS: u32 = 5000;
-        warn!("Socket Client: Shutdown asked & initiated for client connected @ {}:{} -- timeout: {TIMEOUT_MILLIS}ms", self.ip, self.port);
-        if let Err(_err) = self.processor_shutdown_signaler.send(TIMEOUT_MILLIS) {
-            Err(Box::from("Socket Client BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix"))
+    pub fn shutdown(self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error>> {
+        warn!("Socket Client: Shutdown asked & initiated for client connected @ {}:{} -- timeout: {timeout_ms}ms", self.ip, self.port);
+        if let Err(_err) = self.processor_shutdown_signaler.send(timeout_ms) {
+            Err(Box::from("Socket Client BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix!"))
         } else {
             Ok(())
         }
