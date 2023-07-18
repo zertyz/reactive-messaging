@@ -22,6 +22,8 @@ const SERVER_IP: &str = "127.0.0.1";
 const PORT:      u16  = 1234;
 const INSTANCES: u16  = 2;
 
+const BUFFERED_MESSAGES_PER_PEER_COUNT: usize = 2048;
+
 #[cfg(debug_assertions)]
 const DEBUG: bool = true;
 #[cfg(not(debug_assertions))]
@@ -42,12 +44,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         let client_processor_ref1 = Arc::new(ClientProtocolProcessor::new());
         let client_processor_ref2 = Arc::clone(&client_processor_ref1);
 
-        let socket_client = reactive_messaging::SocketClient::spawn_responsive_processor(SERVER_IP.to_string(), PORT,
+        let socket_client = reactive_messaging::SocketClient::<BUFFERED_MESSAGES_PER_PEER_COUNT>::spawn_responsive_processor(SERVER_IP.to_string(), PORT,
             move |connection_event| {
                 client_processor_ref1.client_events_callback(connection_event);
                 future::ready(())
             },
-            move |client_addr, port, peer, server_messages_stream: ProcessorRemoteStreamType<ServerMessages>| {
+            move |client_addr, port, peer, server_messages_stream: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>| {
                 let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
                 let server_messages_stream = server_messages_stream
                     .inspect(move |server_message| {

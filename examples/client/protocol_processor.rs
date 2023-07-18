@@ -37,12 +37,12 @@ const MATCH_CONFIG: MatchConfig = MatchConfig {
     ball_out_probability:   0.007,
 };
 
-pub struct ClientProtocolProcessor {
+pub struct ClientProtocolProcessor<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> {
     start_instant:     Instant,
     in_messages_count: AtomicU64,
 }
 
-impl ClientProtocolProcessor {
+impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ClientProtocolProcessor<BUFFERED_MESSAGES_PER_PEER_COUNT> {
 
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -51,7 +51,7 @@ impl ClientProtocolProcessor {
         })
     }
 
-    pub fn client_events_callback(self: &Arc<Self>, connection_event: ConnectionEvent<ClientMessages>) {
+    pub fn client_events_callback(self: &Arc<Self>, connection_event: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 debug!("Connected: {:?}", peer);
@@ -70,8 +70,13 @@ impl ClientProtocolProcessor {
         }
     }
 
-    pub fn dialog_processor<RemoteStreamType: Stream<Item=SocketProcessorDerivedType<ServerMessages>>>
-                           (self: &Arc<Self>, server_addr: String, port: u16, peer: Arc<Peer<ClientMessages>>, server_messages_stream: RemoteStreamType) -> impl Stream<Item=ClientMessages> {
+    pub fn dialog_processor<RemoteStreamType: Stream<Item=SocketProcessorDerivedType<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>>>
+                           (self:                   &Arc<Self>,
+                            server_addr:            String,
+                            port:                   u16,
+                            peer:                   Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>>,
+                            server_messages_stream: RemoteStreamType)
+                           -> impl Stream<Item=ClientMessages> {
         let cloned_self = Arc::clone(self);
         let mut umpire = Umpire::new(&MATCH_CONFIG, Players::Ourself);
         server_messages_stream.map(move |server_message| {

@@ -18,5 +18,9 @@ use reactive_mutiny::prelude::advanced::MutinyStream;
 /// ```no_compile
 ///     fn dialog_processor<RemoteStreamType: Stream<Item=SocketProcessorDerivedType<RemoteMessages>>>
 ///                        (remote_messages_stream: RemoteStreamType) -> impl Stream<Item=LocalMessages> { ... }
-pub type ProcessorRemoteStreamType<RemoteMessagesType> = MutinyStream<'static, RemoteMessagesType, SocketProcessorChannelType<RemoteMessagesType>, SocketProcessorDerivedType<RemoteMessagesType>>;
+pub type ProcessorRemoteStreamType<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
+                                   RemoteMessagesType>
+    = MutinyStream<'static, RemoteMessagesType,
+                            SocketProcessorChannelType<BUFFERED_MESSAGES_PER_PEER_COUNT, RemoteMessagesType>,
+                            SocketProcessorDerivedType<BUFFERED_MESSAGES_PER_PEER_COUNT, RemoteMessagesType>>;
 

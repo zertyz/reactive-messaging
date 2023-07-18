@@ -1,4 +1,4 @@
-mod config;
+pub(crate) mod config;
 
 mod socket_connection_handler;
 pub use crate::socket_connection_handler::ResponsiveMessages;

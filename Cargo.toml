@@ -1,6 +1,6 @@
 [package]
 name          = "reactive-messaging"
-version       = "0.1.5"
+version       = "0.2.0"
 edition       = "2021"
 description   = "Reactive client/server communications, focused on high performance"
 keywords      = ["reactive", "event-driven", "socket", "messaging", "transport"]
@@ -60,8 +60,8 @@ minstant       = "0.1"  # (real) time measurements through RDTSC instruction (wi
 
 # command-line parsing
 structopt    = "0.3"                                            # command line parsing
-strum        = { version = "0.24", features = ["derive"] }      # enums serialization/deserialization
-strum_macros = "0.24"
+strum        = { version = "0.25", features = ["derive"] }      # enums serialization/deserialization
+strum_macros = "0.25"
 chrono       = "0"
 
 # console UI
@@ -72,7 +72,7 @@ sloggers    = "2"
 
 # deprecated
 lazy_static    = "1.4"  # as of 2023-03-29: use `one_cell` instead
-neat-date-time = "0.1"  # as of 2023-04-05: scheduled to be removed once ogre is removed from here
+neat-date-time = "0.2"  # as of 2023-04-05: scheduled to be removed once ogre is removed from here
 
 # dependencies for benchmarks
 #############################

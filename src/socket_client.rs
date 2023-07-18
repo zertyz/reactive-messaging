@@ -6,7 +6,8 @@ use crate::{
     prelude::ProcessorRemoteStreamType,
     socket_connection_handler::{self, Peer},
     ReactiveMessagingDeserializer,
-    ResponsiveMessages, ReactiveMessagingSerializer,
+    ResponsiveMessages,
+    ReactiveMessagingSerializer,
 };
 use std::{
     fmt::Debug,
@@ -23,8 +24,10 @@ use log::warn;
 
 
 /// The handle to define, start and shutdown a Reactive Client for Socket Connections
+/// `BUFFERED_MESSAGES_PER_PEER_COUNT` is the number of messages that may be produced ahead of sending (to the server)
+///                                    as well as the number of messages that this client may accumulate from the server before denying new ones
 #[derive(Debug)]
-pub struct SocketClient {
+pub struct SocketClient<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> {
     /// false if a disconnection happened, as tracked by the socket logic
     connected: Arc<AtomicBool>,
     /// the server ip of the connection
@@ -35,7 +38,7 @@ pub struct SocketClient {
     processor_shutdown_signaler: Sender<u32>,
 }
 
-impl SocketClient {
+impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> SocketClient<BUFFERED_MESSAGES_PER_PEER_COUNT> {
 
     /// Spawns a task to connect to the server @ `ip` & `port` and returns, immediately,
     /// an object through which the caller may inquire some stats (if opted in) and request
@@ -48,10 +51,12 @@ impl SocketClient {
                                             ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
                                             ClientStreamType:               Stream<Item=ClientMessages>                   + Send + 'static,
                                             IntoString:                     Into<String>>
+
                                            (ip:                         IntoString,
                                             port:                       u16,
-                                            connection_events_callback: impl Fn(ConnectionEvent<ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                            processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<ClientMessages>>, /*remote_messages_stream: */ProcessorRemoteStreamType<ServerMessages>) -> ClientStreamType + Send + Sync + 'static)
+                                            connection_events_callback: impl Fn(ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>)                                                                                                                                                      -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                            processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>>, /*remote_messages_stream: */ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>) -> ClientStreamType               + Send + Sync + 'static)
+
                                            -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         let ip = ip.into();
         let (processor_shutdown_sender, processor_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
@@ -74,10 +79,12 @@ impl SocketClient {
                                               OutputStreamType:               Stream<Item=OutputStreamItemsType>            + Send                            + 'static,
                                               ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
                                               IntoString:                     Into<String>>
+
                                              (ip:                         IntoString,
                                               port:                       u16,
-                                              connection_events_callback: impl Fn(ConnectionEvent<ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                              processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<ClientMessages>>, /*remote_messages_stream: */ProcessorRemoteStreamType<ServerMessages>) -> OutputStreamType + Send + Sync + 'static)
+                                              connection_events_callback: impl Fn(ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>)                                                                                                                                                      -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                              processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>>, /*remote_messages_stream: */ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>) -> OutputStreamType               + Send + Sync + 'static)
+
                                              -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         let ip = ip.into();
         let (processor_shutdown_sender, processor_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
@@ -104,11 +111,15 @@ impl SocketClient {
 }
 
 /// Upgrades the user provided `connection_events_callback` into a callback able to keep track of disconnection events
-fn upgrade_to_connected_state_tracking<ClientMessages:                 ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
-                                       ConnectionEventsCallbackFuture: Future<Output=()>                        + Send>
+fn upgrade_to_connected_state_tracking<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
+                                       ClientMessages:                         ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
+                                       ConnectionEventsCallbackFuture:         Future<Output=()>                        + Send>
+
                                       (connected_state:                          &Arc<AtomicBool>,
-                                       user_provided_connection_events_callback: impl Fn(ConnectionEvent<ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
-                                      -> impl Fn(ConnectionEvent<ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static {
+                                       user_provided_connection_events_callback: impl Fn(ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+
+                                      -> impl Fn(ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static {
+
     let connected_state = Arc::clone(connected_state);
     move |connection_event | {
         if let ConnectionEvent::PeerConnected { .. } = connection_event {

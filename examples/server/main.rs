@@ -12,6 +12,7 @@ use log::warn;
 const LISTENING_INTERFACE: &str = "0.0.0.0";
 const LISTENING_PORT:      u16  = 1234;
 
+const BUFFERED_MESSAGES_PER_PEER_COUNT: usize = 2048;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -22,14 +23,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);
 
-    let mut socket_server = reactive_messaging::SocketServer::new(LISTENING_INTERFACE.to_string(), LISTENING_PORT);
+    let mut socket_server = reactive_messaging::SocketServer::<BUFFERED_MESSAGES_PER_PEER_COUNT>::new(LISTENING_INTERFACE.to_string(), LISTENING_PORT);
 
     socket_server.spawn_responsive_processor(
         move |connection_events| {
             server_processor_ref1.server_events_callback(connection_events);
             future::ready(())
         },
-        move |client_addr, port, peer, client_messages_stream: ProcessorRemoteStreamType<ClientMessages>| {
+        move |client_addr, port, peer, client_messages_stream: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>| {
             server_processor_ref2.dialog_processor(client_addr, port, peer, client_messages_stream)
         }
     ).await?;

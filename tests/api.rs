@@ -14,15 +14,18 @@ use reactive_messaging::{
 use futures::stream::StreamExt;
 
 
+const BUFFERED_MESSAGES_PER_PEER_COUNT: usize = 2048;
+
+
 /// Proves we are able to create a server whose processor outputs answers -- using a "Responsive Processor".
 /// Note that special messages mean "don't send anything" (as defined by the serializer) and that 
 /// answers may still be sent explicitly (using [Peer]).
 #[cfg_attr(not(doc), test)]
 fn server_with_responsive_processor() {
-    let mut server = SocketServer::new("0.0.0.0", 0);
+    let mut server = SocketServer::<BUFFERED_MESSAGES_PER_PEER_COUNT>::new("0.0.0.0", 0);
     let _unused_future = server.spawn_responsive_processor(
-        |_: ConnectionEvent<DummyResponsiveServerMessages>| async {},
-        |_, _, _, client_messages: ProcessorRemoteStreamType<DummyResponsiveClientMessages>| client_messages.map(|_| DummyResponsiveServerMessages::ProducedByTheServer)
+        |_: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyResponsiveServerMessages>| async {},
+        |_, _, _, client_messages: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyResponsiveClientMessages>| client_messages.map(|_| DummyResponsiveServerMessages::ProducedByTheServer)
     );
 }
 
@@ -30,10 +33,10 @@ fn server_with_responsive_processor() {
 /// Note that answers may still be sent, but they should be done explicitly
 #[cfg_attr(not(doc), test)]
 fn server_with_unresponsive_processor() {
-    let mut server = SocketServer::new("0.0.0.0", 0);
+    let mut server = SocketServer::<BUFFERED_MESSAGES_PER_PEER_COUNT>::new("0.0.0.0", 0);
     let _unused_future = server.spawn_unresponsive_processor(
-        |_: ConnectionEvent<DummyUnresponsiveServerMessages>| async {},
-        |_, _, _, client_messages: ProcessorRemoteStreamType<DummyUnresponsiveClientMessages>| client_messages.map(|_| "anything")
+        |_: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyUnresponsiveServerMessages>| async {},
+        |_, _, _, client_messages: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyUnresponsiveClientMessages>| client_messages.map(|_| "anything")
     );
 }
 
@@ -42,11 +45,11 @@ fn server_with_unresponsive_processor() {
 /// answers may still be sent explicitly (using [Peer]).
 #[cfg_attr(not(doc), test)]
 fn client_with_responsive_processor() {
-    let _unused_future = SocketClient::spawn_responsive_processor(
+    let _unused_future = SocketClient::<BUFFERED_MESSAGES_PER_PEER_COUNT>::spawn_responsive_processor(
         "0.0.0.0",
         0,
-        |_: ConnectionEvent<DummyResponsiveClientMessages>| async {},
-        |_, _, _, server_messages: ProcessorRemoteStreamType<DummyResponsiveServerMessages>| server_messages.map(|_| DummyResponsiveClientMessages::ProducedByTheClient)
+        |_: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyResponsiveClientMessages>| async {},
+        |_, _, _, server_messages: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyResponsiveServerMessages>| server_messages.map(|_| DummyResponsiveClientMessages::ProducedByTheClient)
     );
 }
 
@@ -54,11 +57,11 @@ fn client_with_responsive_processor() {
 /// Note that answers may still be sent, but they should be done explicitly
 #[cfg_attr(not(doc), test)]
 fn client_with_unresponsive_processor() {
-    let _unused_future = SocketClient::spawn_unresponsive_processor(
+    let _unused_future = SocketClient::<BUFFERED_MESSAGES_PER_PEER_COUNT>::spawn_unresponsive_processor(
         "0.0.0.0",
         0,
-        |_: ConnectionEvent<DummyUnresponsiveClientMessages>| async {},
-        |_, _, _, server_messages: ProcessorRemoteStreamType<DummyResponsiveServerMessages>| server_messages.map(|_| "anything")
+        |_: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyUnresponsiveClientMessages>| async {},
+        |_, _, _, server_messages: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyResponsiveServerMessages>| server_messages.map(|_| "anything")
     );
 }
 

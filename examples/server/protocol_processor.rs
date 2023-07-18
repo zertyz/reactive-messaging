@@ -26,10 +26,12 @@ struct Session {
 unsafe impl Send for Session {}
 unsafe impl Sync for Session {}
 
-pub struct ServerProtocolProcessor {
+pub struct ServerProtocolProcessor<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> {
     sessions: Arc<DashMap<u32, Arc<Session>>>,
 }
-impl Default for ServerProtocolProcessor {
+impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize>
+Default for
+ServerProtocolProcessor<BUFFERED_MESSAGES_PER_PEER_COUNT> {
     fn default() -> Self {
         Self {
             sessions: Arc::new(DashMap::new()),
@@ -37,13 +39,13 @@ impl Default for ServerProtocolProcessor {
     }
 }
 
-impl ServerProtocolProcessor {
+impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ServerProtocolProcessor<BUFFERED_MESSAGES_PER_PEER_COUNT> {
 
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn server_events_callback(&self, connection_event: ConnectionEvent<ServerMessages>) {
+    pub fn server_events_callback(&self, connection_event: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 debug!("Connected: {:?}", peer);
@@ -60,7 +62,14 @@ impl ServerProtocolProcessor {
         }
     }
 
-    pub fn dialog_processor(&self, _client_addr: String, _port: u16, peer: Arc<Peer<ServerMessages>>, client_messages_stream: ProcessorRemoteStreamType<ClientMessages>) -> impl Stream<Item=ServerMessages> {
+    pub fn dialog_processor(&self,
+                            _client_addr:           String,
+                            _port:                  u16,
+                            peer:                   Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>>,
+                            client_messages_stream: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>)
+
+                           -> impl Stream<Item=ServerMessages> {
+                            
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! Peer {:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback", peer))
                                                  .value()
@@ -69,9 +78,8 @@ impl ServerProtocolProcessor {
 
             // get the game's umpire instance or expect the first client message to be the one to create the match umpire
             let umpire_option = unsafe { &mut * (session.umpire.get()) };
-            let umpire = match umpire_option {
-                Some(umpire) => umpire,
-                None => return {
+            let Some(umpire) = umpire_option else {
+                return {
                     if let ClientMessages::Config(match_config) = &*client_message {
                         // instantiate the game
                         let umpire = Umpire::new(match_config, Players::Opponent);
