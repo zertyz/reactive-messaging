@@ -27,6 +27,11 @@ futures           = "0.3"     # brings in "Streams" / async iterators
 minstant          = "0.1"     # as fast as possible time measurements on X86_64 using TSC / RDTSC instructions -- avoiding system calls & context switches
 once_cell         = "1.17"    # lazy
 
+# for the const configs pattern
+strum        = { version = "0.25", features = ["derive"] }      # enums serialization/deserialization
+strum_macros = "0.25"
+
+
 
 # doc-dependencies
 ctor          = "0.2"    # setup and teardown for modules
@@ -42,7 +47,6 @@ lazy_static    = "1.4"  # as of 2023-03-29: use `one_cell` instead
 ctor          = "0.2"    # setup and teardown for modules
 simple_logger = "4.0"    # a dirty console logger
 log           = { version = "0.4", features = ["max_level_trace", "release_max_level_info"] }
-
 
 # dependencies for the examples
 ###############################
@@ -60,8 +64,6 @@ minstant       = "0.1"  # (real) time measurements through RDTSC instruction (wi
 
 # command-line parsing
 structopt    = "0.3"                                            # command line parsing
-strum        = { version = "0.25", features = ["derive"] }      # enums serialization/deserialization
-strum_macros = "0.25"
 chrono       = "0"
 
 # console UI

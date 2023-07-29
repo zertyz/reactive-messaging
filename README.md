@@ -17,7 +17,7 @@ Take a look at the ping-pong game in `example/`, which shows some nice patterns 
   - How straight-forward it is to create flexible server & client applications once the processors are complete. 
 
 
-# pre-alpha status
+# alpha status
 Research & core developments are just done:
   - The main network loop for both client & server is complete & fully optimized;
   - A nice message & network events API eases the modeling of elaborated protocols, with a fully working `example/`;
