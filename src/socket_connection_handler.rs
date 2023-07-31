@@ -50,14 +50,14 @@ use log::{trace, debug, warn, error};
 ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
 ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
 #[inline(always)]
-pub async fn server_loop_for_unresponsive_text_protocol<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                                                        ClientMessages:                         ReactiveMessagingDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                                        ServerMessages:                         ReactiveMessagingSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
-                                                        PipelineOutputType:                                                                     Send + Sync +             Debug + 'static,
-                                                        OutputStreamType:                       Stream<Item=PipelineOutputType>               + Send                            + 'static,
-                                                        ConnectionEventsCallbackFuture:         Future<Output=()>                             + Send,
-                                                        ConnectionEventsCallback:               Fn(/*server_event: */ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>)                                                                                                                                              -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                        ProcessorBuilderFn:                     Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>) -> OutputStreamType               + Send + Sync + 'static>
+pub async fn server_loop_for_unresponsive_text_protocol<const CONST_CONFIG:             usize,
+                                                        ClientMessages:                 ReactiveMessagingDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                                        ServerMessages:                 ReactiveMessagingSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
+                                                        PipelineOutputType:                                                             Send + Sync +             Debug + 'static,
+                                                        OutputStreamType:               Stream<Item=PipelineOutputType>               + Send                            + 'static,
+                                                        ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
+                                                        ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONST_CONFIG, ServerMessages>)                                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                        ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONST_CONFIG, ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<CONST_CONFIG, ClientMessages>) -> OutputStreamType               + Send + Sync + 'static>
 
                                                        (listening_interface:         String,
                                                         listening_port:              u16,
@@ -109,7 +109,7 @@ pub async fn server_loop_for_unresponsive_text_protocol<const BUFFERED_MESSAGES_
             };
 
             // prepares for the dialog to come with the (just accepted) connection
-            let sender = SenderChannel::<ServerMessages, BUFFERED_MESSAGES_PER_PEER_COUNT>::new(format!("Sender for client {addr}"));
+            let sender = SenderChannel::<ServerMessages, CONST_CONFIG>::new(format!("Sender for client {addr}"));
             let peer = Arc::new(Peer::new(sender, addr));
             let peer_ref1 = Arc::clone(&peer);
             let peer_ref2 = Arc::clone(&peer);
@@ -123,15 +123,15 @@ pub async fn server_loop_for_unresponsive_text_protocol<const BUFFERED_MESSAGES_
             };
 
             let connection_events_callback_ref = Arc::clone(&connection_events_callback);
-            let processor_sender = SocketProcessorUniType::<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>
+            let processor_sender = SocketProcessorUniType::<CONST_CONFIG, ClientMessages>
                                                                                                                                                   ::new(format!("Server processor for remote client {addr} @ {listening_interface}:{listening_port}"))
                 .spawn_non_futures_non_fallibles_executors(1,
-                                                        |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
-                                                        move |executor| {
-                                                            // issue the async disconnect event
-                                                            futures::executor::block_on(connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }));
-                                                            future::ready(())
-                                                        });
+                                                           |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
+                                                           move |executor| {
+                                                               // issue the async disconnect event
+                                                               futures::executor::block_on(connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }));
+                                                               future::ready(())
+                                                           });
 
             // spawn a task to handle communications with that client
             tokio::spawn(tokio::task::unconstrained(dialog_loop_for_textual_protocol(socket, peer, processor_sender)));
@@ -148,14 +148,14 @@ pub async fn server_loop_for_unresponsive_text_protocol<const BUFFERED_MESSAGES_
 ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
 ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
 #[inline(always)]
-pub async fn client_for_unresponsive_text_protocol<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                                                   ClientMessages:                         ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
-                                                   ServerMessages:                         ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                                   PipelineOutputType:                                                                     Send + Sync +             Debug + 'static,
-                                                   OutputStreamType:                       Stream<Item=PipelineOutputType>               + Send + 'static,
-                                                   ConnectionEventsCallbackFuture:         Future<Output=()>,
-                                                   ConnectionEventsCallback:               Fn(/*server_event: */ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>)                                                                                                                                              -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                   ProcessorBuilderFn:                     Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>>, /*server_messages_stream: */ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>) -> OutputStreamType>
+pub async fn client_for_unresponsive_text_protocol<const CONST_CONFIG:             usize,
+                                                   ClientMessages:                 ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
+                                                   ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                                   PipelineOutputType:                                                             Send + Sync +             Debug + 'static,
+                                                   OutputStreamType:               Stream<Item=PipelineOutputType>               + Send + 'static,
+                                                   ConnectionEventsCallbackFuture: Future<Output=()>,
+                                                   ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONST_CONFIG, ClientMessages>)                                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                   ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONST_CONFIG, ClientMessages>>, /*server_messages_stream: */ProcessorRemoteStreamType<CONST_CONFIG, ServerMessages>) -> OutputStreamType>
 
                                                   (server_ipv4_addr:            String,
                                                    port:                        u16,
@@ -169,7 +169,7 @@ pub async fn client_for_unresponsive_text_protocol<const BUFFERED_MESSAGES_PER_P
     let socket = TcpStream::connect(addr).await?;
 
     // prepares for the dialog to come with the (just accepted) connection
-    let sender = SenderChannel::<ClientMessages, BUFFERED_MESSAGES_PER_PEER_COUNT>::new(format!("Sender for client {addr}"));
+    let sender = SenderChannel::<ClientMessages, CONST_CONFIG>::new(format!("Sender for client {addr}"));
     let peer = Arc::new(Peer::new(sender, addr));
     let peer_ref1 = Arc::clone(&peer);
     let peer_ref2 = Arc::clone(&peer);
@@ -178,7 +178,7 @@ pub async fn client_for_unresponsive_text_protocol<const BUFFERED_MESSAGES_PER_P
     // issue the connection event
     connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
 
-    let processor_sender = SocketProcessorUniType::<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>
+    let processor_sender = SocketProcessorUniType::<CONST_CONFIG, ServerMessages>
                                                                                                                                         ::new(format!("Client Processor for remote server @ {addr}"))
         .spawn_non_futures_non_fallibles_executors(1,
                                                    |in_stream| dialog_processor_builder_fn(server_ipv4_addr.clone(), port, peer_ref1.clone(), in_stream),
@@ -216,21 +216,31 @@ pub async fn client_for_unresponsive_text_protocol<const BUFFERED_MESSAGES_PER_P
 ///   - `processor_sender` is a [reactive_mutiny::Uni], to which incoming messages will be sent;
 ///   - conversely, `peer.sender` is the [reactive_mutiny::Uni] to receive outgoing messages.
 #[inline(always)]
-async fn dialog_loop_for_textual_protocol<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                                          RemoteMessages:                         ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                          LocalMessages:                          ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static>
+async fn dialog_loop_for_textual_protocol<const CONST_CONFIG: usize,
+                                          RemoteMessages:     ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                          LocalMessages:      ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static>
 
                                          (mut textual_socket: TcpStream,
-                                          peer:               Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, LocalMessages>>,
-                                          processor_uni:      Arc<SocketProcessorUniType<BUFFERED_MESSAGES_PER_PEER_COUNT, RemoteMessages>>)
+                                          peer:               Arc<Peer<CONST_CONFIG, LocalMessages>>,
+                                          processor_uni:      Arc<SocketProcessorUniType<{CONST_CONFIG<<1}, {ConstConfig::extract_executor_instruments(CONST_CONFIG)}, RemoteMessages>>)
 
                                          -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
-    textual_socket.set_nodelay(true).map_err(|err| format!("error setting nodelay() for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
-    textual_socket.set_ttl(30).map_err(|err| format!("error setting ttl(30) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
-    textual_socket.set_linger(Some(Duration::from_secs(3))).map_err(|err| format!("error setting linger(Some(Duration::from_secs(3))) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
-    let mut read_buffer = Vec::with_capacity(CHAT_MSG_SIZE_HINT);
-    let mut serialization_buffer = Vec::with_capacity(CHAT_MSG_SIZE_HINT);
+    let config = ConstConfig::from(CONST_CONFIG);
+    // socket
+    if let Some(no_delay) = config.socket_options.no_delay {
+        textual_socket.set_nodelay(no_delay).map_err(|err| format!("error setting nodelay({no_delay}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
+    }
+    if let Some(hops_to_live) = config.socket_options.hops_to_live {
+        let hops_to_live = hops_to_live.get() as u32;
+        textual_socket.set_ttl(hops_to_live).map_err(|err| format!("error setting ttl({hops_to_live}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
+    }
+    if let Some(millis) = config.socket_options.linger_millis {
+        textual_socket.set_linger(Some(Duration::from_millis(millis as u64))).map_err(|err| format!("error setting linger({millis}ms) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
+    }
+
+    let mut read_buffer = Vec::with_capacity(config.msg_size_hint as usize);
+    let mut serialization_buffer = Vec::with_capacity(config.msg_size_hint as usize);
 
     let (mut sender_stream, _) = peer.sender.create_stream();
 
@@ -272,6 +282,8 @@ async fn dialog_loop_for_textual_protocol<const BUFFERED_MESSAGES_PER_PEER_COUNT
                                 match RemoteMessages::deserialize(line_bytes) {
                                     Ok(client_message) => {
                                         if !processor_uni.try_send(|slot| unsafe { std::ptr::write(slot, client_message) }) {
+                                            // TODO apply config.retrying_strategy here
+
                                             // breach in protocol: we cannot process further messages (they were received too fast)
                                             let msg = format!("Input message ignored: local processor is too busy -- `dialog_processor` is full of unprocessed messages ({}/{}) while attempting to enqueue another message from {:?} (peer id {})",
                                                                      processor_uni.channel.pending_items_count(), processor_uni.channel.buffer_size(), peer.peer_address, peer.peer_id);
@@ -288,6 +300,7 @@ async fn dialog_loop_for_textual_protocol<const BUFFERED_MESSAGES_PER_PEER_COUNT
                                         let sent = peer.sender.try_send(|slot| unsafe { std::ptr::write(slot, outgoing_error) });
                                         if !sent {
                                             // prevent bad clients from depleting our resources: if the out buffer is full due to bad input, we'll wait 1 sec to process the next message
+                                            // TODO apply config.retrying_strategy here
                                             tokio::time::sleep(Duration::from_millis(1000)).await;
                                         }
                                     }
@@ -334,14 +347,14 @@ async fn dialog_loop_for_textual_protocol<const BUFFERED_MESSAGES_PER_PEER_COUNT
 /// Similar to [server_loop_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
 /// answers of type `ServerMessages`, which will be automatically routed to the clients.
 #[inline(always)]
-pub async fn server_loop_for_responsive_text_protocol<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                                                      ClientMessages:                         ReactiveMessagingDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                                      ServerMessages:                         ReactiveMessagingSerializer<ServerMessages>   +
-                                                                                              ResponsiveMessages<ServerMessages>            + Send + Sync + PartialEq + Debug + 'static,
-                                                      OutputStreamType:                       Stream<Item=ServerMessages>                   + Send                            + 'static,
-                                                      ConnectionEventsCallbackFuture:         Future<Output=()>                             + Send,
-                                                      ConnectionEventsCallback:               Fn(/*server_event: */ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>)                                                                                                                                              -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                      ProcessorBuilderFn:                     Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>) -> OutputStreamType               + Send + Sync + 'static>
+pub async fn server_loop_for_responsive_text_protocol<const CONST_CONFIG: usize,
+                                                      ClientMessages:                 ReactiveMessagingDeserializer<ClientMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                                      ServerMessages:                 ReactiveMessagingSerializer<ServerMessages>   +
+                                                                                      ResponsiveMessages<ServerMessages>            + Send + Sync + PartialEq + Debug + 'static,
+                                                      OutputStreamType:               Stream<Item=ServerMessages>                   + Send                            + 'static,
+                                                      ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
+                                                      ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONST_CONFIG, ServerMessages>)                                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                      ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONST_CONFIG, ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<CONST_CONFIG, ClientMessages>) -> OutputStreamType               + Send + Sync + 'static>
 
                                                      (listening_interface:         String,
                                                       listening_port:              u16,
@@ -363,14 +376,14 @@ pub async fn server_loop_for_responsive_text_protocol<const BUFFERED_MESSAGES_PE
 /// Similar to [client_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
 /// answers of type `ClientMessages`, which will be automatically routed to the server.
 #[inline(always)]
-pub async fn client_for_responsive_text_protocol<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                                                 ClientMessages:                         ReactiveMessagingSerializer<ClientMessages> +
-                                                                                         ResponsiveMessages<ClientMessages>                + Send + Sync + PartialEq + Debug + 'static,
-                                                 ServerMessages:                         ReactiveMessagingDeserializer<ServerMessages>     + Send + Sync + PartialEq + Debug + 'static,
-                                                 OutputStreamType:                       Stream<Item=ClientMessages>                       + Send + 'static,
-                                                 ConnectionEventsCallbackFuture:         Future<Output=()>,
-                                                 ConnectionEventsCallback:               Fn(/*server_event: */ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>)                                                                                                                                              -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                 ProcessorBuilderFn:                     Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>>, /*server_messages_stream: */ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>) -> OutputStreamType>
+pub async fn client_for_responsive_text_protocol<const CONST_CONFIG: usize,
+                                                 ClientMessages:                 ReactiveMessagingSerializer<ClientMessages> +
+                                                                                 ResponsiveMessages<ClientMessages>                + Send + Sync + PartialEq + Debug + 'static,
+                                                 ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages>     + Send + Sync + PartialEq + Debug + 'static,
+                                                 OutputStreamType:               Stream<Item=ClientMessages>                       + Send + 'static,
+                                                 ConnectionEventsCallbackFuture: Future<Output=()>,
+                                                 ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONST_CONFIG, ClientMessages>)                                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                 ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONST_CONFIG, ClientMessages>>, /*server_messages_stream: */ProcessorRemoteStreamType<CONST_CONFIG, ServerMessages>) -> OutputStreamType>
 
                                                 (server_ipv4_addr:            String,
                                                  port:                        u16,
@@ -391,11 +404,11 @@ pub async fn client_for_responsive_text_protocol<const BUFFERED_MESSAGES_PER_PEE
 
 /// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
 #[inline(always)]
-fn to_responsive_stream<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                        LocalMessages: ReactiveMessagingSerializer<LocalMessages> + 
-                                       ResponsiveMessages<LocalMessages>          + Send + Sync + PartialEq + Debug + 'static>
+fn to_responsive_stream<const CONST_CONFIG: usize,
+                        LocalMessages:      ReactiveMessagingSerializer<LocalMessages> + 
+                                            ResponsiveMessages<LocalMessages>          + Send + Sync + PartialEq + Debug + 'static>
 
-                       (peer:                     Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, LocalMessages>>,
+                       (peer:                     Arc<Peer<CONST_CONFIG, LocalMessages>>,
                         request_processor_stream: impl Stream<Item = LocalMessages>)
 
                        -> impl Stream<Item = ()> {
@@ -413,6 +426,7 @@ fn to_responsive_stream<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
                 if sent {
                     // the usual case -- not stripped out since we want the branch prediction optimization as this is the usual case
                 } else {
+                    // TODO apply config.retrying_strategy here
                     warn!("Slow reader detected -- {:?} (peer id {}). Closing the connection...", peer.peer_address, peer.peer_id);
                     // peer is slow-reading (and, possibly, fast sending?) -- this is a protocol offence and the connection will be closed (as soon as all messages are sent?? names should be reviewed: gracefully_end_all_streams() & immediately_cancel_all_streams())
                     peer.sender.cancel_all_streams();
@@ -421,6 +435,7 @@ fn to_responsive_stream<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
                 trace!("SocketServer: processor choose to drop connection with {} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
                 if !is_no_answer {
                     let _sent = peer.sender.try_send(|slot| unsafe { std::ptr::write(slot,  outgoing) } );
+                    // TODO apply config.retrying_strategy here
                 }
                 peer.sender.cancel_all_streams();
             }
@@ -429,11 +444,11 @@ fn to_responsive_stream<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
 
 /// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
 #[inline(always)]
-fn _to_responsive_stream_of_fallibles<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                                      LocalMessages: ReactiveMessagingSerializer<LocalMessages> +
-                                                     ResponsiveMessages<LocalMessages>          + Send + Sync + PartialEq + Debug + 'static>
+fn _to_responsive_stream_of_fallibles<const CONST_CONFIG: usize,
+                                      LocalMessages:      ReactiveMessagingSerializer<LocalMessages> +
+                                                          ResponsiveMessages<LocalMessages>          + Send + Sync + PartialEq + Debug + 'static>
 
-                                    (peer:                     Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, LocalMessages>>,
+                                    (peer:                     Arc<Peer<CONST_CONFIG, LocalMessages>>,
                                      request_processor_stream: impl Stream<Item = Result<LocalMessages, Box<dyn std::error::Error + Sync + Send>>>)
 
                                     -> impl Stream<Item = ()> {
@@ -462,18 +477,18 @@ fn _to_responsive_stream_of_fallibles<const BUFFERED_MESSAGES_PER_PEER_COUNT: us
 static PEER_COUNTER: AtomicU32 = AtomicU32::new(0);
 pub type PeerId = u32;
 /// Represents a channel to a peer able to send out `MessageType` kinds of messages from "here" to "there"
-pub struct Peer<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                MessagesType:                           'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>> {
+pub struct Peer<const CONST_CONFIG: usize,
+                      MessagesType: 'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>> {
     pub peer_id:      PeerId,
-    pub sender:       Arc<SenderChannel<MessagesType, BUFFERED_MESSAGES_PER_PEER_COUNT>>,
+    pub sender:       Arc<SenderChannel<MessagesType, CONST_CONFIG>>,
     pub peer_address: SocketAddr,
 }
 
-impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-     MessagesType: 'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>>
-Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, MessagesType> {
+impl<const CONST_CONFIG: usize,
+           MessagesType: 'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>>
+Peer<CONST_CONFIG, MessagesType> {
 
-    pub fn new(sender: Arc<SenderChannel<MessagesType, BUFFERED_MESSAGES_PER_PEER_COUNT>>, peer_address: SocketAddr) -> Self {
+    pub fn new(sender: Arc<SenderChannel<MessagesType, CONST_CONFIG>>, peer_address: SocketAddr) -> Self {
         Self {
             peer_id: PEER_COUNTER.fetch_add(1, Relaxed),
             sender,
@@ -483,13 +498,13 @@ Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, MessagesType> {
 
 }
 
-impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-     MessagesType: 'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>>
+impl<const CONST_CONFIG: usize,
+           MessagesType: 'static + Send + Sync + PartialEq + Debug + ReactiveMessagingSerializer<MessagesType>>
 Debug for
-Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, MessagesType> {
+Peer<CONST_CONFIG, MessagesType> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Peer {{peer_id: {}, peer_address: '{}', sender: {}/{} pending messages}}",
-                  self.peer_id, self.peer_address, self.sender.pending_items_count(), BUFFERED_MESSAGES_PER_PEER_COUNT)
+                  self.peer_id, self.peer_address, self.sender.pending_items_count(), CONST_CONFIG)
     }
 }
 

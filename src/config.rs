@@ -1,22 +1,12 @@
 //! Contains constants and other configuration information affecting default & fixed behaviors of this library
 
-use std::{time::Duration, ops::RangeInclusive, num::NonZeroU8};
+use std::{ops::RangeInclusive, num::NonZeroU8};
 use reactive_mutiny::prelude::Instruments;
 use strum_macros::FromRepr;
 
 
-/// How many bytes to pre-allocate to each connected peer to receive their dialogues
-pub const CHAT_MSG_SIZE_HINT: usize = 1024;
-/// Default executor instruments for processing the server-side logic due to each client message
-pub const SOCKET_PROCESSOR_INSTRUMENTS: usize = Instruments::NoInstruments.into();
-/// Timeout to wait for any last messages to be sent to the peer when a disconnection was commanded
-pub const GRACEFUL_STREAM_ENDING_TIMEOUT_DURATION: Duration = Duration::from_millis(100);
-
-
-
 /// Specifies the channels (queues) from `reactive-mutiny` thay may be used to send/receive data.\
 /// On different hardware, the performance characteristics may vary.
-/// // 2 bits
 #[derive(Debug,PartialEq,FromRepr)]
 pub enum Channels {
     Atomic,
@@ -66,44 +56,6 @@ impl RetryingStrategies {
         }
     }
 }
-
-/// same as Option::<bool>::unwrap_or(fakse), but const
-const fn unwrap_bool_or_default(option: Option<bool>) -> bool {
-    match option {
-        Some(v) => v,
-        None => false,
-    }
-}
-/// same as Option::<u8>::unwrap_or(0), but const
-const fn unwrap_u8_or_default(option: Option<u8>) -> u8 {
-    match option {
-        Some(v) => v,
-        None => 0,
-    }
-}
-/// same as Option::<u16>::unwrap_or(0), but const
-const fn unwrap_u16_or_default(option: Option<u16>) -> u16 {
-    match option {
-        Some(v) => v,
-        None => 0,
-    }
-}
-/// same as Option::<u32>::unwrap_or(0), but const
-const fn unwrap_u32_or_default(option: Option<u32>) -> u32 {
-    match option {
-        Some(v) => v,
-        None => 0,
-    }
-}
-
-// same as Option::<NonZero*>::map(|v| v.get()).unwrap_or(0), but const
-const fn unwrap_non_zero_u8_or_default(option: Option<NonZeroU8>) -> u8 {
-    match option {
-        Some(v) => v.get(),
-        None => 0,
-    }
-}
-
 
 /// Socket options for the local peer to be set when the connection is stablished
 #[derive(Debug,PartialEq)]
@@ -164,29 +116,28 @@ impl SocketOptions {
 /// Usage examples:
 /// ```nocompile
 ///     see bellow
-/// // 19 bits
 #[derive(Debug,PartialEq)]
 pub struct ConstConfig {
     /// Pre-allocates the sender/receiver buffers to this value (power of 2).
     /// Setting it wisely may economize some `realloc` calls
-    msg_size_hint: u32,
+    pub msg_size_hint: u32,
     /// How many messages (per peer) may be enqueued for output (power of 2)
     /// before operations start to fail
-    sender_buffer: u32,
+    pub sender_buffer: u32,
     /// How many messages (per peer) may be enqueued for processing (power of 2)
     /// before operations start to fail
-    receiver_buffer: u32,
+    pub receiver_buffer: u32,
     /// How many milliseconds to wait before giving up waiting for a socket to close.\
     /// Set this taking [SocketOptions::linger_millis] into account
-    gracefull_close_timeout_millis: u16,
+    pub gracefull_close_timeout_millis: u16,
     /// Specifies what to do when operations fail (full buffers / connection droppings)
-    retrying_strategy: RetryingStrategies,
+    pub retrying_strategy: RetryingStrategies,
     /// Messes with the low level (system) socket options
-    socket_options: SocketOptions,
+    pub socket_options: SocketOptions,
     /// Allows changing the backing queue for the sender/receiver buffers
-    channel: Channels,
+    pub channel: Channels,
     /// Allows changing the Stream executor options in regard to logging & collected/reported metrics
-    executor_instruments: /*reactive_mutiny::*/Instruments,
+    pub executor_instruments: /*reactive_mutiny::*/Instruments,
 }
 
 #[warn(non_snake_case)]
@@ -214,6 +165,19 @@ impl ConstConfig {
     /// The 8 bits from `reactive-mutiny`
     const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 49..=57;
 
+
+    pub const fn default() -> ConstConfig {
+        ConstConfig {
+            msg_size_hint:                  1024,
+            sender_buffer:                  2048,
+            receiver_buffer:                2048,
+            gracefull_close_timeout_millis:  256,
+            retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(14),
+            socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
+            channel:                        Channels::Atomic,
+            executor_instruments:           Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
+        }
+    }
 
     /// For use when instantiating a generic struct that uses the "Const Config Pattern"
     /// -- when chosing a pre-defined configuration.\
@@ -261,9 +225,21 @@ impl ConstConfig {
         }
     }
 
-    // bellow this point: query functions for business logic configuration attributes
-    /////////////////////////////////////////////////////////////////////////////////
+    // query functions for business logic configuration attributes
+    //////////////////////////////////////////////////////////////
     // to be used by the struct in which the generic `const CONFIGS: usize` resides
+
+    pub const fn extract_receiver_buffer<const CONFIG: usize>() -> u32 {
+        let config = config.from();
+        config.receiver_buffer
+    }
+
+    pub const fn extract_executor_instruments<const CONFIG: usize>() -> usize {
+        let config = CONFIG.from();
+        config.executor_instruments.into()
+    }
+
+
     
     // /// Is logging on failures enabled?
     // pub const fn log(config: usize) -> bool {
@@ -358,6 +334,46 @@ const fn set_bits_from_power_of_2_u8(config: usize, bits: RangeInclusive<usize>,
     }
 }
 
+// const versions of some `Option<>` functions
+//////////////////////////////////////////////
+
+/// same as Option::<bool>::unwrap_or(fakse), but const
+const fn unwrap_bool_or_default(option: Option<bool>) -> bool {
+    match option {
+        Some(v) => v,
+        None => false,
+    }
+}
+/// same as Option::<u8>::unwrap_or(0), but const
+const fn unwrap_u8_or_default(option: Option<u8>) -> u8 {
+    match option {
+        Some(v) => v,
+        None => 0,
+    }
+}
+/// same as Option::<u16>::unwrap_or(0), but const
+const fn unwrap_u16_or_default(option: Option<u16>) -> u16 {
+    match option {
+        Some(v) => v,
+        None => 0,
+    }
+}
+/// same as Option::<u32>::unwrap_or(0), but const
+const fn unwrap_u32_or_default(option: Option<u32>) -> u32 {
+    match option {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+// same as Option::<NonZero*>::map(|v| v.get()).unwrap_or(0), but const
+const fn unwrap_non_zero_u8_or_default(option: Option<NonZeroU8>) -> u8 {
+    match option {
+        Some(v) => v.get(),
+        None => 0,
+    }
+}
+
 
 /// Unit tests & enforces the requisites of the [stream_executor](self) module.\
 /// Tests here mixes manual & automated assertions -- you should manually inspect the output of each one and check if the log outputs make sense
@@ -430,32 +446,3 @@ mod tests {
 
 
 }
-
-
-// /// A user struct, benefiting from having the entire configuration in a single generic parameter
-// struct MyStruct<const CONFIG: usize> {}
-// impl<const CONFIG: usize> MyStruct<CONFIG> {
-//     pub fn dump_config() {
-//         let config = ConstConfig::from(CONFIG);
-//         println!("Configs: {:?} -- log? {}; retry? {}; buffer_size: {}; a flag? {}",
-//                  config, ConstConfig::log(CONFIG), ConstConfig::retry(CONFIG),
-//                  ConstConfig::buffer_size(CONFIG), ConstConfig::flag(CONFIG));
-//     }
-// }
-
-// fn main() {
-
-//     // using predefined configs
-//     MyStruct::<{ConstConfig::LogAndRetry    {buffer_size:   128}.into()}>::dump_config();
-//     MyStruct::<{ConstConfig::LogButIgnore   {buffer_size:  4096}.into()}>::dump_config();
-//     MyStruct::<{ConstConfig::RetrySilently  {buffer_size: 32768}.into()}>::dump_config();
-//     MyStruct::<{ConstConfig::IgnoreSilently {buffer_size: 1<<20}.into()}>::dump_config();
-
-//     // using custom configs
-//     const CUSTOM_CONFIG: usize = ConstConfig::custom(&[
-//         ConstConfig::A_NEXT_FLAG,
-//         ConstConfig::BUFFER_SIZE(1<<31),
-//         ConstConfig::LOG,
-//     ]);
-//     MyStruct::<{CUSTOM_CONFIG}>::dump_config();
-// }

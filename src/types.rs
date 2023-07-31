@@ -1,7 +1,6 @@
 //! Common types used across this crate
 
 use crate::{
-    config::*,
     socket_connection_handler::Peer,
     ReactiveMessagingSerializer,
 };
@@ -21,9 +20,9 @@ use reactive_mutiny::prelude::advanced::{
 pub(crate) type SenderChannel<ItemType, const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> = reactive_mutiny::uni::channels::movable::atomic::Atomic::<'static, ItemType, BUFFERED_MESSAGES_PER_PEER_COUNT, 1>;
 
 // Uni types for handling socket connections
-pub(crate) type SocketProcessorUniType<    const BUFFERED_MESSAGES_PER_CLIENT_COUNT: usize, MessagesType> = UniZeroCopyAtomic<MessagesType, BUFFERED_MESSAGES_PER_CLIENT_COUNT, 1, SOCKET_PROCESSOR_INSTRUMENTS>;
-pub(crate) type SocketProcessorChannelType<const BUFFERED_MESSAGES_PER_CLIENT_COUNT: usize, MessagesType> = ChannelUniZeroCopyAtomic<MessagesType, BUFFERED_MESSAGES_PER_CLIENT_COUNT, 1>;
-pub        type SocketProcessorDerivedType<const BUFFERED_MESSAGES_PER_CLIENT_COUNT: usize, MessagesType> = OgreUnique<MessagesType, AllocatorAtomicArray<MessagesType, BUFFERED_MESSAGES_PER_CLIENT_COUNT>>;
+pub(crate) type SocketProcessorUniType    <const BUFFERED_MESSAGES_PER_CLIENT_COUNT: usize, const SOCKET_PROCESSOR_INSTRUMENTS: usize, MessagesType> = UniZeroCopyAtomic<MessagesType, BUFFERED_MESSAGES_PER_CLIENT_COUNT, 1, SOCKET_PROCESSOR_INSTRUMENTS>;
+pub(crate) type SocketProcessorChannelType<const BUFFERED_MESSAGES_PER_CLIENT_COUNT: usize, MessagesType>                                            = ChannelUniZeroCopyAtomic<MessagesType, BUFFERED_MESSAGES_PER_CLIENT_COUNT, 1>;
+pub        type SocketProcessorDerivedType<const BUFFERED_MESSAGES_PER_CLIENT_COUNT: usize, MessagesType>                                            = OgreUnique<MessagesType, AllocatorAtomicArray<MessagesType, BUFFERED_MESSAGES_PER_CLIENT_COUNT>>;
 
 /// The internal events a reactive processor (for a server or client) shares with the user code.\
 /// The user code may use those events to maintain a list of connected clients, be notified of stop/close/quit requests, init/deinit sessions, etc.
