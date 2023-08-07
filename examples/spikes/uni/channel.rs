@@ -3,28 +3,36 @@
 use std::{marker::PhantomData, sync::Arc};
 
 
-pub trait GenericChannel {
+pub trait GenericChannel<const BUFFER_SIZE: usize> {
+    const BUFFER_SIZE: usize;
+    type ItemType;
     type DerivedType;
 }
 
 
-pub struct ChannelAtomic<MsgType> {
+pub struct ChannelZeroCopy<const BUFFER_SIZE: usize, MsgType> {
     pub _phantom: PhantomData<MsgType>
 }
-impl<MsgType> ChannelAtomic<MsgType> {}
+impl<const BUFFER_SIZE: usize, MsgType> ChannelZeroCopy<BUFFER_SIZE, MsgType> {}
 
-impl<MsgType> GenericChannel for
-ChannelAtomic<MsgType> {
-    type DerivedType = Arc<MsgType>;
+impl<const BUFFER_SIZE: usize,
+     MsgType>
+GenericChannel<BUFFER_SIZE> for
+ChannelZeroCopy<BUFFER_SIZE, MsgType> {
+    const BUFFER_SIZE: usize = BUFFER_SIZE;
+    type ItemType            = MsgType;
+    type DerivedType         = Arc<MsgType>;
 }
 
 
-pub struct ChannelFullSync<MsgType> {
+pub struct ChannelMove<const BUFFER_SIZE: usize, MsgType> {
     pub _phantom: PhantomData<MsgType>
 }
-impl<MsgType> ChannelFullSync<MsgType> {}
+impl<const BUFFER_SIZE: usize, MsgType> ChannelMove<BUFFER_SIZE, MsgType> {}
 
-impl<MsgType> GenericChannel for
-ChannelFullSync<MsgType> {
-    type DerivedType = MsgType;
+impl<const BUFFER_SIZE: usize, MsgType> GenericChannel<BUFFER_SIZE> for
+ChannelMove<BUFFER_SIZE, MsgType> {
+    const BUFFER_SIZE: usize = BUFFER_SIZE;
+    type ItemType            = MsgType;
+    type DerivedType         = MsgType;
 }
