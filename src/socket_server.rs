@@ -5,7 +5,6 @@ use crate::ReactiveMessagingSerializer;
 use super::{
     ResponsiveMessages,
     types::*,
-    prelude::ProcessorRemoteStreamType,
     socket_connection_handler::{self, Peer},
     serde::ReactiveMessagingDeserializer,
 };
@@ -16,7 +15,18 @@ use std::{
 };
 use futures::{Stream, future::BoxFuture};
 use log::{warn,error};
+use reactive_mutiny::prelude::advanced::{Instruments, GenericUni, ChannelUniMoveAtomic, UniZeroCopyAtomic, FullDuplexUniChannel};
 use tokio::sync::Mutex;
+use crate::config::ConstConfig;
+use crate::socket_connection_handler::SocketConnectionHandler;
+
+
+// TO BE DETERMINED BY THE CONFIG PARAMS
+pub const DEFAULT_CONFIG: usize            = ConstConfig::default().into();
+pub const MESSAGES_BUFFER_SIZE: usize      = 1024;
+pub const MESSAGING_UNI_INSTRUMENTS: usize = {Instruments::LogsWithMetrics.into()};
+type DefaultUni<PayloadType>               = MessagingAtomicUniType<MESSAGES_BUFFER_SIZE, MESSAGING_UNI_INSTRUMENTS, PayloadType>;
+type DefaultUniChannel<PayloadType>        = MessagingMoveChannelType<MESSAGES_BUFFER_SIZE, PayloadType>;
 
 
 /// The handle to define, start and shutdown a Reactive Server for Socket Connections.\
@@ -51,6 +61,11 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> SocketServer<BUFFERED_MESSAG
         }
     }
 
+    /// Useful for Generic Programming, shares the internal generic parameter
+    pub const fn uni_instruments() -> usize {
+        MESSAGING_UNI_INSTRUMENTS
+    }
+
     /// Spawns a task to run a Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
     /// an object through which the caller may inquire some stats (if opted in) and request the server to shutdown.\
     /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `reactive-mutiny` Stream
@@ -60,8 +75,8 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> SocketServer<BUFFERED_MESSAG
                                                                                     ResponsiveMessages<ServerMessages>            + Send + Sync + PartialEq + Debug + 'static,
                                             ServerStreamType:                       Stream<Item=ServerMessages>                   + Send + 'static,
                                             ConnectionEventsCallbackFuture:         Future<Output=()> + Send,
-                                            ConnectionEventsCallback:               Fn(/*server_event: */ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>)                                                                                                                                              -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                            ProcessorBuilderFn:                     Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>) -> ServerStreamType + Send + Sync + 'static>
+                                            ConnectionEventsCallback:               Fn(/*server_event: */ConnectionEvent<DefaultUniChannel<ServerMessages>>)                                                                                                                                               -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                            ProcessorBuilderFn:                     Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<DefaultUniChannel<ServerMessages>>>, /*client_messages_stream: */MessagingMutinyStream<MESSAGING_UNI_INSTRUMENTS, DefaultUni<ClientMessages>>) -> ServerStreamType + Send + Sync + 'static>
 
                                            (&mut self,
                                             connection_events_callback:  ConnectionEventsCallback,
@@ -78,8 +93,8 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> SocketServer<BUFFERED_MESSAG
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
-        socket_connection_handler::server_loop_for_responsive_text_protocol::
-            <BUFFERED_MESSAGES_PER_PEER_COUNT, _, _, _, _, _, _>
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_CONFIG, _, _, DefaultUni<ClientMessages>, DefaultUniChannel<ServerMessages>, MESSAGING_UNI_INSTRUMENTS>::new();
+        socket_connection_handler.server_loop_for_responsive_text_protocol
             (listening_interface.to_string(),
              port,
              server_shutdown_receiver,
@@ -98,8 +113,8 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> SocketServer<BUFFERED_MESSAG
                                               OutputStreamItemsType:                                                          Send + Sync             + Debug + 'static,
                                               ServerStreamType:               Stream<Item=OutputStreamItemsType>            + Send + 'static,
                                               ConnectionEventsCallbackFuture: Future<Output=()> + Send,
-                                              ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>)                                                                                                                                              -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                              ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>>, /*client_messages_stream: */ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>) -> ServerStreamType + Send + Sync + 'static>
+                                              ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<DefaultUniChannel<ServerMessages>>)                                                                                                                                             -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                              ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<DefaultUniChannel<ServerMessages>>>, /*client_messages_stream: */MessagingMutinyStream<MESSAGING_UNI_INSTRUMENTS, DefaultUni<ClientMessages>>) -> ServerStreamType + Send + Sync + 'static>
 
                                              (&mut self,
                                               connection_events_callback:  ConnectionEventsCallback,
@@ -116,11 +131,12 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> SocketServer<BUFFERED_MESSAG
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
-        socket_connection_handler::server_loop_for_unresponsive_text_protocol(listening_interface.to_string(),
-                                                                              port,
-                                                                              server_shutdown_receiver,
-                                                                              connection_events_callback,
-                                                                              dialog_processor_builder_fn).await
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_CONFIG, _, _, DefaultUni<ClientMessages>, DefaultUniChannel<ServerMessages>, MESSAGING_UNI_INSTRUMENTS>::new();
+        socket_connection_handler.server_loop_for_unresponsive_text_protocol(listening_interface.to_string(),
+                                                                             port,
+                                                                             server_shutdown_receiver,
+                                                                             connection_events_callback,
+                                                                             dialog_processor_builder_fn).await
             .map_err(|err| Box::from(format!("Error starting SocketServer @ {listening_interface}:{port}: {:?}", err)))
     }
 
@@ -169,14 +185,13 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> SocketServer<BUFFERED_MESSAG
 
 /// Upgrades the user provided `connection_events_callback` into a callback able to keep track of the shutdown event
 /// -- so the "shutdown is complete" signal may be sent
-fn upgrade_to_shutdown_tracking<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize,
-                                ServerMessages:                         ReactiveMessagingSerializer<ServerMessages>   + Send + Sync + PartialEq + Debug + 'static,
-                                ConnectionEventsCallbackFuture:         Future<Output=()>                             + Send>
+fn upgrade_to_shutdown_tracking<SenderChannelType:              FullDuplexUniChannel + Sync + Send + 'static,
+                                ConnectionEventsCallbackFuture: Future<Output=()> + Send>
 
                                (shutdown_is_complete_signaler:            tokio::sync::oneshot::Sender<()>,
-                                user_provided_connection_events_callback: impl Fn(ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                user_provided_connection_events_callback: impl Fn(ConnectionEvent<SenderChannelType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                               -> impl Fn(ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
+                               -> impl Fn(ConnectionEvent<SenderChannelType>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
 
     let shutdown_is_complete_signaler = Arc::new(Mutex::new(Option::Some(shutdown_is_complete_signaler)));
     let user_provided_connection_events_callback = Arc::new(user_provided_connection_events_callback);
@@ -256,7 +271,7 @@ mod tests {
         let client_peer_ref2 = Arc::clone(&client_peer_ref1);
         let mut server = SocketServer::<2048>::new(LOCALHOST, PORT);
         server.spawn_responsive_processor(
-            move |connection_event: ConnectionEvent<2048, DummyResponsiveClientAndServerMessages>| {
+            move |connection_event: ConnectionEvent<DefaultUniChannel<DummyResponsiveClientAndServerMessages>>| {
                 let client_peer = Arc::clone(&client_peer_ref1);
                 async move {
                     match connection_event {
@@ -279,7 +294,7 @@ mod tests {
                     }
                 }
             },
-            move |_, _, _, client_messages: ProcessorRemoteStreamType<2048, DummyResponsiveClientAndServerMessages>| {
+            move |_, _, _, client_messages: MessagingMutinyStream<2048, DummyResponsiveClientAndServerMessages>| {
                 let server_received_messages_count = Arc::clone(&server_received_messages_count_ref1);
                 client_messages.map(move |client_message| {
                     std::mem::forget(client_message);   // TODO 2023-07-15: investigate this reactive-mutiny related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
@@ -293,8 +308,8 @@ mod tests {
         let _client = SocketClient::spawn_responsive_processor(
             LOCALHOST,
             PORT,
-            |_: ConnectionEvent<2048, DummyResponsiveClientAndServerMessages>| async {},
-            move |_, _, _, server_messages: ProcessorRemoteStreamType<2048, DummyResponsiveClientAndServerMessages>| {
+            |_: ConnectionEvent<DefaultUniChannel<DummyResponsiveClientAndServerMessages>>| async {},
+            move |_, _, _, server_messages: MessagingMutinyStream<2048, DummyResponsiveClientAndServerMessages>| {
                 let client_received_messages_count = Arc::clone(&client_received_messages_count_ref1);
                 server_messages.map(move |server_message| {
                     std::mem::forget(server_message);   // TODO 2023-07-15: investigate this reactive-mutiny related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?

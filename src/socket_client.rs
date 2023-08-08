@@ -3,7 +3,6 @@
 
 use crate::{
     types::ConnectionEvent,
-    prelude::ProcessorRemoteStreamType,
     socket_connection_handler::{self, Peer},
     ReactiveMessagingDeserializer,
     ResponsiveMessages,
@@ -21,6 +20,17 @@ use std::{
 use futures::Stream;
 use tokio::sync::oneshot::Sender;
 use log::warn;
+use reactive_mutiny::prelude::advanced::{Instruments, ChannelUniMoveAtomic, UniZeroCopyAtomic, FullDuplexUniChannel};
+use crate::config::ConstConfig;
+use crate::socket_connection_handler::SocketConnectionHandler;
+use crate::types::MessagingMutinyStream;
+
+
+// TO BE DETERMINED BY THE CONFIG PARAMS
+const DEFAULT_CONFIG: usize = ConstConfig::default().into();
+const DEFAULT_UNI_INSTRUMENTS: usize = {Instruments::LogsWithMetrics.into()};
+type DefaultUni<PayloadType> = UniZeroCopyAtomic<PayloadType, 1024>;
+type DefaultUniChannel<PayloadType>  = ChannelUniMoveAtomic<PayloadType, 1024, 1>;
 
 
 /// The handle to define, start and shutdown a Reactive Client for Socket Connections
@@ -53,15 +63,16 @@ impl<const CONST_CONFIG: usize> SocketClient<CONST_CONFIG> {
 
                                            (ip:                         IntoString,
                                             port:                       u16,
-                                            connection_events_callback: impl Fn(ConnectionEvent<CONST_CONFIG, ClientMessages>)                                                                                                                                                      -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                            processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<CONST_CONFIG, ClientMessages>>, /*remote_messages_stream: */ProcessorRemoteStreamType<CONST_CONFIG, ServerMessages>) -> ClientStreamType               + Send + Sync + 'static)
+                                            connection_events_callback: impl Fn(ConnectionEvent<DefaultUniChannel<ClientMessages>>)                                                                                                                                                     -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                            processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<DefaultUniChannel<ClientMessages>>>, /*remote_messages_stream: */MessagingMutinyStream<DEFAULT_UNI_INSTRUMENTS, DefaultUni<ServerMessages>>) -> ClientStreamType               + Send + Sync + 'static)
 
                                            -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         let ip = ip.into();
         let (processor_shutdown_sender, processor_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let connected_state = Arc::new(AtomicBool::new(false));
         let connection_events_callback = upgrade_to_connected_state_tracking(&connected_state, connection_events_callback);
-        socket_connection_handler::client_for_responsive_text_protocol(ip.clone(), port, processor_shutdown_receiver, connection_events_callback, processor_stream_builder).await?;
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_CONFIG, _, _, DefaultUni<ServerMessages>, DefaultUniChannel<ClientMessages>, DEFAULT_UNI_INSTRUMENTS>::new();
+        socket_connection_handler.client_for_responsive_text_protocol(ip.clone(), port, processor_shutdown_receiver, connection_events_callback, processor_stream_builder).await?;
         let socket_client = Self { connected: connected_state, ip, port, processor_shutdown_signaler: processor_shutdown_sender };
         Ok(socket_client)
     }
@@ -81,15 +92,16 @@ impl<const CONST_CONFIG: usize> SocketClient<CONST_CONFIG> {
 
                                              (ip:                         IntoString,
                                               port:                       u16,
-                                              connection_events_callback: impl Fn(ConnectionEvent<CONST_CONFIG, ClientMessages>)                                                                                                                                                      -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                              processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<CONST_CONFIG, ClientMessages>>, /*remote_messages_stream: */ProcessorRemoteStreamType<CONST_CONFIG, ServerMessages>) -> OutputStreamType               + Send + Sync + 'static)
+                                              connection_events_callback: impl Fn(ConnectionEvent<DefaultUniChannel<ClientMessages>>)                                                                                                                                                     -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                              processor_stream_builder:   impl Fn(/*server_addr: */String, /*port: */u16, /*peer: */Arc<Peer<DefaultUniChannel<ClientMessages>>>, /*remote_messages_stream: */MessagingMutinyStream<DEFAULT_UNI_INSTRUMENTS, DefaultUni<ServerMessages>>) -> OutputStreamType               + Send + Sync + 'static)
 
                                              -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         let ip = ip.into();
         let (processor_shutdown_sender, processor_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let connected_state = Arc::new(AtomicBool::new(false));
         let connection_events_callback = upgrade_to_connected_state_tracking(&connected_state, connection_events_callback);
-        socket_connection_handler::client_for_unresponsive_text_protocol(ip.clone(), port, processor_shutdown_receiver, connection_events_callback, processor_stream_builder).await?;
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_CONFIG, _, _, DefaultUni<ServerMessages>, DefaultUniChannel<ClientMessages>, DEFAULT_UNI_INSTRUMENTS>::new();
+        socket_connection_handler.client_for_unresponsive_text_protocol(ip.clone(), port, processor_shutdown_receiver, connection_events_callback, processor_stream_builder).await?;
         let socket_client = Self { connected: connected_state, ip, port, processor_shutdown_signaler: processor_shutdown_sender };
         Ok(socket_client)
     }
@@ -110,14 +122,13 @@ impl<const CONST_CONFIG: usize> SocketClient<CONST_CONFIG> {
 }
 
 /// Upgrades the user provided `connection_events_callback` into a callback able to keep track of disconnection events
-fn upgrade_to_connected_state_tracking<const CONST_CONFIG: usize,
-                                       ClientMessages:                         ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
-                                       ConnectionEventsCallbackFuture:         Future<Output=()>                        + Send>
+fn upgrade_to_connected_state_tracking<SenderChannelType:              FullDuplexUniChannel,
+                                       ConnectionEventsCallbackFuture: Future<Output=()>                        + Send>
 
                                       (connected_state:                          &Arc<AtomicBool>,
-                                       user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONST_CONFIG, ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                       user_provided_connection_events_callback: impl Fn(ConnectionEvent<SenderChannelType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                                      -> impl Fn(ConnectionEvent<CONST_CONFIG, ClientMessages>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static {
+                                      -> impl Fn(ConnectionEvent<SenderChannelType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static {
 
     let connected_state = Arc::clone(connected_state);
     move |connection_event | {

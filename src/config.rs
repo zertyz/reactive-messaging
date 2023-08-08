@@ -1,57 +1,56 @@
 //! Contains constants and other configuration information affecting default & fixed behaviors of this library
 
 use std::{ops::RangeInclusive, num::NonZeroU8};
-use reactive_mutiny::prelude::Instruments;
-use strum_macros::FromRepr;
+use std::time::Duration;
 
-
-/// Specifies the channels (queues) from `reactive-mutiny` thay may be used to send/receive data.\
-/// On different hardware, the performance characteristics may vary.
-#[derive(Debug,PartialEq,FromRepr)]
-pub enum Channels {
-    Atomic,
-    FullSync,
-    Crossbean,
-}
 
 /// Specifies how to behave when communication failures happen
 #[derive(Debug,PartialEq)]
 pub enum RetryingStrategies {
+
     /// Simply ignore full buffer failures denials of sending & receiving messages, without retrying nor dropping the connection.\
     /// This option is acceptable when missing messages don't disrupt the communications and when low latencies / realtime-ish behavior is required.\
     /// Set [ConstConfig::sender_buffer] & [ConstConfig::receiver_buffer] accordingly.
-    Ignore,
-    /// Drops the connection on "buffer is full" errors
+    DoNotRetry,
+
+    /// Drops the connection on "buffer is full" errors, also without retrying
     EndCommunications,
+
+    /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieve.\
     /// Starting at 10ms, waits further 10ms on each attempt -- for up to 255 attempts, with 2.55s being the last sleeping time.\
     /// Total retrying time: 5*(n²+n) (milliseconds) -- for up to ~5.5 minutes total retrying time
     RetrySleepingArithmetically(u8),
-    /// Must be a power of 2
+
+    /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieve
+    /// during the specified milliseconds -- during which retrying will be performed in a pool loop, yielding
+    /// to tokio before each attempt.\
+    /// Use this option if low latency is desirable -- but see also [Self::RetrySleepingArithmetically]
     RetryYieldingForUpToMillis(u8),
-    /// /// Must be a power of 2
-    RetrySpinningForUpTo(u8),
+
+    /// Deprecated. Do not use -- to be replaced or removed, as spinning doesn't make sense in this lib
+    RetrySpinningForUpToMillis(u8),
     // /// reconnect if dropped? this may go as normal parameter... and on the client only
 }
 impl RetryingStrategies {
     /// requires 3+8=11 bits to represent the data; reverse of [Self::from_repr()]
-    const fn into_repr(&self) -> u16 {
+    const fn as_repr(&self) -> u16 {
         match self {
-            Self::Ignore                              => 0,
-            Self::EndCommunications                   => 1,
+            Self::DoNotRetry => 0,
+            Self::EndCommunications                    => 1,
             Self::RetrySleepingArithmetically(n) => 2 | (*n as u16) << 3,
             Self::RetryYieldingForUpToMillis(n)  => 3 | (*n as u16) << 3,
-            Self::RetrySpinningForUpTo(n)        => 4 | (*n as u16) << 3,
+            Self::RetrySpinningForUpToMillis(n)  => 4 | (*n as u16) << 3,
         }
     }
     /// reverse of [Self::from_repr()]
     const fn from_repr(repr: u16) -> Self {
         let (variant, n) = (repr & 7, repr >> 3);
         match variant {
-            0 => Self::Ignore,
+            0 => Self::DoNotRetry,
             1 => Self::EndCommunications,
             2 => Self::RetrySleepingArithmetically(n as u8),
             3 => Self::RetryYieldingForUpToMillis(n as u8),
-            4 => Self::RetrySpinningForUpTo(n as u8),
+            4 => Self::RetrySpinningForUpToMillis(n as u8),
             _ => unreachable!(),    // If this errors, did a new enum member was added?
         }
     }
@@ -76,20 +75,20 @@ pub struct SocketOptions {
 }
 impl SocketOptions {
     /// requires 8+(1+5)+(1+1)=16 bits to represent the data; reverse of [Self::from_repr()]
-    const fn into_repr(&self) -> u32 {
-          (self.no_delay.is_some() as u32)                                                                                                  // << 0       // no delay flag
+    const fn as_repr(&self) -> u32 {
+          (self.no_delay.is_some() as u32)                                                                                                 // << 0       // no delay flag
         | (unwrap_bool_or_default(self.no_delay) as u32)                                                                               << 1       // no delay data
-        | (self.linger_millis.is_some() as u32)                                                                                                << 2       // linger flag
+        | (self.linger_millis.is_some() as u32)                                                                                               << 2       // linger flag
         | if let Some(linger_millis) = self.linger_millis {
               if linger_millis > 0 {
-                set_bits_from_power_of_2_u32(0, 3..=7, linger_millis) as u32                             // 3..=7      // linger data  -- may use set bits
+                set_bits_from_power_of_2_u32(0, 3..=7, linger_millis) as u32                                // 3..=7       // linger data  -- may use set bits
               } else {
                 0
               }
           } else {
             0
           }
-        | (unwrap_non_zero_u8_or_default(self.hops_to_live) as u32)                                                                     << 8      // hops
+        | (unwrap_non_zero_u8_or_default(self.hops_to_live) as u32)                                                                    << 8      // hops
     }
     /// reverse of [Self::from_repr()]
     const fn from_repr(repr: u32) -> Self {
@@ -97,13 +96,13 @@ impl SocketOptions {
             (repr & (1 << 0) ) > 0,                                      // no delay flag
             (repr & (1 << 1) ) > 0,                                      // no delay data
             (repr & (1 << 2) ) > 0,                                      // linger flag
-            get_power_of_2_u32_bits(repr as usize, 3..=7),  // power of 32 bits linger data
+            get_power_of_2_u32_bits(repr as usize, 3..=7),   // power of 32 bits linger data
             (repr & (( (!0u8)  as u32) << 8) ) >> 8,                     // raw 8 bits hops data
         );
         Self {
             hops_to_live:  if hops > 0      { NonZeroU8::new(hops as u8) } else { None },
-            linger_millis: if linger_flag   { Some(linger_data) }          else { None },
-            no_delay:      if no_delay_flag { Some(no_delay_data) }        else { None },
+            linger_millis: if linger_flag   { Some(linger_data) }             else { None },
+            no_delay:      if no_delay_flag { Some(no_delay_data) }           else { None },
         }
     }
 }
@@ -121,23 +120,13 @@ pub struct ConstConfig {
     /// Pre-allocates the sender/receiver buffers to this value (power of 2).
     /// Setting it wisely may economize some `realloc` calls
     pub msg_size_hint: u32,
-    /// How many messages (per peer) may be enqueued for output (power of 2)
-    /// before operations start to fail
-    pub sender_buffer: u32,
-    /// How many messages (per peer) may be enqueued for processing (power of 2)
-    /// before operations start to fail
-    pub receiver_buffer: u32,
     /// How many milliseconds to wait before giving up waiting for a socket to close.\
     /// Set this taking [SocketOptions::linger_millis] into account
-    pub gracefull_close_timeout_millis: u16,
+    pub graceful_close_timeout_millis: u16,
     /// Specifies what to do when operations fail (full buffers / connection droppings)
     pub retrying_strategy: RetryingStrategies,
     /// Messes with the low level (system) socket options
     pub socket_options: SocketOptions,
-    /// Allows changing the backing queue for the sender/receiver buffers
-    pub channel: Channels,
-    /// Allows changing the Stream executor options in regard to logging & collected/reported metrics
-    pub executor_instruments: /*reactive_mutiny::*/Instruments,
 }
 
 #[warn(non_snake_case)]
@@ -150,32 +139,20 @@ impl ConstConfig {
 
     /// u32_value = 2^n
     const MSG_SIZE_HINT: RangeInclusive<usize> = 0..=4;
-    /// u32_value = 2^n
-    const SENDER_BUFFER: RangeInclusive<usize> = 5..=9;
-    /// u32_value = 2^n
-    const RECEIVER_BUFFER: RangeInclusive<usize> = 10..=14;
     /// u16_value = 2^n
-    const GRACEFULL_CLOSE_TIMEOUT_MILLIS: RangeInclusive<usize> = 15..=18;
-    /// One of [RetryingStrategies], converted by [RetryingStrategies::into_repr()]
-    const RETRYING_STRATEGY: RangeInclusive<usize> = 19..=29;
-    /// One of [SocketOptions], converted by [SocketOptions::into_repr()]
-    const SOCKET_OPTIONS: RangeInclusive<usize> = 30..=45;
-    /// This might be impossible to implement... candidate for removal
-    const CHANNEL: RangeInclusive<usize> = 46..=48;
-    /// The 8 bits from `reactive-mutiny`
-    const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 49..=57;
+    const GRACEFUL_CLOSE_TIMEOUT_MILLIS: RangeInclusive<usize> = 5..=8;
+    /// One of [RetryingStrategies], converted by [RetryingStrategies::as_repr()]
+    const RETRYING_STRATEGY: RangeInclusive<usize> = 9..=19;
+    /// One of [SocketOptions], converted by [SocketOptions::as_repr()]
+    const SOCKET_OPTIONS: RangeInclusive<usize> = 20..=35;
 
 
     pub const fn default() -> ConstConfig {
         ConstConfig {
             msg_size_hint:                  1024,
-            sender_buffer:                  2048,
-            receiver_buffer:                2048,
-            gracefull_close_timeout_millis:  256,
+            graceful_close_timeout_millis:  256,
             retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(14),
             socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
-            channel:                        Channels::Atomic,
-            executor_instruments:           Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
         }
     }
 
@@ -187,41 +164,27 @@ impl ConstConfig {
     ///     see bellow
     pub const fn into(self) -> usize {
         let mut config = 0usize;
-        config = set_bits_from_power_of_2_u32(config, Self::MSG_SIZE_HINT,                  self.msg_size_hint);
-        config = set_bits_from_power_of_2_u32(config, Self::SENDER_BUFFER,                  self.sender_buffer);
-        config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_BUFFER,                self.receiver_buffer);
-        config = set_bits_from_power_of_2_u16(config, Self::GRACEFULL_CLOSE_TIMEOUT_MILLIS, self.gracefull_close_timeout_millis);
-        let retrying_strategy_repr = self.retrying_strategy.into_repr();
+        config = set_bits_from_power_of_2_u32(config, Self::MSG_SIZE_HINT,                 self.msg_size_hint);
+        config = set_bits_from_power_of_2_u16(config, Self::GRACEFUL_CLOSE_TIMEOUT_MILLIS, self.graceful_close_timeout_millis);
+        let retrying_strategy_repr = self.retrying_strategy.as_repr();
         config = set_bits(config, Self::RETRYING_STRATEGY, retrying_strategy_repr as usize);
-        let socket_options_repr = self.socket_options.into_repr();
+        let socket_options_repr = self.socket_options.as_repr();
         config = set_bits(config, Self::SOCKET_OPTIONS, socket_options_repr as usize);
-        let channel_repr = self.channel as u8;
-        config = set_bits(config, Self::CHANNEL, channel_repr as usize);
-        let executor_instruments_repr = self.executor_instruments.into();
-        config = set_bits(config, Self::EXECUTOR_INSTRUMENTS, executor_instruments_repr);
         config
     }
 
     /// Builds [Self] from the generic `const CONFIGS: usize` parameter used in structs
     /// by the "Const Config Pattern"
     pub const fn from(config: usize) -> Self {
-        let msg_size_hint                  = get_power_of_2_u32_bits(config, Self::MSG_SIZE_HINT);
-        let sender_buffer                  = get_power_of_2_u32_bits(config, Self::SENDER_BUFFER);
-        let receiver_buffer                = get_power_of_2_u32_bits(config, Self::RECEIVER_BUFFER);
-        let gracefull_close_timeout_millis = get_power_of_2_u16_bits(config, Self::GRACEFULL_CLOSE_TIMEOUT_MILLIS);
+        let msg_size_hint                 = get_power_of_2_u32_bits(config, Self::MSG_SIZE_HINT);
+        let graceful_close_timeout_millis = get_power_of_2_u16_bits(config, Self::GRACEFUL_CLOSE_TIMEOUT_MILLIS);
         let retrying_strategy_repr       = get_bits(config, Self::RETRYING_STRATEGY);
         let socket_options_repr          = get_bits(config, Self::SOCKET_OPTIONS);
-        let channel_repr                 = get_bits(config, Self::CHANNEL);
-        let executor_instruments_repr    = get_bits(config, Self::EXECUTOR_INSTRUMENTS);
         Self {
             msg_size_hint,
-            sender_buffer,
-            receiver_buffer,
-            gracefull_close_timeout_millis,
+            graceful_close_timeout_millis,
             retrying_strategy:    RetryingStrategies::from_repr(retrying_strategy_repr as u16),
             socket_options:       SocketOptions::from_repr(socket_options_repr as u32),
-            channel:              if let Some(channel) = Channels::from_repr(channel_repr) {channel} else {Channels::Atomic},
-            executor_instruments: Instruments::from(executor_instruments_repr),
         }
     }
 
@@ -229,38 +192,25 @@ impl ConstConfig {
     //////////////////////////////////////////////////////////////
     // to be used by the struct in which the generic `const CONFIGS: usize` resides
 
-    pub const fn extract_receiver_buffer<const CONFIG: usize>() -> u32 {
-        let config = config.from();
-        config.receiver_buffer
+    pub const fn extract_msg_size_hint(config: usize) -> u32 {
+        let config = Self::from(config);
+        config.msg_size_hint
     }
 
-    pub const fn extract_executor_instruments<const CONFIG: usize>() -> usize {
-        let config = CONFIG.from();
-        config.executor_instruments.into()
+    pub const fn extract_graceful_close_timeout(config: usize) -> Duration {
+        let config = Self::from(config);
+        Duration::from_millis(config.graceful_close_timeout_millis as u64)
     }
 
+    pub const fn extract_retrying_strategy(config: usize) -> RetryingStrategies {
+        let config = Self::from(config);
+        config.retrying_strategy
+    }
 
-    
-    // /// Is logging on failures enabled?
-    // pub const fn log(config: usize) -> bool {
-    //     config & (Self::LOG) > 0
-    // }
-    
-    // /// Is retrying on failures enabled?
-    // pub const fn retry(config: usize) -> bool {
-    //     config & (Self::RETRY) > 0
-    // }
-    
-    // /// The size of the queue for operations to process
-    // pub const fn buffer_size(config: usize) -> u32 {
-    //     Self::get_bits(config, Self::BUFFER_SIZE_BIT_RANGE) as u32
-    // }
-
-    // /// Any other flag that may lead to optional code compilation when used if `if`s
-    // pub const fn flag(config: usize) -> bool {
-    //     config & (Self::A_NEXT_FLAG) > 0
-    // }
-
+    pub const fn extract_socket_options(config: usize) -> SocketOptions {
+        let config = Self::from(config);
+        config.socket_options
+    }
 }
 
 /// Helper for retrieving data (other than simple flags) from the configuration
@@ -385,16 +335,16 @@ mod tests {
     fn retrying_strategies_repr() {
         let subjects = vec![
             vec![
-                RetryingStrategies::Ignore,
+                RetryingStrategies::DoNotRetry,
                 RetryingStrategies::EndCommunications,
             ].into_iter(),
             (0..8).map(|n| RetryingStrategies::RetrySleepingArithmetically(1<<n)).collect::<Vec<_>>().into_iter(),
             (0..8).map(|n| RetryingStrategies::RetryYieldingForUpToMillis(1<<n)).collect::<Vec<_>>().into_iter(),
-            (0..8).map(|n| RetryingStrategies::RetrySpinningForUpTo(1<<n)).collect::<Vec<_>>().into_iter(),
+            (0..8).map(|n| RetryingStrategies::RetrySpinningForUpToMillis(1<<n)).collect::<Vec<_>>().into_iter(),
         ].into_iter().flatten();
 
         for expected in subjects {
-            let converted = RetryingStrategies::into_repr(&expected);
+            let converted = RetryingStrategies::as_repr(&expected);
             let reconverted = RetryingStrategies::from_repr(converted);
             assert_eq!(reconverted, expected, "FAILED: {:?} (repr: 0x{:x}); reconverted: {:?}", expected, converted, reconverted);
         }
@@ -415,7 +365,7 @@ mod tests {
         ].into_iter().flatten();
 
         for expected in subjects {
-            let converted = SocketOptions::into_repr(&expected);
+            let converted = SocketOptions::as_repr(&expected);
             let reconverted = SocketOptions::from_repr(converted);
             assert_eq!(reconverted, expected, "FAILED: {:?} (repr: 0x{:x}); reconverted: {:?}", expected, converted, reconverted);
         }
@@ -431,18 +381,13 @@ mod tests {
     fn const_config() {
         let expected = || ConstConfig {
             msg_size_hint:                  1024,
-            sender_buffer:                  2048,
-            receiver_buffer:                2048,
-            gracefull_close_timeout_millis:  256,
+            graceful_close_timeout_millis:  256,
             retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(14),
             socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
-            channel:                        Channels::Atomic,
-            executor_instruments:           Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
         };
         let converted = ConstConfig::into(expected());
         let reconverted = ConstConfig::from(converted);
         assert_eq!(reconverted, expected(), "FAILED: {:?} (repr: 0x{:x}); reconverted: {:?}", expected(), converted, reconverted);
-}
-
+    }
 
 }

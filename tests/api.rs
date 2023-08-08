@@ -6,12 +6,13 @@
 use reactive_messaging::{
     SocketServer,
     SocketClient,
-    prelude::{ConnectionEvent, ProcessorRemoteStreamType},
+    prelude::ConnectionEvent,
     ResponsiveMessages,
     ReactiveMessagingSerializer,
     ReactiveMessagingDeserializer,
 };
 use futures::stream::StreamExt;
+use reactive_messaging::prelude::{MessagingAtomicUniType, MessagingAtomicDerivedType, MessagingMutinyStream};
 
 
 const BUFFERED_MESSAGES_PER_PEER_COUNT: usize = 2048;
@@ -22,10 +23,12 @@ const BUFFERED_MESSAGES_PER_PEER_COUNT: usize = 2048;
 /// answers may still be sent explicitly (using [Peer]).
 #[cfg_attr(not(doc), test)]
 fn server_with_responsive_processor() {
-    let mut server = SocketServer::<BUFFERED_MESSAGES_PER_PEER_COUNT>::new("0.0.0.0", 0);
+    type SocketServerType = SocketServer::<BUFFERED_MESSAGES_PER_PEER_COUNT>;
+    const UNI_INSTRUMENTS: usize = SocketServerType::uni_instruments();
+    let mut server = SocketServerType::new("0.0.0.0", 0);
     let _unused_future = server.spawn_responsive_processor(
-        |_: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyResponsiveServerMessages>| async {},
-        |_, _, _, client_messages: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyResponsiveClientMessages>| client_messages.map(|_| DummyResponsiveServerMessages::ProducedByTheServer)
+        |_| async {},
+        |_, _, _, client_messages| client_messages.map(|_: MessagingAtomicDerivedType<1024, DummyResponsiveClientMessages>| DummyResponsiveServerMessages::ProducedByTheServer)
     );
 }
 
@@ -35,8 +38,8 @@ fn server_with_responsive_processor() {
 fn server_with_unresponsive_processor() {
     let mut server = SocketServer::<BUFFERED_MESSAGES_PER_PEER_COUNT>::new("0.0.0.0", 0);
     let _unused_future = server.spawn_unresponsive_processor(
-        |_: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyUnresponsiveServerMessages>| async {},
-        |_, _, _, client_messages: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, DummyUnresponsiveClientMessages>| client_messages.map(|_| "anything")
+        |_| async {},
+        |_, _, _, client_messages: MessagingMutinyStream<MESSAGING_UNI_INSTRUMENTS, MessagingAtomicUniType<1024, MESSAGING_UNI_INSTRUMENTS, DummyUnresponsiveClientMessages>>| client_messages.map(|_| "anything")
     );
 }
 
