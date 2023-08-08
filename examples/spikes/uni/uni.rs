@@ -1,4 +1,7 @@
-/// Models a Uni from `reactive-mutiny`
+/// Models a Uni from `reactive-mutiny`.
+/// A `Uni` links a `Channel` (able to produce and consume messages) to a `Stream` and a
+/// `StreamExecutor`, that will consume the Stream to completion...
+/// but these parts are not present here as this is only a simplified model.
 
 use std::marker::PhantomData;
 

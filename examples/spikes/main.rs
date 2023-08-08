@@ -14,7 +14,7 @@ use uni::channel::ChannelZeroCopy;
 use config::ConstConfig;
 use socket_server::SocketServer;
 
-use crate::{socket_server::{GenericSocketServer, AtomicSocketServer, FullSyncSocketServer}, uni::channel::{GenericChannel, ChannelMove}};
+use crate::{socket_server::{GenericSocketServer, ZeroCopySocketServer, MovableSocketServer, ConnectionEvents}, uni::channel::{GenericChannel, ChannelMove}};
 
 type LocalMessages  = f64;
 type RemoteMessages = u32;
@@ -61,7 +61,7 @@ fn modality_2_and_3() {
     type ProcessorUniType     = Uni::<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, RemoteMessages, ProcessorChannelType>;
     type SenderChannelType    = ChannelMove<SENDER_BUFFER_SIZE, LocalMessages>;
     type ServerType           = SocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType>;
-    type ConnectionEventType  = <ServerType as GenericSocketServer<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE>>::ConnectionEventType;
+    type ConnectionEventType  = ConnectionEvents<<ServerType as GenericSocketServer<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE>>::ConnectionEventType>;
     type _StreamType          = <ServerType as GenericSocketServer<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE>>::StreamType;
     type StreamItemType       = <ServerType as GenericSocketServer<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE>>::StreamItemType;
 
@@ -80,9 +80,9 @@ fn modality_4 () {
     const PROCESSOR_UNI_INSTRUMENTS: usize = 0;    
     const PROCESSOR_BUFFER_SIZE:     usize = 1024;
     const SENDER_BUFFER_SIZE:        usize = 1024;
-    type AtomicServer           = AtomicSocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, SENDER_BUFFER_SIZE, RemoteMessages, LocalMessages>;
+    type AtomicServer           = ZeroCopySocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, SENDER_BUFFER_SIZE, RemoteMessages, LocalMessages>;
     type AtomicStreamItemType   = <AtomicServer as GenericSocketServer<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE>>::StreamItemType;
-    type FullSyncServer         = FullSyncSocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, SENDER_BUFFER_SIZE, RemoteMessages, LocalMessages>;
+    type FullSyncServer         = MovableSocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, SENDER_BUFFER_SIZE, RemoteMessages, LocalMessages>;
     type FullSyncStreamItemType = <FullSyncServer as GenericSocketServer<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE>>::StreamItemType;
 
     // if atomic
@@ -93,7 +93,13 @@ fn modality_4 () {
     let _full_sync_server = FullSyncServer {_phantom: PhantomData}
         .start(connection_events_handler, processor::<FullSyncStreamItemType> /* RemoteMessages */);
 
-    fn connection_events_handler<ConnectionEventType: GenericChannel<PROCESSOR_BUFFER_SIZE>>(_event: ConnectionEventType) {}
+    fn connection_events_handler<ChannelType: GenericChannel<PROCESSOR_BUFFER_SIZE>>(event: ConnectionEvents<ChannelType>) {
+        match event {
+            ConnectionEvents::_Connected(_) => todo!(),
+            ConnectionEvents::_Disconnected(_) => todo!(),
+            ConnectionEvents::_IOError(_) => todo!(),
+        }
+    }
     fn processor<StreamItemType: Borrow<RemoteMessages>>(client_messages_stream: impl Iterator<Item=StreamItemType>) -> impl Iterator<Item=LocalMessages> {
         client_messages_stream.map(|payload| *payload.borrow() as f64)
     }

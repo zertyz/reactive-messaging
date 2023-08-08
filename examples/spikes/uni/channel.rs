@@ -1,4 +1,6 @@
-/// Models a `Uni::channel` from `reactive-mutiny`
+/// Models a `Uni::channel` from `reactive-mutiny`.
+/// A `Channel` may be a "Multiple producers & Multiple consumer" bounded queue, for instance.
+/// It will provide means to receive messages and to send them to `Streams`, although this part is not modeled here.
 
 use std::{marker::PhantomData, sync::Arc};
 
