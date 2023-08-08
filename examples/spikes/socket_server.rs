@@ -55,6 +55,28 @@ pub struct SocketServer<const CONFIG: usize,
                         SenderChannelType> {
     pub _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,SenderChannelType)>
 }
+impl<const CONFIG: usize,
+     const PROCESSOR_UNI_INSTRUMENTS: usize,
+     const PROCESSOR_BUFFER_SIZE: usize,
+     RemoteMessages,
+     LocalMessages,
+     ProcessorUniType: GenericUni<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE>,
+     SenderChannelType>
+SocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
+
+    /// Starts the server, returning an `Arc<Self>` so it may still be shutdown
+    pub fn start<LocalMessagesIteratorType:  Iterator<Item=LocalMessages>>
+                (self,
+                 _connection_events_handler: impl FnMut(ConnectionEvents<SenderChannelType>),
+                 _processor:                 impl FnOnce(MessagingMutinyStream<PROCESSOR_UNI_INSTRUMENTS,
+                                                                               PROCESSOR_BUFFER_SIZE,
+                                                                               ProcessorUniType>)
+                                                        -> LocalMessagesIteratorType)
+                -> Arc<Self> {
+        Arc::new(self)
+    }
+
+}
 
 /// Helps to infer some types:
 /// ```nocompile
@@ -70,15 +92,6 @@ pub trait GenericSocketServer<const PROCESSOR_UNI_INSTRUMENTS: usize,
     type ConnectionEventType;
     type StreamItemType;
     type StreamType;
-
-    fn start<LocalMessagesIteratorType:  Iterator<Item=Self::LocalMessages>>
-            (self,
-             connection_events_handler: impl FnMut(ConnectionEvents<Self::SenderChannelType>),
-             processor:                 impl FnOnce(MessagingMutinyStream<PROCESSOR_UNI_INSTRUMENTS,
-                                                                          PROCESSOR_BUFFER_SIZE,
-                                                                          Self::ProcessorUniType>)
-                                                   -> LocalMessagesIteratorType)
-            -> Arc<Self>;
 }
 impl<const CONFIG: usize,
      const PROCESSOR_UNI_INSTRUMENTS: usize,
@@ -108,18 +121,6 @@ SocketServer<CONFIG,
     type StreamType                        = MessagingMutinyStream<PROCESSOR_UNI_INSTRUMENTS,
                                                                    PROCESSOR_BUFFER_SIZE,
                                                                    ProcessorUniType>;
-
-    /// Starts the server, returning an `Arc<Self>` so it may still be shutdown
-    fn start<LocalMessagesIteratorType:  Iterator<Item=LocalMessages>>
-            (self,
-             _connection_events_handler: impl FnMut(ConnectionEvents<SenderChannelType>),
-             _processor:                 impl FnOnce(MessagingMutinyStream<PROCESSOR_UNI_INSTRUMENTS,
-                                                                           PROCESSOR_BUFFER_SIZE,
-                                                                           ProcessorUniType>)
-                                                    -> LocalMessagesIteratorType)
-            -> Arc<Self> {
-        Arc::new(self)
-    }
 }
 
 
