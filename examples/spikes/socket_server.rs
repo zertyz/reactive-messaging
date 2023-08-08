@@ -1,7 +1,7 @@
 //! Models what the server API should be like
 //! so to allow us full control of the [Uni] and [Channel]s being used.
 
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
 use crate::uni::{GenericUni, MessagingMutinyStream, channel::{ChannelZeroCopy, ChannelMove}, Uni};
 
@@ -72,11 +72,27 @@ SocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, RemoteMes
                                                                                PROCESSOR_BUFFER_SIZE,
                                                                                ProcessorUniType>)
                                                         -> LocalMessagesIteratorType)
-                -> Arc<Self> {
-        Arc::new(self)
+                -> impl SocketServerController {
+        self
     }
 
 }
+
+pub trait SocketServerController {
+    fn shutdown(self);
+}
+impl<const CONFIG: usize,
+     const PROCESSOR_UNI_INSTRUMENTS: usize,
+     const PROCESSOR_BUFFER_SIZE: usize,
+     RemoteMessages,
+     LocalMessages,
+     ProcessorUniType: GenericUni<PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE>,
+     SenderChannelType>
+SocketServerController for
+SocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
+    fn shutdown(self) {}
+}
+
 
 /// Helps to infer some types:
 /// ```nocompile
