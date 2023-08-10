@@ -28,7 +28,7 @@ use crate::types::MessagingMutinyStream;
 
 // TO BE DETERMINED BY THE CONFIG PARAMS
 const DEFAULT_CONFIG: usize = ConstConfig::default().into();
-const DEFAULT_UNI_INSTRUMENTS: usize = {Instruments::LogsWithMetrics.into()};
+const DEFAULT_UNI_INSTRUMENTS: usize = Instruments::LogsWithMetrics.into();
 type DefaultUni<PayloadType> = UniZeroCopyAtomic<PayloadType, 1024>;
 type DefaultUniChannel<PayloadType>  = ChannelUniMoveAtomic<PayloadType, 1024, 1>;
 
@@ -54,9 +54,9 @@ impl<const CONST_CONFIG: usize> SocketClient<CONST_CONFIG> {
     /// the client to disconnect.\
     /// The given `dialog_processor` will produce non-futures & non-fallibles `ClientMessages` that will be sent to the server.
     #[must_use = "the client won't do a thing if its value isn't hold until the disconnection time"]
-    pub async fn spawn_responsive_processor<ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug + 'static,
+    pub async fn spawn_responsive_processor<ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug +           'static,
                                             ClientMessages:                 ReactiveMessagingSerializer<ClientMessages>   +
-                                                                            ResponsiveMessages<ClientMessages>            + Send + Sync + PartialEq + Debug + 'static,
+                                                                            ResponsiveMessages<ClientMessages>            + Send + Sync + PartialEq + Debug + Default + 'static,
                                             ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
                                             ClientStreamType:               Stream<Item=ClientMessages>                   + Send + 'static,
                                             IntoString:                     Into<String>>
@@ -83,10 +83,10 @@ impl<const CONST_CONFIG: usize> SocketClient<CONST_CONFIG> {
     /// The given `dialog_processor` will produce non-futures & non-fallibles items that won't be sent to the server
     /// -- if you want the processor to produce "answer messages" to the server, see [SocketClient::spawn_responsive_processor()].
     #[must_use = "the client won't do a thing if its value isn't hold until the disconnection time"]
-    pub async fn spawn_unresponsive_processor<ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug + 'static,
-                                              ClientMessages:                 ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + 'static,
-                                              OutputStreamItemsType:                                                          Send + Sync             + Debug + 'static,
-                                              OutputStreamType:               Stream<Item=OutputStreamItemsType>            + Send                            + 'static,
+    pub async fn spawn_unresponsive_processor<ServerMessages:                 ReactiveMessagingDeserializer<ServerMessages> + Send + Sync + PartialEq + Debug           + 'static,
+                                              ClientMessages:                 ReactiveMessagingSerializer<ClientMessages>   + Send + Sync + PartialEq + Debug + Default + 'static,
+                                              OutputStreamItemsType:                                                          Send + Sync             + Debug           + 'static,
+                                              OutputStreamType:               Stream<Item=OutputStreamItemsType>            + Send                                      + 'static,
                                               ConnectionEventsCallbackFuture: Future<Output=()>                             + Send,
                                               IntoString:                     Into<String>>
 

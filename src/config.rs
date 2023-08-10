@@ -2,7 +2,18 @@
 
 use std::{ops::RangeInclusive, num::NonZeroU8};
 use std::time::Duration;
+use reactive_mutiny::prelude::Instruments;
+use strum_macros::FromRepr;
 
+
+/// Specifies the channels (queues) from `reactive-mutiny` thay may be used to send/receive data.\
+/// On different hardware, the performance characteristics may vary.
+#[derive(Debug,PartialEq,FromRepr)]
+pub enum Channels {
+    Atomic,
+    FullSync,
+    Crossbean,
+}
 
 /// Specifies how to behave when communication failures happen
 #[derive(Debug,PartialEq)]
@@ -120,6 +131,12 @@ pub struct ConstConfig {
     /// Pre-allocates the sender/receiver buffers to this value (power of 2).
     /// Setting it wisely may economize some `realloc` calls
     pub msg_size_hint: u32,
+    /// How many messages (per peer) may be enqueued for output (power of 2)
+    /// before operations start to fail
+    pub sender_buffer: u32,
+    /// How many messages (per peer) may be enqueued for processing (power of 2)
+    /// before operations start to fail
+    pub receiver_buffer: u32,
     /// How many milliseconds to wait before giving up waiting for a socket to close.\
     /// Set this taking [SocketOptions::linger_millis] into account
     pub graceful_close_timeout_millis: u16,
@@ -127,6 +144,10 @@ pub struct ConstConfig {
     pub retrying_strategy: RetryingStrategies,
     /// Messes with the low level (system) socket options
     pub socket_options: SocketOptions,
+    /// Allows changing the backing queue for the sender/receiver buffers
+    pub channel: Channels,
+    /// Allows changing the Stream executor options in regard to logging & collected/reported metrics
+    pub executor_instruments: /*reactive_mutiny::*/Instruments,
 }
 
 #[warn(non_snake_case)]
@@ -139,20 +160,32 @@ impl ConstConfig {
 
     /// u32_value = 2^n
     const MSG_SIZE_HINT: RangeInclusive<usize> = 0..=4;
+    /// u32_value = 2^n
+    const SENDER_BUFFER: RangeInclusive<usize> = 5..=9;
+    /// u32_value = 2^n
+    const RECEIVER_BUFFER: RangeInclusive<usize> = 10..=14;
     /// u16_value = 2^n
-    const GRACEFUL_CLOSE_TIMEOUT_MILLIS: RangeInclusive<usize> = 5..=8;
+    const GRACEFUL_CLOSE_TIMEOUT_MILLIS: RangeInclusive<usize> = 15..=18;
     /// One of [RetryingStrategies], converted by [RetryingStrategies::as_repr()]
-    const RETRYING_STRATEGY: RangeInclusive<usize> = 9..=19;
+    const RETRYING_STRATEGY: RangeInclusive<usize> = 19..=29;
     /// One of [SocketOptions], converted by [SocketOptions::as_repr()]
-    const SOCKET_OPTIONS: RangeInclusive<usize> = 20..=35;
+    const SOCKET_OPTIONS: RangeInclusive<usize> = 30..=45;
+    /// This might be impossible to implement... candidate for removal
+    const CHANNEL: RangeInclusive<usize> = 46..=48;
+    /// The 8 bits from `reactive-mutiny`
+    const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 49..=57;
 
 
     pub const fn default() -> ConstConfig {
         ConstConfig {
             msg_size_hint:                  1024,
+            sender_buffer:                  2048,
+            receiver_buffer:                2048,
             graceful_close_timeout_millis:  256,
             retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(14),
             socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
+            channel:                        Channels::Atomic,
+            executor_instruments:           Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
         }
     }
 
@@ -165,11 +198,17 @@ impl ConstConfig {
     pub const fn into(self) -> usize {
         let mut config = 0usize;
         config = set_bits_from_power_of_2_u32(config, Self::MSG_SIZE_HINT,                 self.msg_size_hint);
+        config = set_bits_from_power_of_2_u32(config, Self::SENDER_BUFFER,                 self.sender_buffer);
+        config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_BUFFER,               self.receiver_buffer);
         config = set_bits_from_power_of_2_u16(config, Self::GRACEFUL_CLOSE_TIMEOUT_MILLIS, self.graceful_close_timeout_millis);
         let retrying_strategy_repr = self.retrying_strategy.as_repr();
         config = set_bits(config, Self::RETRYING_STRATEGY, retrying_strategy_repr as usize);
         let socket_options_repr = self.socket_options.as_repr();
         config = set_bits(config, Self::SOCKET_OPTIONS, socket_options_repr as usize);
+        let channel_repr = self.channel as u8;
+        config = set_bits(config, Self::CHANNEL, channel_repr as usize);
+        let executor_instruments_repr = self.executor_instruments.into();
+        config = set_bits(config, Self::EXECUTOR_INSTRUMENTS, executor_instruments_repr);
         config
     }
 
@@ -177,20 +216,38 @@ impl ConstConfig {
     /// by the "Const Config Pattern"
     pub const fn from(config: usize) -> Self {
         let msg_size_hint                 = get_power_of_2_u32_bits(config, Self::MSG_SIZE_HINT);
+        let sender_buffer                 = get_power_of_2_u32_bits(config, Self::SENDER_BUFFER);
+        let receiver_buffer               = get_power_of_2_u32_bits(config, Self::RECEIVER_BUFFER);
         let graceful_close_timeout_millis = get_power_of_2_u16_bits(config, Self::GRACEFUL_CLOSE_TIMEOUT_MILLIS);
         let retrying_strategy_repr       = get_bits(config, Self::RETRYING_STRATEGY);
         let socket_options_repr          = get_bits(config, Self::SOCKET_OPTIONS);
+        let channel_repr                 = get_bits(config, Self::CHANNEL);
+        let executor_instruments_repr    = get_bits(config, Self::EXECUTOR_INSTRUMENTS);
         Self {
             msg_size_hint,
             graceful_close_timeout_millis,
+            sender_buffer,
+            receiver_buffer,
             retrying_strategy:    RetryingStrategies::from_repr(retrying_strategy_repr as u16),
             socket_options:       SocketOptions::from_repr(socket_options_repr as u32),
+            channel:              if let Some(channel) = Channels::from_repr(channel_repr) {channel} else {Channels::Atomic},
+            executor_instruments: Instruments::from(executor_instruments_repr),
         }
     }
 
     // query functions for business logic configuration attributes
     //////////////////////////////////////////////////////////////
     // to be used by the struct in which the generic `const CONFIGS: usize` resides
+
+    pub const fn extract_receiver_buffer(config: usize) -> u32 {
+        let config = Self::from(config);
+        config.receiver_buffer
+    }
+
+    pub const fn extract_executor_instruments(config: usize) -> usize {
+        let config = Self::from(config);
+        config.executor_instruments.into()
+    }
 
     pub const fn extract_msg_size_hint(config: usize) -> u32 {
         let config = Self::from(config);
@@ -381,9 +438,13 @@ mod tests {
     fn const_config() {
         let expected = || ConstConfig {
             msg_size_hint:                  1024,
+            sender_buffer:                  2048,
+            receiver_buffer:                2048,
             graceful_close_timeout_millis:  256,
             retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(14),
             socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
+            channel:                        Channels::Atomic,
+            executor_instruments:           Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
         };
         let converted = ConstConfig::into(expected());
         let reconverted = ConstConfig::from(converted);

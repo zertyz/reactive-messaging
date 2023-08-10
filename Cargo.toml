@@ -22,13 +22,21 @@ license       = "Unlicense"
 [dependencies]
 tokio             = { version = "1", features = ["full", "rt-multi-thread"] }
 log               = "0.4"
-reactive-mutiny   = "1.1.16"  # for reactive programming in Rust
+reactive-mutiny   = "1.1.18"  # for reactive programming in Rust
 futures           = "0.3"     # brings in "Streams" / async iterators
 minstant          = "0.1"     # as fast as possible time measurements on X86_64 using TSC / RDTSC instructions -- avoiding system calls & context switches
 once_cell         = "1.17"    # lazy
 
+# for the const configs pattern
+strum        = { version = "0.25", features = ["derive"] }      # enums serialization/deserialization
+strum_macros = "0.25"
+
 # for the retrying mechanism
 keen-retry = "0.2.0"
+
+# soon to be dropped when Rust finally goes forward in late 2023...
+# (in this crate, the costs of async traits are only paid for functions out of the hot path)
+async-trait = "0.1"
 
 
 # doc-dependencies
@@ -61,8 +69,6 @@ minstant       = "0.1"  # (real) time measurements through RDTSC instruction (wi
 
 # command-line parsing
 structopt    = "0.3"                                            # command line parsing
-strum        = { version = "0.25", features = ["derive"] }      # enums serialization/deserialization
-strum_macros = "0.25"
 chrono       = "0"
 
 # console UI

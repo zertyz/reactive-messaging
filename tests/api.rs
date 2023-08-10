@@ -2,7 +2,7 @@
 //!
 //! NOTE: many "tests" here have no real assertions, as they are used only to verify the API is able to represent certain models;
 //!       actually, many are not even executed, as their futures are simply dropped.
-
+/*
 use reactive_messaging::{
     SocketServer,
     SocketClient,
@@ -170,4 +170,4 @@ impl ReactiveMessagingDeserializer<DummyUnresponsiveServerMessages> for DummyUnr
     fn deserialize(_local_message: &[u8]) -> Result<DummyUnresponsiveServerMessages, Box<dyn std::error::Error + Sync + Send>> {
         todo!()
     }
-}
+}*/

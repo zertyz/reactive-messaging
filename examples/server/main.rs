@@ -1,4 +1,4 @@
-#[path = "../common/mod.rs"] mod common;
+/*#[path = "../common/mod.rs"] mod common;
 
 pub mod protocol_processor;
 
@@ -13,10 +13,10 @@ const LISTENING_INTERFACE: &str = "0.0.0.0";
 const LISTENING_PORT:      u16  = 1234;
 
 const BUFFERED_MESSAGES_PER_PEER_COUNT: usize = 2048;
-
+*/
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
+/*    simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
 
     warn!("Ping-Pong server starting at {LISTENING_INTERFACE}:{LISTENING_PORT}");
 
@@ -41,7 +41,7 @@ tokio::spawn( async move {
     socket_server.shutdown(5000).expect("FAILED TO SHUTDOWN");
 });
     wait_for_shutdown().await?;
-
+*/
     Ok(())
     //let (processor_stream, stream_producer, stream_closer) = socket_server.set_processor()
 

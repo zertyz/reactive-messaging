@@ -1,4 +1,4 @@
-#[path = "../common/mod.rs"] mod common;
+/*#[path = "../common/mod.rs"] mod common;
 
 mod protocol_processor;
 
@@ -30,10 +30,10 @@ const DEBUG: bool = true;
 const DEBUG: bool = false;
 
 
-
+*/
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
-
+/*
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
 
     warn!("{INSTANCES} Ping-Pong client(s) starting... connecting to {SERVER_IP}:{PORT}");
@@ -77,6 +77,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     tokio::time::sleep(Duration::from_secs(290)).await;
     socket_clients.into_iter().for_each(|socket_client| socket_client.shutdown(5000).expect("FAILED TO SHUTDOWN THE CLIENT"));
-
+*/
     Ok(())
 }

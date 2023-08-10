@@ -1,15 +1,12 @@
 //! Common types used across this crate
 
-use crate::{
-    socket_connection_handler::Peer,
-    ReactiveMessagingSerializer,
-};
+use crate::socket_connection_handler::Peer;
 use std::{
     fmt::Debug,
     sync::Arc,
 };
-use reactive_mutiny::prelude::advanced::{UniZeroCopyAtomic, ChannelUniZeroCopyAtomic, OgreUnique, AllocatorAtomicArray, ChannelUniMoveAtomic};
-use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni, Instruments, MutinyStream};
+use reactive_mutiny::prelude::advanced::{UniZeroCopyAtomic, OgreUnique, AllocatorAtomicArray, ChannelUniMoveAtomic};
+use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni, MutinyStream};
 
 
 pub type MessagingMoveChannelType  <const MESSAGES_BUFFER_SIZE: usize, MessagesType>                               = ChannelUniMoveAtomic<MessagesType, MESSAGES_BUFFER_SIZE, 1>;

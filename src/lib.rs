@@ -17,6 +17,7 @@ pub mod prelude;
 
 mod socket_server;
 pub use socket_server::*;
+//mod old_socket_server;  // TODO REMOVE THIS ONCE THE ABOVE IS COMPLETE
 
 mod socket_client;
 pub use socket_client::*;*/
