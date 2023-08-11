@@ -22,15 +22,15 @@ pub type MessagingAtomicDerivedType<const MESSAGES_BUFFER_SIZE: usize, MessagesT
 /// ```no_compile
 ///     fn dialog_processor<RemoteStreamType: Stream<Item=SocketProcessorDerivedType<RemoteMessages>>>
 ///                        (remote_messages_stream: RemoteStreamType) -> impl Stream<Item=LocalMessages> { ... }
-pub type MessagingMutinyStream<const UNI_INSTRUMENTS: usize, GenericUniType: GenericUni<UNI_INSTRUMENTS>>          = MutinyStream<'static, GenericUniType::ItemType, GenericUniType::UniChannelType, GenericUniType::DerivedItemType>;
+pub type MessagingMutinyStream<GenericUniType: GenericUni> = MutinyStream<'static, GenericUniType::ItemType, GenericUniType::UniChannelType, GenericUniType::DerivedItemType>;
 
 /// The internal events a reactive processor (for a server or client) shares with the user code.\
 /// The user code may use those events to maintain a list of connected clients, be notified of stop/close/quit requests, init/deinit sessions, etc.
 /// Note that the `Peer` objects received in those events may be used, at any time, to send messages to the clients -- like "Shutting down. Goodbye".
 /// *When doing this on other occasions, make sure you won't break your own protocol.*
 #[derive(Debug)]
-pub enum ConnectionEvent<SenderChannelType: FullDuplexUniChannel> {
+pub enum ConnectionEvent<SenderChannelType: FullDuplexUniChannel + Sync + Send> {
     PeerConnected       {peer: Arc<Peer<SenderChannelType>>},
-    PeerDisconnected    {peer: Arc<Peer<SenderChannelType>>, stream_stats: Arc<reactive_mutiny::stream_executor::StreamExecutor>},
+    PeerDisconnected    {peer: Arc<Peer<SenderChannelType>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send>},
     ApplicationShutdown {timeout_ms: u32},
 }

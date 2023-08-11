@@ -1,7 +1,9 @@
 //! SERializers & DEserializers (traits & implementations) for our [SocketServer]
 
 
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+};
 use serde::{Serialize, Deserialize};
 use once_cell::sync::Lazy;
 
@@ -11,7 +13,7 @@ use once_cell::sync::Lazy;
 /// This trait, therefore, specifies how to:
 ///   * `serialize()` enum variants into a String (like RON, for textual protocols) to be sent to the remote peer
 ///   * inform the peer if any wrong input was sent -- the network processor will handle that special case.
-pub trait ReactiveMessagingSerializer<LocalPeerMessages: ReactiveMessagingSerializer<LocalPeerMessages> + Send + PartialEq + Debug> {
+pub trait ReactiveMessagingSerializer<LocalPeerMessages: ReactiveMessagingSerializer<LocalPeerMessages> + Send + PartialEq + Debug>: Default {
 
     /// Local messages serializer: transforms a strong typed `message` into a sequence of bytes, put in `buffer`\
     /// -- not appending any '\n'.
