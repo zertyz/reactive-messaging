@@ -24,6 +24,35 @@ use crate::socket_server::common::upgrade_to_shutdown_tracking;
 use crate::socket_server::socket_server_types::{ResponsiveSocketServerAssociatedTypes, ResponsiveSocketServerGenericTypes, ServerResponsiveProcessor, SocketServerController};
 
 
+/// Instantiates & allocate resources for a [ResponsibleSocketServer], ready to be later started.\
+/// Params:
+///   - `const_config: ConstConfig` -- the configurations for the server;
+///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
+///   - `port: u16` -- the port to listen to incoming connections;
+///   - `RemoteMessages` -- the type of the messages produced by the clients. See [ResponsibleSocketServer] for the traits it should implement;
+///   - `LocalMessage` -- the type of the messages produced by this server. See [ResponsibleSocketServer] for the traits it should implement.
+#[macro_export]
+macro_rules! new_responsive_socket_server {
+    ($const_config:    expr,
+     $interface_ip:    expr,
+     $port:            expr,
+     $remote_messages: ty,
+     $local_messages:  ty) => {
+        {
+            const CONFIG:                    usize = $const_config.into();
+            const PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
+            const PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
+            const SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
+            ResponsiveSocketServer::<CONFIG, PROCESSOR_BUFFER, PROCESSOR_UNI_INSTRUMENTS, SENDER_BUFFER, $remote_messages, $local_messages> {
+                interface_ip: $interface_ip.to_string(),
+                port:         $port,
+                _phantom:     PhantomData,
+            }
+        }
+    }
+}
+pub use new_responsive_socket_server;
+
 /// Used to [Self::spawn_responsive_processor()].\
 /// Instantiating this trait directly is not recommended -- the macro [new_responsive_socket_server!()] should be used instead
 pub struct ResponsiveSocketServer<const CONFIG:                    usize,
@@ -302,4 +331,80 @@ CustomResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     type LocalMessages       = LocalMessages;
     type StreamItemType      = ProcessorUniType::DerivedItemType;
     type StreamType          = MessagingMutinyStream<ProcessorUniType>;
+}
+
+
+/// Unit tests the [socket_server](self) module
+#[cfg(any(test,doc))]
+mod tests {
+    use super::*;
+    use crate::{ron_deserializer, ron_serializer};
+    use std::borrow::Borrow;
+    use std::future;
+    use serde::{Deserialize, Serialize};
+    use futures::stream::StreamExt;
+
+
+    /// Test that our types can be compiled & instantiated & are ready for usage
+    #[cfg_attr(not(doc),tokio::test)]
+    async fn doc_usage() {
+        let mut server = new_responsive_socket_server!(
+            ConstConfig::default(),
+            "127.0.0.1",
+            8060,
+            DummyResponsiveClientAndServerMessages,
+            DummyResponsiveClientAndServerMessages
+        );
+        server.spawn_responsive_processor(connection_events_handler, processor).await;
+
+        async fn connection_events_handler<SenderChannelType: FullDuplexUniChannel<ItemType=DummyResponsiveClientAndServerMessages, DerivedItemType=DummyResponsiveClientAndServerMessages> + Sync + Send + 'static>
+                                          (event: ConnectionEvent<SenderChannelType>) {
+        }
+        fn processor<SenderChannelType: FullDuplexUniChannel<ItemType=DummyResponsiveClientAndServerMessages, DerivedItemType=DummyResponsiveClientAndServerMessages> + Sync + Send + 'static,
+                     StreamItemType: Borrow<DummyResponsiveClientAndServerMessages>>
+                    (client_addr:            String,
+                     connected_port:         u16,
+                     peer:                   Arc<Peer<SenderChannelType>>,
+                     client_messages_stream: impl Stream<Item=StreamItemType>)
+                    -> impl Stream<Item=DummyResponsiveClientAndServerMessages> {
+            client_messages_stream.map(|payload| DummyResponsiveClientAndServerMessages::FloodPing)
+        }
+
+    }
+
+    /// The pretended messages produced by the server's "Unresponsive Processor"
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+    enum DummyResponsiveClientAndServerMessages {
+        #[default]
+        FloodPing,
+    }
+
+    impl ReactiveMessagingSerializer<DummyResponsiveClientAndServerMessages> for DummyResponsiveClientAndServerMessages {
+        #[inline(always)]
+        fn serialize(remote_message: &DummyResponsiveClientAndServerMessages, buffer: &mut Vec<u8>) {
+            ron_serializer(remote_message, buffer)
+                .expect("socket_server.rs unit tests: No errors should have happened here!")
+        }
+        #[inline(always)]
+        fn processor_error_message(err: String) -> DummyResponsiveClientAndServerMessages {
+            panic!("socket_server.rs unit tests: protocol error when none should have happened: {err}");
+        }
+    }
+    impl ResponsiveMessages<DummyResponsiveClientAndServerMessages> for DummyResponsiveClientAndServerMessages {
+        #[inline(always)]
+        fn is_disconnect_message(_processor_answer: &DummyResponsiveClientAndServerMessages) -> bool {
+            false
+        }
+        #[inline(always)]
+        fn is_no_answer_message(_processor_answer: &DummyResponsiveClientAndServerMessages) -> bool {
+            false
+        }
+    }
+    impl ReactiveMessagingDeserializer<DummyResponsiveClientAndServerMessages> for DummyResponsiveClientAndServerMessages {
+        #[inline(always)]
+        fn deserialize(local_message: &[u8]) -> Result<DummyResponsiveClientAndServerMessages, Box<dyn std::error::Error + Sync + Send>> {
+            ron_deserializer(local_message)
+        }
+    }
+
 }
