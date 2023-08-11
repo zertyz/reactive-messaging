@@ -37,22 +37,45 @@ macro_rules! new_responsive_socket_server {
      $interface_ip:    expr,
      $port:            expr,
      $remote_messages: ty,
-     $local_messages:  ty) => {
+     $local_messages:  ty,
+     $connection_events_handle_fn: expr,
+     $dialog_processor_builder_fn: expr) => {
         {
             const CONFIG:                    usize = $const_config.into();
             const PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
             const PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
             const SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
-            ResponsiveSocketServer::<CONFIG, PROCESSOR_BUFFER, PROCESSOR_UNI_INSTRUMENTS, SENDER_BUFFER, $remote_messages, $local_messages> {
-                interface_ip: $interface_ip.to_string(),
-                port:         $port,
-                _phantom:     PhantomData,
+            match $const_config.channel {
+                Channels::Atomic => {
+                    let server = CustomResponsiveSocketServer::<CONFIG,
+                                                                                            $remote_messages,
+                                                                                            $local_messages,
+                                                                                            UniZeroCopyAtomic<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                            ChannelUniMoveAtomic<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
+                    server.spawn_responsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
+                },
+                Channels::FullSync => {
+                    let server = CustomResponsiveSocketServer::<CONFIG,
+                                                                                            $remote_messages,
+                                                                                            $local_messages,
+                                                                                            UniZeroCopyFullSync<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                            ChannelUniMoveFullSync<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
+                    server.spawn_responsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
+                },
+                Channels::Crossbean => {
+                    let server = CustomResponsiveSocketServer::<CONFIG,
+                                                                                            $remote_messages,
+                                                                                            $local_messages,
+                                                                                            UniMoveCrossbeam<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                            ChannelUniMoveCrossbeam<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
+                    server.spawn_responsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
+                },
             }
         }
     }
 }
 pub use new_responsive_socket_server;
-
+/*
 /// Used to [Self::spawn_responsive_processor()].\
 /// Instantiating this trait directly is not recommended -- the macro [new_responsive_socket_server!()] should be used instead
 pub struct ResponsiveSocketServer<const CONFIG:                    usize,
@@ -164,7 +187,7 @@ ResponsiveSocketServer<CONFIG, PROCESSOR_BUFFER, PROCESSOR_UNI_INSTRUMENTS, SEND
     type StreamItemType      = ();
     type StreamType          = ();
 }
-
+*/
 
 /// This is the internal one. Users must use [UnresponsiveSocketServer] instead.
 #[derive(Debug)]
@@ -211,26 +234,24 @@ CustomResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     }
 }
 
-#[async_trait]
+//#[async_trait]
 impl<const CONFIG:   usize,
      RemoteMessages:     ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:      ReactiveMessagingSerializer<LocalMessages>                                  +
                          ResponsiveMessages<LocalMessages>                                           + Send + Sync + PartialEq + Debug + 'static,
-     _ProcessorUniType:  GenericUni<ItemType=RemoteMessages>                                         + Send + Sync + 'static,
-     _SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
-ServerResponsiveProcessor for
-CustomResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, _ProcessorUniType, _SenderChannelType> {
+     ProcessorUniType:   GenericUni<ItemType=RemoteMessages>                                         + Send + Sync + 'static,
+     SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
+//ServerResponsiveProcessor for
+CustomResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
 
-    const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
+//    const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
 
     /// Spawns a task to run a Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
     /// an object through which the caller may inquire some stats (if opted in) and request the server to shutdown.\
     /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `reactive-mutiny` Stream
     /// that will produce non-futures & non-fallibles `ServerMessages` that will be sent to the clients.
-    async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=Self::LocalMessages>                                                                                                                                                                    + Send        + 'static,
+    async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                          + Send        + 'static,
                                         ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                   + Send,
-                                        ProcessorUniType:                GenericUni<ItemType=Self::RemoteMessages>                                                                                                                                                           + Send + Sync + 'static,
-                                        SenderChannelType:               FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages>                                                                                                             + Sync + Send + 'static,
                                         ConnectionEventsCallback:        Fn(/*server_event: */ConnectionEvent<SenderChannelType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                         ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<SenderChannelType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
 
@@ -341,6 +362,7 @@ mod tests {
     use crate::{ron_deserializer, ron_serializer};
     use std::borrow::Borrow;
     use std::future;
+    use std::ops::Deref;
     use serde::{Deserialize, Serialize};
     use futures::stream::StreamExt;
 
@@ -348,20 +370,20 @@ mod tests {
     /// Test that our types can be compiled & instantiated & are ready for usage
     #[cfg_attr(not(doc),tokio::test)]
     async fn doc_usage() {
-        let mut server = new_responsive_socket_server!(
+        let server = new_responsive_socket_server!(
             ConstConfig::default(),
             "127.0.0.1",
             8060,
             DummyResponsiveClientAndServerMessages,
-            DummyResponsiveClientAndServerMessages
+            DummyResponsiveClientAndServerMessages,
+            connection_events_handler,
+            processor
         );
-        server.spawn_responsive_processor(connection_events_handler, processor).await;
-
         async fn connection_events_handler<SenderChannelType: FullDuplexUniChannel<ItemType=DummyResponsiveClientAndServerMessages, DerivedItemType=DummyResponsiveClientAndServerMessages> + Sync + Send + 'static>
                                           (event: ConnectionEvent<SenderChannelType>) {
         }
         fn processor<SenderChannelType: FullDuplexUniChannel<ItemType=DummyResponsiveClientAndServerMessages, DerivedItemType=DummyResponsiveClientAndServerMessages> + Sync + Send + 'static,
-                     StreamItemType: Borrow<DummyResponsiveClientAndServerMessages>>
+                     StreamItemType:    Deref<Target=DummyResponsiveClientAndServerMessages>>
                     (client_addr:            String,
                      connected_port:         u16,
                      peer:                   Arc<Peer<SenderChannelType>>,
@@ -377,6 +399,13 @@ mod tests {
     enum DummyResponsiveClientAndServerMessages {
         #[default]
         FloodPing,
+    }
+
+    impl Deref for DummyResponsiveClientAndServerMessages {
+        type Target = DummyResponsiveClientAndServerMessages;
+        fn deref(&self) -> &Self::Target {
+            self
+        }
     }
 
     impl ReactiveMessagingSerializer<DummyResponsiveClientAndServerMessages> for DummyResponsiveClientAndServerMessages {
