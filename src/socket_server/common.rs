@@ -1,4 +1,4 @@
-//! Contains some functions used across this module
+//! Contains some functions and other goodies used across this module
 
 
 use crate::prelude::ConnectionEvent;

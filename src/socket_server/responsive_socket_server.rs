@@ -1,4 +1,4 @@
-//! Provides a Server whose processor function yields messages to be sent back to the client
+//! Provides a Server whose processor's output `Stream` yields messages to be sent back to the client.\
 //! See also [super::unresponsive_socket_server]
 //!
 //! In case some messages yields no messages, the [ResponsiveMessages<>] trait provides a "No Answer" option, that may be returned by the dialog processor.\
@@ -21,7 +21,7 @@ use crate::config::{Channels, ConstConfig};
 use crate::prelude::{ConnectionEvent, MessagingMutinyStream};
 use crate::socket_connection_handler::{Peer, SocketConnectionHandler};
 use crate::socket_server::common::upgrade_to_shutdown_tracking;
-use crate::socket_server::socket_server_types::{ResponsiveSocketServerAssociatedTypes, SocketServerController};
+use crate::types::{ReactiveResponsiveProcessorAssociatedTypes, ReactiveProcessorController, ReactiveResponsiveProcessor};
 
 
 /// Instantiates & allocate resources for a [ResponsiveSocketServer], ready to be later started.\
@@ -32,8 +32,8 @@ use crate::socket_server::socket_server_types::{ResponsiveSocketServerAssociated
 ///   - `const_config: ConstConfig` -- the configurations for the server, enforcing const time optimizations;
 ///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
 ///   - `port: u16` -- the port to listen to incoming connections;
-///   - `RemoteMessages` -- the type of the messages produced by the clients. See [ResponsibleSocketServer] for the traits it should implement;
-///   - `LocalMessage` -- the type of the messages produced by this server. See [ResponsibleSocketServer] for the traits it should implement.
+///   - `RemoteMessages` -- the type of the messages produced by the clients. See [ReactiveResponsiveProcessorAssociatedTypes] for the traits it should implement;
+///   - `LocalMessage` -- the type of the messages produced by this server. See [ReactiveResponsiveProcessorAssociatedTypes] for the traits it should implement.
 ///   - `connection_events_handle_fn` -- the generic function to handle connected, disconnected and shutdown events (possibly to manage sessions). Sign it as:
 ///     ```nocompile
 ///      async fn connection_events_handler<SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages,
@@ -100,7 +100,7 @@ macro_rules! new_responsive_socket_server {
 pub use new_responsive_socket_server;
 
 
-/// Represents a Socket Server whose `dialog_processor` streams will produce messages to be sent back to the clients.\
+/// Defines a Socket Server whose `dialog_processor` output streams will produce messages to be sent back to the clients.\
 /// Users of this struct may prefer to use it through the facility macro [new_responsive_socket_server!()]
 #[derive(Debug)]
 pub struct ResponsiveSocketServer<const CONFIG:      usize,
@@ -145,46 +145,44 @@ ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
     }
 }
 
+#[async_trait]
 impl<const CONFIG:   usize,
      RemoteMessages:     ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:      ReactiveMessagingSerializer<LocalMessages>                                  +
                          ResponsiveMessages<LocalMessages>                                           + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:   GenericUni<ItemType=RemoteMessages>                                         + Send + Sync + 'static,
      SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
+ReactiveResponsiveProcessor for
 ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
 
-    /// Spawns a task to run a Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
-    /// an object through which the caller may inquire some stats (if opted in) and request the server to shutdown.\
-    /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `Stream`
-    /// that will produce non-futures & non-fallibles `ServerMessages` that will be sent to the clients.
-    async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                          + Send        + 'static,
-                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                   + Send,
-                                        ConnectionEventsCallback:        Fn(/*server_event: */ConnectionEvent<SenderChannelType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                        ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<SenderChannelType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
+    async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                      + Send        + 'static,
+                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                               + Send,
+                                        ConnectionEventsCallback:        Fn(/*server_event: */ConnectionEvent<Self::SenderChannelType>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                        ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::SenderChannelType>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
 
                                        (mut self,
                                         connection_events_callback:  ConnectionEventsCallback,
                                         dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                       -> Result<Box<dyn SocketServerController>, Box<dyn std::error::Error + Sync + Send>> {
+                                       -> Result<Box<dyn ReactiveProcessorController>, Box<dyn std::error::Error + Sync + Send>> {
 
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
         self.server_shutdown_signaler = Some(server_shutdown_sender);
         self.local_shutdown_receiver = Some(local_shutdown_receiver);
-        let listening_interface = self.interface_ip.to_string();
+        let listening_interface = self.interface_ip.clone();
         let port = self.port;
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
         let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType>::new();
         socket_connection_handler.server_loop_for_responsive_text_protocol
-            (listening_interface.to_string(),
+            (listening_interface.clone(),
              port,
              server_shutdown_receiver,
              connection_events_callback,
              dialog_processor_builder_fn).await
-            .map_err(|err| format!("Error starting SocketServer @ {listening_interface}:{port}: {:?}", err))?;
+            .map_err(|err| format!("Error starting ResponsiveSocketServer @ {listening_interface}:{port}: {:?}", err))?;
         Ok(Box::new(self))
     }
 }
@@ -195,7 +193,7 @@ impl<const CONFIG:   usize,
                         ResponsiveMessages<LocalMessages>                                           + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:  GenericUni<ItemType=RemoteMessages>              + Send + Sync + 'static,
      SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
-SocketServerController for
+ReactiveProcessorController for
 ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
 
     fn shutdown_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
@@ -207,10 +205,10 @@ ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
                         Ok(()) => {
                             Ok(())
                         },
-                        Err(err) => Err(Box::from(format!("SocketServer::wait_for_shutdown(): It is no longer possible to tell when the server will be shutdown: `one_shot` signal error: {err}")))
+                        Err(err) => Err(Box::from(format!("ResponsiveSocketServer::wait_for_shutdown(): It is no longer possible to tell when the server will be shutdown: `one_shot` signal error: {err}")))
                     }
                 } else {
-                    Err(Box::from("SocketServer: \"wait for shutdown\" requested, but the service was not started (or a previous shutdown was commanded) at the moment `shutdown_waiter()` was called"))
+                    Err(Box::from("ResponsiveSocketServer: \"wait for shutdown\" requested, but the service was not started (or a previous shutdown was commanded) at the moment `shutdown_waiter()` was called"))
                 }
             }
         }))
@@ -219,15 +217,15 @@ ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
     fn shutdown(mut self: Box<Self>, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match self.server_shutdown_signaler.take() {
             Some(server_sender) => {
-                warn!("Socket Server: Shutdown asked & initiated for server @ {}:{} -- timeout: {timeout_ms}ms", self.interface_ip, self.port);
+                warn!("ResponsiveSocketServer: Shutdown asked & initiated for server @ {}:{} -- timeout: {timeout_ms}ms", self.interface_ip, self.port);
                 if let Err(_sent_value) = server_sender.send(timeout_ms) {
-                    Err(Box::from("Socket Server BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix!"))
+                    Err(Box::from("ResponsiveSocketServer BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix!"))
                 } else {
                     Ok(())
                 }
             }
             None => {
-                Err(Box::from("Socket Server: Shutdown requested, but the service was not started. Ignoring..."))
+                Err(Box::from("ResponsiveSocketServer: Shutdown requested, but the service was not started. Ignoring..."))
             }
         }
     }
@@ -241,7 +239,7 @@ impl<const CONFIG:   usize,
                         ResponsiveMessages<LocalMessages>                                           + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:  GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
      SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send                     + 'static>
-ResponsiveSocketServerAssociatedTypes for
+ReactiveResponsiveProcessorAssociatedTypes for
 ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
     type RemoteMessages      = RemoteMessages;
     type LocalMessages       = LocalMessages;
@@ -282,7 +280,7 @@ mod tests {
             processor
         )?;
         async fn connection_events_handler<SenderChannelType: FullDuplexUniChannel<ItemType=DummyResponsiveClientAndServerMessages, DerivedItemType=DummyResponsiveClientAndServerMessages> + Sync + Send + 'static>
-                                          (event: ConnectionEvent<SenderChannelType>) {
+                                          (_event: ConnectionEvent<SenderChannelType>) {
         }
         fn processor<SenderChannelType: FullDuplexUniChannel<ItemType=DummyResponsiveClientAndServerMessages, DerivedItemType=DummyResponsiveClientAndServerMessages> + Sync + Send + 'static,
                      StreamItemType:    Deref<Target=DummyResponsiveClientAndServerMessages>>

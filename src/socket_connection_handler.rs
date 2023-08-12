@@ -160,10 +160,9 @@ impl<const CONFIG:                    usize,
                 let processor_sender = ProcessorUniType::new(format!("Server processor for remote client {addr} @ {listening_interface}:{listening_port}"))
                     .spawn_non_futures_non_fallibles_executors(1,
                                                                |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
-                                                               move |executor| {
+                                                               move |executor| async move {
                                                                 // issue the async disconnect event
-                                                                futures::executor::block_on(connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }));
-                                                                future::ready(())
+                                                                connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
                                                             });
 
                 // spawn a task to handle communications with that client
@@ -184,7 +183,7 @@ impl<const CONFIG:                    usize,
     #[inline(always)]
     pub async fn client_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                   Send + Sync + Debug + 'static,
                                                        OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                     + Send                + 'static,
-                                                       ConnectionEventsCallbackFuture: Future<Output=()>,
+                                                       ConnectionEventsCallbackFuture: Future<Output=()> + Send,
                                                        ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<SenderChannelType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
                                                        ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<SenderChannelType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
@@ -210,13 +209,14 @@ impl<const CONFIG:                    usize,
         // issue the connection event
         connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
 
+        let connection_events_callback_ref1 = Arc::new(connection_events_callback);
+        let connection_events_callback_ref2 = Arc::clone(&connection_events_callback_ref1);
         let processor_sender = ProcessorUniType::new(format!("Client Processor for remote server @ {addr}"))
             .spawn_non_futures_non_fallibles_executors(1,
                                                     |in_stream| dialog_processor_builder_fn(server_ipv4_addr.clone(), port, peer_ref1.clone(), in_stream),
-                                                    move |executor| {
+                                                    move |executor| async move {
                                                         // issue the async disconnect event
-                                                        futures::executor::block_on(connection_events_callback(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }));
-                                                        future::ready(())
+                                                        connection_events_callback_ref1(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
                                                     });
 
         // spawn the processor
@@ -234,6 +234,8 @@ impl<const CONFIG:                    usize,
                     5000    // consider this as the "problematic shutdown timeout (millis) constant"
                 },
             };
+            // issue the shutdown event
+            connection_events_callback_ref2(ConnectionEvent::ApplicationShutdown {timeout_ms}).await;
             // close the connection
             peer_ref3.sender.gracefully_end_all_streams(Duration::from_millis(timeout_ms as u64)).await;
         });
@@ -407,7 +409,7 @@ impl<const CONFIG:                    usize,
     /// answers of type `ClientMessages`, which will be automatically routed to the server.
     #[inline(always)]
     pub async fn client_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                      + Send +        'static,
-                                                     ConnectionEventsCallbackFuture: Future<Output=()>,
+                                                     ConnectionEventsCallbackFuture: Future<Output=()> + Send,
                                                      ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<SenderChannelType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                                      ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<SenderChannelType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 

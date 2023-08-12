@@ -21,3 +21,4 @@ pub use socket_server::*;
 
 mod socket_client;
 pub use socket_client::*;
+mod old_socket_client;  // TODO REMOVE THIS ONCE THE ABOVE IS COMPLETE
