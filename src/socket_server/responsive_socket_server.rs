@@ -1,4 +1,4 @@
-//! Provides a Server whose processor's output `Stream` yields messages to be sent back to the client.\
+//! Provides a Server whose processor's output `Stream` yields messages to be sent back to each client.\
 //! See also [super::unresponsive_socket_server]
 //!
 //! In case some messages yields no messages, the [ResponsiveMessages<>] trait provides a "No Answer" option, that may be returned by the dialog processor.\

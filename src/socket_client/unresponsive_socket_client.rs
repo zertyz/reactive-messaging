@@ -48,7 +48,7 @@ use crate::types::{ReactiveProcessorController, ReactiveSocketClient, ReactiveUn
 ///   - `ip: IntoString` -- the ip to connect to;
 ///   - `port: u16` -- the port to connect to;
 ///   - `RemoteMessages` -- the type of the messages produced by the server. See [ReactiveUnresponsiveProcessorAssociatedTypes] for the traits it should implement;
-///   - `LocalMessage` -- the type of the messages produced by this server. See [ReactiveUnresponsiveProcessorAssociatedTypes] for the traits it should implement.
+///   - `LocalMessage` -- the type of the messages produced by this client. See [ReactiveUnresponsiveProcessorAssociatedTypes] for the traits it should implement.
 ///   - `connection_events_handle_fn` -- the generic function to handle connected, disconnected and shutdown events. Sign it as:
 ///     ```nocompile
 ///      async fn connection_events_handler<SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages,
@@ -89,7 +89,7 @@ macro_rules! new_unresponsive_socket_client {
                                                             UniZeroCopyAtomic<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
                                                             ChannelUniMoveAtomic<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
                     server.spawn_unresponsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
-                        .map_err(|err| format!("UnresponsiveSocketClient: error starting server with configs «{:?}»: {:?}", $const_config, err))
+                        .map_err(|err| format!("UnresponsiveSocketClient: error starting client with configs «{:?}»: {:?}", $const_config, err))
                 },
                 Channels::FullSync => {
                     let server = UnresponsiveSocketClient::<CONFIG,
@@ -98,7 +98,7 @@ macro_rules! new_unresponsive_socket_client {
                                                             UniZeroCopyFullSync<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
                                                             ChannelUniMoveFullSync<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
                     server.spawn_unresponsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
-                        .map_err(|err| format!("UnresponsiveSocketClient: error starting server with configs «{:?}»: {:?}", $const_config, err))
+                        .map_err(|err| format!("UnresponsiveSocketClient: error starting client with configs «{:?}»: {:?}", $const_config, err))
                 },
                 Channels::Crossbean => {
                     let server = UnresponsiveSocketClient::<CONFIG,
@@ -107,7 +107,7 @@ macro_rules! new_unresponsive_socket_client {
                                                             UniMoveCrossbeam<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
                                                             ChannelUniMoveCrossbeam<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
                     server.spawn_unresponsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
-                        .map_err(|err| format!("UnresponsiveSocketClient: error starting server with configs «{:?}»: {:?}", $const_config, err))
+                        .map_err(|err| format!("UnresponsiveSocketClient: error starting client with configs «{:?}»: {:?}", $const_config, err))
                 },
             }
         }
@@ -145,12 +145,11 @@ impl<const CONFIG:   usize,
      SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
 UnresponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
 
-    /// Creates a client to connect to a TCP/IP Server:
+    /// Instantiates a client to connect to a TCP/IP Server:
     ///   `ip`:                   the server IP to connect to
     ///   `port`:                 the server port to connect to
-    ///   `processor_builder_fn`: a function to instantiate a new processor `Stream` when a connection happens
     pub fn new<IntoString: Into<String>>
-              (ip: IntoString,
+              (ip:   IntoString,
                port: u16)
               -> Self {
         Self {
