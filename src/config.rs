@@ -176,6 +176,13 @@ impl ConstConfig {
     const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 49..=57;
 
 
+    /// Contains sane & performant defaults.\
+    /// Usage example:
+    /// ```nocompile
+    ///  const CONFIG: ConstConfig = ConstConfig {
+    ///     receiver_buffer: 1024,
+    ///     ..ConstConfig::default()
+    /// };
     pub const fn default() -> ConstConfig {
         ConstConfig {
             msg_size_hint:                  1024,

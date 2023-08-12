@@ -267,7 +267,7 @@ CustomUnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorU
         }))
     }
 
-    fn shutdown(mut self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error>> {
+    fn shutdown(mut self: Box<Self>, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match self.server_shutdown_signaler.take() {
             Some(server_sender) => {
                 warn!("Socket Server: Shutdown asked & initiated for server @ {}:{} -- timeout: {timeout_ms}ms", self.interface_ip, self.port);
