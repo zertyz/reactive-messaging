@@ -24,7 +24,10 @@ use crate::socket_server::common::upgrade_to_shutdown_tracking;
 use crate::socket_server::socket_server_types::{ResponsiveSocketServerAssociatedTypes, SocketServerController};
 
 
-/// Instantiates & allocate resources for a [ResponsibleSocketServer], ready to be later started.\
+/// Instantiates & allocate resources for a [ResponsiveSocketServer], ready to be later started.\
+/// A Responsive Socket Server is defined by its `dialog_processor_builder_fn()`, which will produce a `Stream` of messages
+/// to be automatically sent to the clients.\
+/// See [new_unresponsive_socket_server!()] if your dialog model is too off of 1-to-1, regarding requests & answers.\
 /// Params:
 ///   - `const_config: ConstConfig` -- the configurations for the server, enforcing const time optimizations;
 ///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
@@ -37,7 +40,8 @@ use crate::socket_server::socket_server_types::{ResponsiveSocketServerAssociated
 ///                                                                                 DerivedItemType=LocalMessages> + Sync + Send + 'static>
 ///                                        (event: ConnectionEvent<SenderChannelType>)
 ///     ```
-///   - `dialog_processor_builder_fn` -- the generic function that returns the `Stream` to handle messages -- called once for each client. Sign it as:
+///   - `dialog_processor_builder_fn` -- the generic function that receives the `Stream` of client messages and returns the `Stream` of server messages to
+///                                      be sent to the clients -- called once for each client. Sign it as:
 ///     ```nocompile
 ///     fn processor<SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static,
 ///                  StreamItemType:    Deref<Target=RemoteMessages>>
@@ -151,7 +155,7 @@ ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
 
     /// Spawns a task to run a Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
     /// an object through which the caller may inquire some stats (if opted in) and request the server to shutdown.\
-    /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `reactive-mutiny` Stream
+    /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `Stream`
     /// that will produce non-futures & non-fallibles `ServerMessages` that will be sent to the clients.
     async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                          + Send        + 'static,
                                         ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                   + Send,
@@ -249,7 +253,7 @@ ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
 }
 
 
-/// Unit tests the [socket_server](self) module
+/// Unit tests the [responsive_socket_server](self) module
 #[cfg(any(test,doc))]
 mod tests {
     use super::*;

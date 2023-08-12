@@ -14,33 +14,6 @@ use crate::socket_connection_handler::Peer;
 use crate::types::ConnectionEvent;
 
 
-/// Contract for spawning a unresponsive server with the given connection & dialog processor functions, returning a controller for the running daemon
-#[async_trait]
-pub trait ServerUnresponsiveProcessor: UnresponsiveSocketServerGenericTypes {
-
-    const CONST_CONFIG:              ConstConfig;
-
-    /// Spawns a task to run a Server listening @ `self`'s `interface_ip` & `port` and returns, immediately,
-    /// an object through which the caller may inquire some stats (if opted in) and request the server to shutdown.\
-    /// The given `dialog_processor_builder_fn` will be called for each new client and will return a `reactive-mutiny` Stream
-    /// that will produce non-futures & non-fallibles items that won't be sent to the clients
-    /// -- if you want the processor to produce "answer messages" to the clients, see [SocketServer::spawn_responsive_processor()].
-    async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                Send + Sync + Debug + 'static,
-                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                  + Send                + 'static,
-                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                   + Send,
-                                          ProcessorUniType:               GenericUni<ItemType=Self::RemoteMessages>                                                                                                                                                           + Send + Sync         + 'static,
-                                          SenderChannelType:              FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages>                                                                                                             + Sync + Send         + 'static,
-                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<SenderChannelType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<SenderChannelType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync         + 'static>
-
-                                         (self,
-                                          connection_events_callback:  ConnectionEventsCallback,
-                                          dialog_processor_builder_fn: ProcessorBuilderFn)
-
-                                         -> Result<Arc<dyn SocketServerController>, Box<dyn std::error::Error + Sync + Send + 'static>>;
-
-}
-
 /// Controls a [SocketServer] after it has been started -- shutting down, asking for stats, ....
 pub trait SocketServerController {
     /// Returns an async closure that blocks until [Self::shutdown()] is called.
@@ -57,21 +30,13 @@ pub trait SocketServerController {
 }
 
 
-/// Fills in the same purpose as [UnresponsiveSocketServerGenericTypes], but provides additional types
-/// that are filled in only by the [CustomUnresponsiveSocketServer]
-pub trait UnresponsiveSocketServerAssociatedTypes: UnresponsiveSocketServerGenericTypes + UnresponsiveSocketServerGenericTypes {
+/// Helps to infer some types used by [UnresponsiveSocketServer] implementations -- also helping to simplify Generic Programming when used as a Generic Parameter.\
+pub trait UnresponsiveSocketServerAssociatedTypes {
+    type RemoteMessages:      ReactiveMessagingDeserializer<Self::RemoteMessages>                                     + Send + Sync + PartialEq + Debug + 'static;
+    type LocalMessages:       ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug + 'static;
     type ProcessorUniType:    GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync + 'static;
     type SenderChannelType:   FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Sync + Send + 'static;
     type ConnectionEventType;
-}
-
-/// Helps to infer some types used by [UnresponsiveSocketServer] implementations -- also helping to simplify Generic Programming when used as a Generic Parameter.\
-/// See also [ResponsiveSocketServerAssociatedTypes]
-/// ```nocompile
-///     type THE_TYPE_I_WANT = <SocketServer<...> as GenericSocketServer>::THE_TYPE_YOU_WANT
-pub trait UnresponsiveSocketServerGenericTypes {
-    type RemoteMessages:      ReactiveMessagingDeserializer<Self::RemoteMessages>                                     + Send + Sync + PartialEq + Debug + 'static;
-    type LocalMessages:       ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug + 'static;
     type StreamItemType;
     type StreamType;
 }
