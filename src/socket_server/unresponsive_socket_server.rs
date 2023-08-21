@@ -31,7 +31,7 @@ use futures::Stream;
 use log::warn;
 use crate::config::{Channels, ConstConfig};
 use crate::prelude::{ConnectionEvent, MessagingMutinyStream};
-use crate::socket_connection::{Peer, UnresponsiveSocketConnectionHandler};
+use crate::socket_connection::{Peer, SocketConnectionHandler};
 use crate::socket_server::common::upgrade_to_shutdown_tracking;
 use crate::types::{ReactiveProcessorController, ReactiveUnresponsiveProcessor, ReactiveUnresponsiveProcessorAssociatedTypes};
 use crate::socket_connection::common::{RetryableSender, ReactiveMessagingSender};
@@ -192,7 +192,7 @@ UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
-        let socket_connection_handler = UnresponsiveSocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol(listening_interface.clone(),
                                                                              port,
                                                                              server_shutdown_receiver,

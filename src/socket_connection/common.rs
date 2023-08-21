@@ -381,7 +381,7 @@ mod tests {
     use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
     use crate::types::ResponsiveMessages;
 
-    /// Test implementation for our text-only protocol
+    /// Test implementation for our text-only protocol as used across this module
     impl ReactiveMessagingSerializer<String> for String {
         #[inline(always)]
         fn serialize(message: &String, buffer: &mut Vec<u8>) {
@@ -409,7 +409,7 @@ mod tests {
         }
     }
 
-    /// Testable implementation for our text-only protocol
+    /// Testable implementation for our text-only protocol as used across this module
     impl ReactiveMessagingDeserializer<String> for String {
         #[inline(always)]
         fn deserialize(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send + 'static>> {

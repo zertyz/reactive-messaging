@@ -19,7 +19,7 @@ use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use crate::config::{Channels, ConstConfig};
 use crate::prelude::{ConnectionEvent, MessagingMutinyStream};
-use crate::socket_connection::{Peer, ResponsiveSocketConnectionHandler, UnresponsiveSocketConnectionHandler};
+use crate::socket_connection::{Peer, SocketConnectionHandler};
 use crate::socket_server::common::upgrade_to_shutdown_tracking;
 use crate::types::{ReactiveResponsiveProcessorAssociatedTypes, ReactiveProcessorController, ReactiveResponsiveProcessor, ResponsiveMessages};
 use crate::socket_connection::common::ReactiveMessagingSender;
@@ -180,7 +180,7 @@ ResponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
-        let socket_connection_handler = ResponsiveSocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl>::new();
         socket_connection_handler.server_loop_for_responsive_text_protocol
             (listening_interface.clone(),
              port,

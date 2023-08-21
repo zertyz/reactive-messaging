@@ -35,7 +35,7 @@ use log::warn;
 use tokio::sync::oneshot::error::TryRecvError;
 use crate::config::{Channels, ConstConfig};
 use crate::prelude::{ConnectionEvent, MessagingMutinyStream};
-use crate::socket_connection::{Peer, UnresponsiveSocketConnectionHandler, common::ReactiveMessagingSender};
+use crate::socket_connection::{Peer, SocketConnectionHandler, common::ReactiveMessagingSender};
 use crate::types::{ReactiveProcessorController, ReactiveSocketClient, ReactiveUnresponsiveProcessor, ReactiveUnresponsiveProcessorAssociatedTypes};
 
 
@@ -198,7 +198,7 @@ UnresponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 
         let connection_events_callback = upgrade_to_shutdown_and_connected_state_tracking(&self.connected, local_shutdown_sender, connection_events_callback);
 
-        let socket_connection_handler = UnresponsiveSocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl>::new();
         socket_connection_handler.client_for_unresponsive_text_protocol(ip.clone(),
                                                                         port,
                                                                         client_shutdown_receiver,
