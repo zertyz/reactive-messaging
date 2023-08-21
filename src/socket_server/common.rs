@@ -9,16 +9,17 @@ use futures::future::BoxFuture;
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use tokio::sync::Mutex;
 use log::{warn, error};
+use crate::socket_connection::common::RetryableSender;
 
 /// Upgrades the user provided `connection_events_callback()` into a callback able to keep track of the shutdown event
 /// -- so the "shutdown is complete" signal may be sent
-pub(crate) fn upgrade_to_shutdown_tracking<SenderChannelType:              FullDuplexUniChannel + Sync + Send + 'static,
+pub(crate) fn upgrade_to_shutdown_tracking<RetryableSenderImpl:            RetryableSender   + Send + Sync + 'static,
                                            ConnectionEventsCallbackFuture: Future<Output=()> + Send>
 
                                           (shutdown_is_complete_signaler:            tokio::sync::oneshot::Sender<()>,
-                                           user_provided_connection_events_callback: impl Fn(ConnectionEvent<SenderChannelType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                           user_provided_connection_events_callback: impl Fn(ConnectionEvent<RetryableSenderImpl>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                                          -> impl Fn(ConnectionEvent<SenderChannelType>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
+                                          -> impl Fn(ConnectionEvent<RetryableSenderImpl>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
 
     let shutdown_is_complete_signaler = Arc::new(Mutex::new(Option::Some(shutdown_is_complete_signaler)));
     let user_provided_connection_events_callback = Arc::new(user_provided_connection_events_callback);

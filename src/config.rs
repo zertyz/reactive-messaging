@@ -12,7 +12,7 @@ use strum_macros::FromRepr;
 pub enum Channels {
     Atomic,
     FullSync,
-    Crossbean,
+    Crossbeam,
 }
 
 /// Specifies how to behave when communication failures happen
@@ -189,7 +189,7 @@ impl ConstConfig {
             sender_buffer:                  2048,
             receiver_buffer:                2048,
             graceful_close_timeout_millis:  256,
-            retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(14),
+            retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(20),
             socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
             channel:                        Channels::Atomic,
             executor_instruments:           Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),

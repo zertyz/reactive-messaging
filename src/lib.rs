@@ -1,7 +1,8 @@
 pub(crate) mod config;
 
-mod socket_connection_handler;
-pub use crate::socket_connection_handler::ResponsiveMessages;
+mod socket_connection;
+//mod socket_connection_handler; // TODO REMOVE THIS ONCE THE ABOVE IS COMPLETE
+//pub use crate::socket_connection_handler::ResponsiveMessages;
 
 mod serde;
 pub use crate::serde::{
@@ -21,4 +22,4 @@ pub use socket_server::*;
 
 mod socket_client;
 pub use socket_client::*;
-mod old_socket_client;  // TODO REMOVE THIS ONCE THE ABOVE IS COMPLETE
+//mod old_socket_client;  // TODO REMOVE THIS ONCE THE ABOVE IS COMPLETE

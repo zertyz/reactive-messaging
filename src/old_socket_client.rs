@@ -3,9 +3,7 @@
 
 use crate::{
     types::ConnectionEvent,
-    socket_connection_handler::{self, Peer},
     ReactiveMessagingDeserializer,
-    ResponsiveMessages,
     ReactiveMessagingSerializer,
 };
 use std::{
@@ -22,8 +20,7 @@ use tokio::sync::oneshot::Sender;
 use log::warn;
 use reactive_mutiny::prelude::advanced::{Instruments, ChannelUniMoveAtomic, UniZeroCopyAtomic, FullDuplexUniChannel};
 use crate::config::ConstConfig;
-use crate::socket_connection_handler::SocketConnectionHandler;
-use crate::types::MessagingMutinyStream;
+use crate::types::{MessagingMutinyStream, ResponsiveMessages};
 
 
 // TO BE DETERMINED BY THE CONFIG PARAMS

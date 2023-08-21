@@ -1,6 +1,6 @@
 //! Common types used across this crate
 
-use crate::socket_connection_handler::Peer;
+use crate::socket_connection::Peer;
 use std::{
     fmt::Debug,
     sync::Arc,
@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::Stream;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni, MutinyStream};
-use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer, ResponsiveMessages};
+use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use crate::socket_connection::common::RetryableSender;
 
 
 /// Concrete type of the `Stream`s this crate produces.\
@@ -26,14 +27,31 @@ use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer, Responsi
 pub type MessagingMutinyStream<GenericUniType: GenericUni> = MutinyStream<'static, GenericUniType::ItemType, GenericUniType::UniChannelType, GenericUniType::DerivedItemType>;
 
 
+/// Adherents will, typically, also implement [ReactiveMessagingUnresponsiveSerializer].\
+/// By upgrading your type with this trait, it is possible to build a "Responsive Processor", where the returned `Stream`
+/// contains the messages to be sent as an answer to the remote peer.\
+/// This trait, therefore, specifies (to the internal sender) how to handle special response cases, like "no answer" and "disconnection" messages.
+pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMessages> + Send + PartialEq + Debug> {
+
+    /// Informs the internal sender if the given `processor_answer` is a "disconnect" message & command (issued by the messages processor logic)\
+    /// -- in which case, the network processor will send it and, immediately, close the connection.\
+    /// IMPLEMENTORS: #[inline(always)]
+    fn is_disconnect_message(processor_answer: &LocalPeerMessages) -> bool;
+
+    /// Tells if internal sender if the given `processor_answer` represents a "no message" -- a message that should produce no answer to the peer.\
+    /// IMPLEMENTORS: #[inline(always)]
+    fn is_no_answer_message(processor_answer: &LocalPeerMessages) -> bool;
+}
+
+
 /// The internal events a reactive processor (for a server or client) shares with the user code.\
 /// The user code may use those events to maintain a list of connected clients, be notified of stop/close/quit requests, init/deinit sessions, etc.
 /// Note that the `Peer` objects received in those events may be used, at any time, to send messages to the clients -- like "Shutting down. Goodbye".
 /// *When doing this on other occasions, make sure you won't break your own protocol.*
 #[derive(Debug)]
-pub enum ConnectionEvent<SenderChannelType: FullDuplexUniChannel + Sync + Send> {
-    PeerConnected       {peer: Arc<Peer<SenderChannelType>>},
-    PeerDisconnected    {peer: Arc<Peer<SenderChannelType>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send>},
+pub enum ConnectionEvent<RetryableSenderImpl: RetryableSender + Send + Sync + 'static> {
+    PeerConnected       {peer: Arc<Peer<RetryableSenderImpl>>},
+    PeerDisconnected    {peer: Arc<Peer<RetryableSenderImpl>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send>},
     ApplicationShutdown {timeout_ms: u32},
 }
 
@@ -64,11 +82,11 @@ pub trait ReactiveUnresponsiveProcessor: ReactiveUnresponsiveProcessorAssociated
     /// The given `dialog_processor_builder_fn` will be called for each new connection and will return a `Stream`
     /// that will produce non-futures & non-fallibles items that won't be sent to the peer.\
     /// -- if you want the processor to produce "answer messages" to the peers, see [ReactiveResponsiveProcessor::spawn_responsive_processor()].
-    async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                            Send + Sync + Debug + 'static,
-                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                              + Send                + 'static,
-                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                               + Send,
-                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<Self::SenderChannelType>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::SenderChannelType>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync         + 'static>
+    async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                              Send + Sync + Debug + 'static,
+                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                + Send                + 'static,
+                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                 + Send,
+                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<Self::RetryableSenderImpl>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync         + 'static>
 
                                          (mut self,
                                           connection_events_callback: ConnectionEventsCallback,
@@ -89,10 +107,10 @@ pub trait ReactiveResponsiveProcessor: ReactiveResponsiveProcessorAssociatedType
     /// The given `dialog_processor_builder_fn` will be called for each new connection and will return a `Stream`
     /// that will produce non-futures & non-fallibles items that will be sent to the peer.\
     /// -- if you don't want the processor to produce "answer messages", see [ReactiveUnresponsiveProcessor::spawn_unresponsive_processor()].
-    async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=Self::LocalMessages>                                                                                                                                                                                + Send        + 'static,
-                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                               + Send,
-                                        ConnectionEventsCallback:        Fn(/*server_event: */ConnectionEvent<Self::SenderChannelType>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                        ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::SenderChannelType>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
+    async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=Self::LocalMessages>                                                                                                                                                                                  + Send        + 'static,
+                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                 + Send,
+                                        ConnectionEventsCallback:        Fn(/*server_event: */ConnectionEvent<Self::RetryableSenderImpl>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                        ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
 
                                        (mut self,
                                         connection_events_callback:  ConnectionEventsCallback,
@@ -115,8 +133,8 @@ pub trait ReactiveSocketClient {
 pub trait ReactiveUnresponsiveProcessorAssociatedTypes {
     type RemoteMessages:      ReactiveMessagingDeserializer<Self::RemoteMessages>                                     + Send + Sync + PartialEq + Debug + 'static;
     type LocalMessages:       ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug + 'static;
-    type ProcessorUniType:    GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync + 'static;
-    type SenderChannelType:   FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Sync + Send + 'static;
+    type ProcessorUniType:    GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync                     + 'static;
+    type RetryableSenderImpl: RetryableSender                                                                         + Send + Sync                     + 'static;
     type ConnectionEventType;
     type StreamItemType;
     type StreamType;
@@ -127,8 +145,8 @@ pub trait ReactiveResponsiveProcessorAssociatedTypes {
     type RemoteMessages:      ReactiveMessagingDeserializer<Self::RemoteMessages>                                     + Send + Sync + PartialEq + Debug + 'static;
     type LocalMessages:       ReactiveMessagingSerializer<Self::LocalMessages>                                        +
                               ResponsiveMessages<Self::LocalMessages>                                                 + Send + Sync + PartialEq + Debug + 'static;
-    type ProcessorUniType:    GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync + 'static;
-    type SenderChannelType:   FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Sync + Send + 'static;
+    type ProcessorUniType:    GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync                     + 'static;
+    type RetryableSenderImpl: RetryableSender                                                                         + Send + Sync                     + 'static;
     type ConnectionEventType;
     type StreamItemType;
     type StreamType;

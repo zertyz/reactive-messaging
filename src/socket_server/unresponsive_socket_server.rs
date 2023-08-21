@@ -7,7 +7,7 @@
 //! TODO: The retrying mechanism should should be moved to the `peer.sender`
 
 
-use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer, ResponsiveMessages};
+use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -31,9 +31,10 @@ use futures::Stream;
 use log::warn;
 use crate::config::{Channels, ConstConfig};
 use crate::prelude::{ConnectionEvent, MessagingMutinyStream};
-use crate::socket_connection_handler::{Peer, SocketConnectionHandler};
+use crate::socket_connection::{Peer, UnresponsiveSocketConnectionHandler};
 use crate::socket_server::common::upgrade_to_shutdown_tracking;
 use crate::types::{ReactiveProcessorController, ReactiveUnresponsiveProcessor, ReactiveUnresponsiveProcessorAssociatedTypes};
+use crate::socket_connection::common::{RetryableSender, ReactiveMessagingSender};
 
 
 /// Instantiates & allocate resources for a [UnresponsiveSocketServer], ready to be later started.\
@@ -84,7 +85,8 @@ macro_rules! new_unresponsive_socket_server {
                                                             $remote_messages,
                                                             $local_messages,
                                                             UniZeroCopyAtomic<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                            ChannelUniMoveAtomic<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
+                                                            ReactiveMessagingSender<CONFIG, $local_messages, ChannelUniMoveAtomic<$local_messages, SENDER_BUFFER, 1>> >
+                                                         ::new($interface_ip.to_string(), $port);
                     server.spawn_unresponsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
                         .map_err(|err| format!("UnresponsiveSocketServer: error starting server with configs «{:?}»: {:?}", $const_config, err))
                 },
@@ -93,16 +95,18 @@ macro_rules! new_unresponsive_socket_server {
                                                             $remote_messages,
                                                             $local_messages,
                                                             UniZeroCopyFullSync<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                            ChannelUniMoveFullSync<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
+                                                            ReactiveMessagingSender<CONFIG, $local_messages, ChannelUniMoveFullSync<$local_messages, SENDER_BUFFER, 1>> >
+                                                         ::new($interface_ip.to_string(), $port);
                     server.spawn_unresponsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
                         .map_err(|err| format!("UnresponsiveSocketServer: error starting server with configs «{:?}»: {:?}", $const_config, err))
                 },
-                Channels::Crossbean => {
+                Channels::Crossbeam => {
                     let server = UnresponsiveSocketServer::<CONFIG,
                                                             $remote_messages,
                                                             $local_messages,
                                                             UniMoveCrossbeam<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                            ChannelUniMoveCrossbeam<$local_messages, SENDER_BUFFER, 1> > :: new($interface_ip.to_string(), $port);
+                                                            ReactiveMessagingSender<CONFIG, $local_messages, ChannelUniMoveCrossbeam<$local_messages, SENDER_BUFFER, 1>> >
+                                                         ::new($interface_ip.to_string(), $port);
                     server.spawn_unresponsive_processor($connection_events_handle_fn, $dialog_processor_builder_fn).await
                         .map_err(|err| format!("UnresponsiveSocketServer: error starting server with configs «{:?}»: {:?}", $const_config, err))
                 },
@@ -116,11 +120,11 @@ pub use new_unresponsive_socket_server;
 /// Defines a Socket Server whose `dialog_processor` output stream items won't be sent back to the clients.\
 /// Users of this struct may prefer to use it through the facility macro [new_responsive_socket_server!()]
 #[derive(Debug)]
-pub struct UnresponsiveSocketServer<const CONFIG:   usize,
-                                          RemoteMessages:    ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
-                                          LocalMessages:     ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-                                          ProcessorUniType:  GenericUni<ItemType=RemoteMessages>                                         + Send + Sync + 'static,
-                                          SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static> {
+pub struct UnresponsiveSocketServer<const CONFIG: usize,
+                                          RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+                                          LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
+                                          ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
+                                          RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages>  + Send + Sync                     + 'static> {
     /// The interface to listen to incoming connections
     interface_ip:                String,
     /// The port to listen to incoming connections
@@ -129,15 +133,15 @@ pub struct UnresponsiveSocketServer<const CONFIG:   usize,
     server_shutdown_signaler:    Option<tokio::sync::oneshot::Sender<u32>>,
     /// Signaler to cause [wait_for_shutdown()] to return
     local_shutdown_receiver:     Option<tokio::sync::oneshot::Receiver<()>>,
-    _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,SenderChannelType)>
+    _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,RetryableSenderImpl)>
 }
 
-impl<const CONFIG:   usize,
-     RemoteMessages:    ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessages:     ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-     ProcessorUniType:  GenericUni<ItemType=RemoteMessages>                                         + Send + Sync + 'static,
-     SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
-UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
+impl<const CONFIG: usize,
+     RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
+     ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
+     RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages>  + Send + Sync                     + 'static>
+UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl> {
 
     /// Creates a new server instance listening on TCP/IP:
     ///   `interface_ip`:         the interface's IP to listen to -- 0.0.0.0 will cause listening to all network interfaces
@@ -159,19 +163,19 @@ UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 }
 
 #[async_trait]
-impl<const CONFIG:   usize,
-     RemoteMessages:     ReactiveMessagingDeserializer<RemoteMessages>                              + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessages:      ReactiveMessagingSerializer<LocalMessages>                                 + Send + Sync + PartialEq + Debug + 'static,
-     ProcessorUniType:  GenericUni<ItemType=RemoteMessages>                                         + Send + Sync + 'static,
-     SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
+impl<const CONFIG: usize,
+     RemoteMessages:       ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessages:        ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
+     ProcessorUniType:     GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
+     RetryableSenderImpl:  RetryableSender<LocalMessages=LocalMessages>  + Send + Sync                     + 'static>
 ReactiveUnresponsiveProcessor for
-UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
+UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl> {
 
-    async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                            Send + Sync + Debug + 'static,
-                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                              + Send                + 'static,
-                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                               + Send,
-                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<Self::SenderChannelType>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::SenderChannelType>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync         + 'static>
+    async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                              Send + Sync + Debug + 'static,
+                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                + Send                + 'static,
+                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                 + Send,
+                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<Self::RetryableSenderImpl>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync         + 'static>
 
                                          (mut self,
                                           connection_events_callback: ConnectionEventsCallback,
@@ -188,7 +192,7 @@ UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
-        let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType>::new();
+        let socket_connection_handler = UnresponsiveSocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol(listening_interface.clone(),
                                                                              port,
                                                                              server_shutdown_receiver,
@@ -200,12 +204,12 @@ UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 }
 
 impl<const CONFIG:   usize,
-     RemoteMessages:    ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessages:     ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-     ProcessorUniType:  GenericUni<ItemType=RemoteMessages>                                         + Send + Sync + 'static,
-     SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
+     RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
+     ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
+     RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages>  + Send + Sync                     + 'static>
 ReactiveProcessorController for
-UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
+UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl> {
 
     fn shutdown_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
         let mut local_shutdown_receiver = self.local_shutdown_receiver.take();
@@ -244,17 +248,17 @@ UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 }
 
 impl<const CONFIG:   usize,
-     RemoteMessages:    ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessages:     ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-     ProcessorUniType:  GenericUni<ItemType=RemoteMessages>                                         + Send + Sync + 'static,
-     SenderChannelType: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Sync + Send + 'static>
+     RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
+     ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
+     RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages>  + Send + Sync                     + 'static>
 ReactiveUnresponsiveProcessorAssociatedTypes for
-UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
+UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl> {
     type RemoteMessages      = RemoteMessages;
     type LocalMessages       = LocalMessages;
     type ProcessorUniType    = ProcessorUniType;
-    type SenderChannelType   = SenderChannelType;
-    type ConnectionEventType = ConnectionEvent<SenderChannelType>;
+    type RetryableSenderImpl = RetryableSenderImpl;
+    type ConnectionEventType = ConnectionEvent<RetryableSenderImpl>;
     type StreamItemType      = ProcessorUniType::DerivedItemType;
     type StreamType          = MessagingMutinyStream<ProcessorUniType>;
 }
@@ -287,14 +291,14 @@ mod tests {
             connection_events_handler,
             processor
         )?;
-        async fn connection_events_handler<SenderChannelType: FullDuplexUniChannel<ItemType=DummyResponsiveClientAndServerMessages, DerivedItemType=DummyResponsiveClientAndServerMessages> + Sync + Send + 'static>
-                                          (_event: ConnectionEvent<SenderChannelType>) {
+        async fn connection_events_handler<RetryableSenderImpl: RetryableSender + Send + Sync + 'static>
+                                          (_event: ConnectionEvent<RetryableSenderImpl>) {
         }
-        fn processor<SenderChannelType: FullDuplexUniChannel<ItemType=DummyResponsiveClientAndServerMessages, DerivedItemType=DummyResponsiveClientAndServerMessages> + Sync + Send + 'static,
-                     StreamItemType:    Deref<Target=DummyResponsiveClientAndServerMessages>>
+        fn processor<RetryableSenderImpl: RetryableSender + Send + Sync + 'static,
+                     StreamItemType:      Deref<Target=DummyResponsiveClientAndServerMessages>>
                     (client_addr:            String,
                      connected_port:         u16,
-                     peer:                   Arc<Peer<SenderChannelType>>,
+                     peer:                   Arc<Peer<RetryableSenderImpl>>,
                      client_messages_stream: impl Stream<Item=StreamItemType>)
                     -> impl Stream<Item=()> {
             client_messages_stream.map(|payload| ())
@@ -336,7 +340,7 @@ mod tests {
                                                                           DummyResponsiveClientAndServerMessages,
                                                                           DummyResponsiveClientAndServerMessages,
                                                                           ProcessorUniType,
-                                                                          SenderChannelType>
+                                                                          ReactiveMessagingSender<{CONFIG.into()}, DummyResponsiveClientAndServerMessages, SenderChannelType> >
                                                                       :: new("127.0.0.1", 8050);
         let mut server = server.spawn_unresponsive_processor(
             |_| future::ready(()),
@@ -371,16 +375,6 @@ mod tests {
         #[inline(always)]
         fn processor_error_message(err: String) -> DummyResponsiveClientAndServerMessages {
             panic!("unresponsive_socket_server.rs unit tests: protocol error when none should have happened: {err}");
-        }
-    }
-    impl ResponsiveMessages<DummyResponsiveClientAndServerMessages> for DummyResponsiveClientAndServerMessages {
-        #[inline(always)]
-        fn is_disconnect_message(_processor_answer: &DummyResponsiveClientAndServerMessages) -> bool {
-            false
-        }
-        #[inline(always)]
-        fn is_no_answer_message(_processor_answer: &DummyResponsiveClientAndServerMessages) -> bool {
-            false
         }
     }
     impl ReactiveMessagingDeserializer<DummyResponsiveClientAndServerMessages> for DummyResponsiveClientAndServerMessages {

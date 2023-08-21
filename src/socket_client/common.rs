@@ -11,17 +11,18 @@ use futures::future::BoxFuture;
 use reactive_mutiny::types::FullDuplexUniChannel;
 use log::{error, warn};
 use tokio::sync::Mutex;
+use crate::socket_connection::common::RetryableSender;
 
 /// Upgrades the user provided `connection_events_callback` into a callback able to keep track of disconnection events
 /// as well as shutdown events, so any waiters on the client shutdown event may be notified
-pub fn upgrade_to_shutdown_and_connected_state_tracking<SenderChannelType:              FullDuplexUniChannel + Sync + Send + 'static,
-                                                        ConnectionEventsCallbackFuture: Future<Output=()>           + Send>
+pub fn upgrade_to_shutdown_and_connected_state_tracking<RetryableSenderImpl:            RetryableSender   + Send + Sync + 'static,
+                                                        ConnectionEventsCallbackFuture: Future<Output=()> + Send>
 
                                                        (connected_state:                          &Arc<AtomicBool>,
                                                         shutdown_is_complete_signaler:            tokio::sync::oneshot::Sender<()>,
-                                                        user_provided_connection_events_callback: impl Fn(ConnectionEvent<SenderChannelType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                                        user_provided_connection_events_callback: impl Fn(ConnectionEvent<RetryableSenderImpl>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                                                       -> impl Fn(ConnectionEvent<SenderChannelType>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
+                                                       -> impl Fn(ConnectionEvent<RetryableSenderImpl>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
 
     let connected_state = Arc::clone(connected_state);
     let shutdown_is_complete_signaler = Arc::new(Mutex::new(Option::Some(shutdown_is_complete_signaler)));
