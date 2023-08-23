@@ -3,8 +3,6 @@
 //!
 //! The implementations here still allow you to send messages to the server and should be preferred (as far as performance is concerned)
 //! if the messages in don't nearly map 1/1 with the messages out.
-//!
-//! TODO: The retrying mechanism should should be moved to the `peer.sender`
 
 
 use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
@@ -77,7 +75,8 @@ macro_rules! new_unresponsive_socket_client {
      $connection_events_handle_fn: expr,
      $dialog_processor_builder_fn: expr) => {
         {
-            const CONFIG:                    usize = $const_config.into();
+            use crate::socket_client::unresponsive_socket_client::UnresponsiveSocketClient;
+            const CONFIG:                    u64   = $const_config.into();
             const PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
             const PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
             const SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
@@ -124,7 +123,7 @@ use crate::socket_connection::common::RetryableSender;
 /// Defines a Socket Client whose `dialog_processor` output stream items won't be sent back to the server.\
 /// Users of this struct may prefer to use it through the facility macro [new_responsive_socket_client!()]
 #[derive(Debug)]
-pub struct UnresponsiveSocketClient<const CONFIG: usize,
+pub struct UnresponsiveSocketClient<const CONFIG: u64,
                                           RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
                                           LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
                                           ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
@@ -142,7 +141,7 @@ pub struct UnresponsiveSocketClient<const CONFIG: usize,
     _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,RetryableSenderImpl)>
 }
 
-impl<const CONFIG:   usize,
+impl<const CONFIG:   u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
@@ -169,7 +168,7 @@ UnresponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 }
 
 #[async_trait]
-impl<const CONFIG:   usize,
+impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
@@ -187,7 +186,7 @@ UnresponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
                                           connection_events_callback: ConnectionEventsCallback,
                                           dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                         -> Result<Box<dyn ReactiveProcessorController>, Box<dyn Error + Sync + Send>> {
+                                         -> Result<Box<dyn ReactiveProcessorController + Send>, Box<dyn Error + Sync + Send>> {
 
         let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
@@ -209,7 +208,7 @@ UnresponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
     }
 }
 
-impl<const CONFIG: usize,
+impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
@@ -253,7 +252,7 @@ UnresponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 
 }
 
-impl<const CONFIG: usize,
+impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
@@ -267,7 +266,7 @@ UnresponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 }
 
 
-impl<const CONFIG:   usize,
+impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,

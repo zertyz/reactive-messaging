@@ -1,3 +1,7 @@
 mod common;
-mod unresponsive_socket_server;
-mod responsive_socket_server;
+
+// TODO remove those after the next refactoring is done
+// pub mod unresponsive_socket_server;
+// pub mod responsive_socket_server;
+
+pub mod socket_server;

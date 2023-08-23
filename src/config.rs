@@ -104,11 +104,11 @@ impl SocketOptions {
     /// reverse of [Self::from_repr()]
     const fn from_repr(repr: u32) -> Self {
         let (no_delay_flag, no_delay_data, linger_flag, linger_data, hops) = (
-            (repr & (1 << 0) ) > 0,                                      // no delay flag
-            (repr & (1 << 1) ) > 0,                                      // no delay data
-            (repr & (1 << 2) ) > 0,                                      // linger flag
-            get_power_of_2_u32_bits(repr as usize, 3..=7),   // power of 32 bits linger data
-            (repr & (( (!0u8)  as u32) << 8) ) >> 8,                     // raw 8 bits hops data
+            (repr & (1 << 0) ) > 0,                                    // no delay flag
+            (repr & (1 << 1) ) > 0,                                    // no delay data
+            (repr & (1 << 2) ) > 0,                                    // linger flag
+            get_power_of_2_u32_bits(repr as u64, 3..=7),   // power of 32 bits linger data
+            (repr & (( (!0u8)  as u32) << 8) ) >> 8,                   // raw 8 bits hops data
         );
         Self {
             hops_to_live:  if hops > 0      { NonZeroU8::new(hops as u8) } else { None },
@@ -202,26 +202,26 @@ impl ConstConfig {
     /// Example:
     /// ```nocompile
     ///     see bellow
-    pub const fn into(self) -> usize {
-        let mut config = 0usize;
+    pub const fn into(self) -> u64 {
+        let mut config = 0u64;
         config = set_bits_from_power_of_2_u32(config, Self::MSG_SIZE_HINT,                 self.msg_size_hint);
         config = set_bits_from_power_of_2_u32(config, Self::SENDER_BUFFER,                 self.sender_buffer);
         config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_BUFFER,               self.receiver_buffer);
         config = set_bits_from_power_of_2_u16(config, Self::GRACEFUL_CLOSE_TIMEOUT_MILLIS, self.graceful_close_timeout_millis);
         let retrying_strategy_repr = self.retrying_strategy.as_repr();
-        config = set_bits(config, Self::RETRYING_STRATEGY, retrying_strategy_repr as usize);
+        config = set_bits(config, Self::RETRYING_STRATEGY, retrying_strategy_repr as u64);
         let socket_options_repr = self.socket_options.as_repr();
-        config = set_bits(config, Self::SOCKET_OPTIONS, socket_options_repr as usize);
+        config = set_bits(config, Self::SOCKET_OPTIONS, socket_options_repr as u64);
         let channel_repr = self.channel as u8;
-        config = set_bits(config, Self::CHANNEL, channel_repr as usize);
+        config = set_bits(config, Self::CHANNEL, channel_repr as u64);
         let executor_instruments_repr = self.executor_instruments.into();
-        config = set_bits(config, Self::EXECUTOR_INSTRUMENTS, executor_instruments_repr);
+        config = set_bits(config, Self::EXECUTOR_INSTRUMENTS, executor_instruments_repr as u64);
         config
     }
 
     /// Builds [Self] from the generic `const CONFIGS: usize` parameter used in structs
     /// by the "Const Config Pattern"
-    pub const fn from(config: usize) -> Self {
+    pub const fn from(config: u64) -> Self {
         let msg_size_hint                 = get_power_of_2_u32_bits(config, Self::MSG_SIZE_HINT);
         let sender_buffer                 = get_power_of_2_u32_bits(config, Self::SENDER_BUFFER);
         let receiver_buffer               = get_power_of_2_u32_bits(config, Self::RECEIVER_BUFFER);
@@ -237,8 +237,8 @@ impl ConstConfig {
             receiver_buffer,
             retrying_strategy:    RetryingStrategies::from_repr(retrying_strategy_repr as u16),
             socket_options:       SocketOptions::from_repr(socket_options_repr as u32),
-            channel:              if let Some(channel) = Channels::from_repr(channel_repr) {channel} else {Channels::Atomic},
-            executor_instruments: Instruments::from(executor_instruments_repr),
+            channel:              if let Some(channel) = Channels::from_repr(channel_repr as usize) {channel} else {Channels::Atomic},
+            executor_instruments: Instruments::from(executor_instruments_repr as usize),
         }
     }
 
@@ -246,32 +246,32 @@ impl ConstConfig {
     //////////////////////////////////////////////////////////////
     // to be used by the struct in which the generic `const CONFIGS: usize` resides
 
-    pub const fn extract_receiver_buffer(config: usize) -> u32 {
+    pub const fn extract_receiver_buffer(config: u64) -> u32 {
         let config = Self::from(config);
         config.receiver_buffer
     }
 
-    pub const fn extract_executor_instruments(config: usize) -> usize {
+    pub const fn extract_executor_instruments(config: u64) -> usize {
         let config = Self::from(config);
         config.executor_instruments.into()
     }
 
-    pub const fn extract_msg_size_hint(config: usize) -> u32 {
+    pub const fn extract_msg_size_hint(config: u64) -> u32 {
         let config = Self::from(config);
         config.msg_size_hint
     }
 
-    pub const fn extract_graceful_close_timeout(config: usize) -> Duration {
+    pub const fn extract_graceful_close_timeout(config: u64) -> Duration {
         let config = Self::from(config);
         Duration::from_millis(config.graceful_close_timeout_millis as u64)
     }
 
-    pub const fn extract_retrying_strategy(config: usize) -> RetryingStrategies {
+    pub const fn extract_retrying_strategy(config: u64) -> RetryingStrategies {
         let config = Self::from(config);
         config.retrying_strategy
     }
 
-    pub const fn extract_socket_options(config: usize) -> SocketOptions {
+    pub const fn extract_socket_options(config: u64) -> SocketOptions {
         let config = Self::from(config);
         config.socket_options
     }
@@ -279,7 +279,7 @@ impl ConstConfig {
 
 /// Helper for retrieving data (other than simple flags) from the configuration
 /// -- as stored in the specified `bits` by [Self::set_bits()]
-const fn get_bits(config: usize, bits: RangeInclusive<usize>) -> usize {
+const fn get_bits(config: u64, bits: RangeInclusive<usize>) -> u64 {
     let bits_len = *bits.end()-*bits.start()+1;
     (config>>*bits.start()) & ((1<<bits_len)-1)
 }
@@ -288,7 +288,7 @@ const fn get_bits(config: usize, bits: RangeInclusive<usize>) -> usize {
 /// -- stored in the specified `bits`.\
 /// `value` should not be higher than what fits in the bits.\
 /// Returns the `configs` with the `value` applied to it in a way it may be retrieved by [Self::get_bits()]
-const fn set_bits(mut config: usize, bits: RangeInclusive<usize>, value: usize) -> usize {
+const fn set_bits(mut config: u64, bits: RangeInclusive<usize>, value: u64) -> u64 {
     let bits_len = *bits.end()-*bits.start()+1;
     if value > (1<<bits_len)-1 {
         // "The value specified is above the maximum the reserved bits for it can take"
@@ -301,15 +301,15 @@ const fn set_bits(mut config: usize, bits: RangeInclusive<usize>, value: usize) 
 }
 
 /// Retrieves 5 `bits` from `configs` that represents a power of 2 over the `u32` space
-const fn get_power_of_2_u32_bits(config: usize, bits: RangeInclusive<usize>) -> u32 {
+const fn get_power_of_2_u32_bits(config: u64, bits: RangeInclusive<usize>) -> u32 {
     let value = get_bits(config, bits);
     1 << value
 }
 
 /// Packs, optimally, the `power_of_2_u32_value` into 5 `bits`, returning the new value for the given `config`
-const fn set_bits_from_power_of_2_u32(config: usize, bits: RangeInclusive<usize>, power_of_2_u32_value: u32) -> usize {
+const fn set_bits_from_power_of_2_u32(config: u64, bits: RangeInclusive<usize>, power_of_2_u32_value: u32) -> u64 {
     if power_of_2_u32_value.is_power_of_two() {
-        set_bits(config, bits, power_of_2_u32_value.ilog2() as usize)
+        set_bits(config, bits, power_of_2_u32_value.ilog2() as u64)
     } else {
         // "The value must be a power of 2"
         unreachable!();
@@ -317,15 +317,15 @@ const fn set_bits_from_power_of_2_u32(config: usize, bits: RangeInclusive<usize>
 }
 
 /// Retrieves 4 `bits` from `configs` that represents a power of 2 over the `u16` space
-const fn get_power_of_2_u16_bits(config: usize, bits: RangeInclusive<usize>) -> u16 {
+const fn get_power_of_2_u16_bits(config: u64, bits: RangeInclusive<usize>) -> u16 {
     let value = get_bits(config, bits);
     1 << value
 }
 
 /// Packs, optimally, the `power_of_2_u16_value` into 4 `bits`, returning the new value for the given `config`
-const fn set_bits_from_power_of_2_u16(config: usize, bits: RangeInclusive<usize>, power_of_2_u16_value: u16) -> usize {
+const fn set_bits_from_power_of_2_u16(config: u64, bits: RangeInclusive<usize>, power_of_2_u16_value: u16) -> u64 {
     if power_of_2_u16_value.is_power_of_two() {
-        set_bits(config, bits, power_of_2_u16_value.ilog2() as usize)
+        set_bits(config, bits, power_of_2_u16_value.ilog2() as u64)
     } else {
         // "The value must be a power of 2"
         unreachable!();
@@ -333,15 +333,15 @@ const fn set_bits_from_power_of_2_u16(config: usize, bits: RangeInclusive<usize>
 }
 
 /// Retrieves 3 `bits` from `configs` that represents a power of 2 over the `u8` space
-const fn get_power_of_3_u8_bits(config: usize, bits: RangeInclusive<usize>) -> u8 {
+const fn get_power_of_3_u8_bits(config: u64, bits: RangeInclusive<usize>) -> u8 {
     let value = get_bits(config, bits);
     1 << value
 }
 
 /// Packs, optimally, the `power_of_2_u8_value` into 3 `bits`, returning the new value for the given `config`
-const fn set_bits_from_power_of_2_u8(config: usize, bits: RangeInclusive<usize>, power_of_2_u8_value: u8) -> usize {
+const fn set_bits_from_power_of_2_u8(config: u64, bits: RangeInclusive<usize>, power_of_2_u8_value: u8) -> u64 {
     if power_of_2_u8_value.is_power_of_two() {
-        set_bits(config, bits, power_of_2_u8_value.ilog2() as usize)
+        set_bits(config, bits, power_of_2_u8_value.ilog2() as u64)
     } else {
         // "The value must be a power of 2"
         unreachable!();

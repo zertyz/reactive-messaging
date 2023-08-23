@@ -62,7 +62,8 @@ macro_rules! new_responsive_socket_client {
      $connection_events_handle_fn: expr,
      $dialog_processor_builder_fn: expr) => {
         {
-            const CONFIG:                    usize = $const_config.into();
+            use crate::socket_client::responsive_socket_client::ResponsiveSocketClient;
+            const CONFIG:                    u64   = $const_config.into();
             const PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
             const PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
             const SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
@@ -107,7 +108,7 @@ pub use new_responsive_socket_client;
 /// Defines a Socket Client whose `dialog_processor` output streams will produce messages to be sent back to the server.\
 /// Users of this struct may prefer to use it through the facility macro [new_responsive_socket_client!()]
 #[derive(Debug)]
-pub struct ResponsiveSocketClient<const CONFIG:      usize,
+pub struct ResponsiveSocketClient<const CONFIG:        u64,
                                   RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
                                   LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    +
                                                        ResponsiveMessages<LocalMessages>             + Send + Sync + PartialEq + Debug + 'static,
@@ -126,7 +127,7 @@ pub struct ResponsiveSocketClient<const CONFIG:      usize,
     _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,RetryableSenderImpl)>
 }
 
-impl<const CONFIG:      usize,
+impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    +
                           ResponsiveMessages<LocalMessages>             + Send + Sync + PartialEq + Debug + 'static,
@@ -153,7 +154,7 @@ ResponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
 }
 
 #[async_trait]
-impl<const CONFIG:   usize,
+impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    +
                           ResponsiveMessages<LocalMessages>             + Send + Sync + PartialEq + Debug + 'static,
@@ -194,7 +195,7 @@ ResponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
     }
 }
 
-impl<const CONFIG: usize,
+impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    +
                           ResponsiveMessages<LocalMessages>             + Send + Sync + PartialEq + Debug + 'static,
@@ -240,7 +241,7 @@ ResponsiveSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, 
 }
 
 
-impl<const CONFIG:   usize,
+impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    +
                           ResponsiveMessages<LocalMessages>             + Send + Sync + PartialEq + Debug + 'static,

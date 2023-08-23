@@ -14,7 +14,7 @@ use crate::config::{ConstConfig, RetryingStrategies};
 use crate::ReactiveMessagingSerializer;
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `COFNIG_USIZE`
-pub fn upgrade_processor_uni_retrying_logic<const CONFIG: usize,
+pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
                                             ItemType:        Send + Sync + Debug + 'static,
                                             DerivedItemType: Send + Sync + Debug + 'static,
                                             OriginalUni:     GenericUni<ItemType=ItemType, DerivedItemType=DerivedItemType> + Send + Sync>
@@ -38,17 +38,17 @@ pub fn upgrade_processor_uni_retrying_logic<const CONFIG: usize,
 #[async_trait]
 /// Our contract for applying the retrying logic to [FullDuplexUniChannel]s when
 /// sending them out to the remote peer
-pub trait RetryableSender {
+pub trait RetryableSender: Send + Sync {
 
     /// The instance config the implementation adheres to
     const CONST_CONFIG: ConstConfig;
     /// The type of the local messages to be delivered to the remote peer
-    type LocalMessages:     ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug;
+    type LocalMessages:     ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug + 'static;
     type SenderChannelType: FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Send + Sync;
 
     /// Instantiates a new `channel` (from `reactive-mutiny`, with type `Self::SenderChannelType`) and wrap in a way to allow
     /// our special [Self::send()] to operate on
-    fn new<IntoString: Into<String>>(channel_name: IntoString) -> Box<Self>;
+    fn new<IntoString: Into<String>>(channel_name: IntoString) -> Self where Self: Sized;
 
     fn channel(&self) -> &Arc<Self::SenderChannelType>;
 
@@ -83,13 +83,13 @@ pub trait RetryableSender {
 /// Our special sender over a [Uni], adding
 /// retrying logic & connection control return values
 /// -- used to "send" messages from the remote peer to the local processor `Stream`
-pub struct ReactiveMessagingUniSender<const CONFIG: usize,
+pub struct ReactiveMessagingUniSender<const CONFIG: u64,
                                       RemoteMessages:         Send + Sync + Debug + 'static,
                                       ConsumedRemoteMessages: Send + Sync + Debug + 'static,
                                       OriginalUni:            GenericUni<ItemType=RemoteMessages, DerivedItemType=ConsumedRemoteMessages> + Send + Sync> {
     uni: Arc<OriginalUni>,
 }
-impl<const CONFIG: usize,
+impl<const CONFIG: u64,
      RemoteMessages:         Send + Sync + Debug + 'static,
      ConsumedRemoteMessages: Send + Sync + Debug + 'static,
      OriginalUni:            GenericUni<ItemType=RemoteMessages, DerivedItemType=ConsumedRemoteMessages> + Send + Sync>
@@ -202,12 +202,12 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
 /// Our special "sender of messages to the remote peer" over a `reactive-mutiny`s [FullDuplexUniChannel], adding
 /// retrying logic & connection control return values
 /// -- used to send messages to the remote peer
-pub struct ReactiveMessagingSender<const CONFIG: usize,
+pub struct ReactiveMessagingSender<const CONFIG:    u64,
                                    LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                    OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static> {
     channel: Arc<OriginalChannel>,
 }
-impl<const CONFIG: usize,
+impl<const CONFIG: u64,
      LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
      OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static>
 ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
@@ -223,7 +223,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 }
 
 #[async_trait]
-impl<const CONFIG: usize,
+impl<const CONFIG: u64,
      LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
      OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static>
 RetryableSender for
@@ -232,13 +232,13 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
     type LocalMessages = LocalMessages;
     type SenderChannelType = OriginalChannel;
 
-    fn new<IntoString: Into<String>>(channel_name: IntoString) -> Box<Self> {
-        Box::new(Self {
+    fn new<IntoString: Into<String>>(channel_name: IntoString) -> Self {
+        Self {
             channel: OriginalChannel::new(channel_name.into()),
-        })
+        }
     }
 
-    fn channel(&self) -> &Arc<Self::SenderChannelType> {
+    fn channel(&self) -> &Arc<OriginalChannel> {
         &self.channel
     }
 
@@ -252,7 +252,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 
     #[inline(always)]
     fn send(&self,
-            message: Self::LocalMessages)
+            message: LocalMessages)
            -> Result<(), (/*abort_the_connection?*/bool, /*error_message: */String)> {
 
         let retryable = self.channel.send(message);
@@ -313,7 +313,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 
     #[inline(always)]
     async fn send_async_trait(&self,
-                              message: Self::LocalMessages)
+                              message: LocalMessages)
                              -> Result<(), (/*abort_the_connection?*/bool, /*error_message: */String)> {
 
         let retryable = self.channel.send(message);

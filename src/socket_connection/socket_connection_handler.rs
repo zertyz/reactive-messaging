@@ -38,7 +38,7 @@ use crate::socket_connection::peer::Peer;
 // Contains abstractions, useful for clients and servers, for dealing with socket connections handled by Stream Processors:\
 //   - handles all combinations of the Stream's output types returned by `dialog_processor_builder_fn()`: futures/non-future & fallible/non-fallible;
 //   - handles unresponsive / responsive output types (also issued by the Streams created by `dialog_processor_builder_fn()`).
-pub struct SocketConnectionHandler<const CONFIG: usize,
+pub struct SocketConnectionHandler<const CONFIG:        u64,
                                    RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType> + Send + Sync + PartialEq + Debug + 'static,
                                    LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>    + Send + Sync + PartialEq + Debug + 'static,
                                    ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>           + Send + Sync                     + 'static,
@@ -46,7 +46,7 @@ pub struct SocketConnectionHandler<const CONFIG: usize,
     _phantom:   PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, RetryableSenderImpl)>,
 }
 
-impl<const CONFIG: usize,
+impl<const CONFIG:        u64,
      RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>    + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>           + Send + Sync                     + 'static,
@@ -509,10 +509,10 @@ mod tests {
         //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
         ..ConstConfig::default()
     };
-    const DEFAULT_TEST_CONFIG_USIZE: usize         = DEFAULT_TEST_CONFIG.into();
+    const DEFAULT_TEST_CONFIG_U64:  u64            = DEFAULT_TEST_CONFIG.into();
     const DEFAULT_TEST_UNI_INSTRUMENTS: usize      = DEFAULT_TEST_CONFIG.executor_instruments.into();
     type DefaultTestUni<PayloadType = String>      = UniZeroCopyAtomic<PayloadType, {DEFAULT_TEST_CONFIG.receiver_buffer as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
-    type RetryableSenderImpl<PayloadType = String> = ReactiveMessagingSender<DEFAULT_TEST_CONFIG_USIZE, PayloadType, ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_buffer as usize}, 1>>;
+    type RetryableSenderImpl<PayloadType = String> = ReactiveMessagingSender<DEFAULT_TEST_CONFIG_U64, PayloadType, ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_buffer as usize}, 1>>;
 
 
     #[ctor::ctor]
@@ -528,8 +528,8 @@ mod tests {
         // check configs
         ////////////////
         println!("Original object: {:#?}", DEFAULT_TEST_CONFIG);
-        println!("Reconverted:     {:#?}", ConstConfig::from(DEFAULT_TEST_CONFIG_USIZE));
-        assert_eq!(ConstConfig::from(DEFAULT_TEST_CONFIG_USIZE), DEFAULT_TEST_CONFIG, "Configs don't match");
+        println!("Reconverted:     {:#?}", ConstConfig::from(DEFAULT_TEST_CONFIG_U64));
+        assert_eq!(ConstConfig::from(DEFAULT_TEST_CONFIG_U64), DEFAULT_TEST_CONFIG, "Configs don't match");
         // try to create the objects based on the config (a compilation error is expected if wrong const generic parameters are provided to the `Uni` type)
         let uni    = DefaultTestUni::<String>::new("Can it be instantiated?");
         let sender = RetryableSenderImpl::<String>::new("Can it be instantiated?");
@@ -575,7 +575,7 @@ mod tests {
         // server
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol
                                                     (LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                      |connection_event| {
@@ -610,7 +610,7 @@ mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
-        let client_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let client_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
         client_connection_handler.client_for_unresponsive_text_protocol
                                                (LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
                                                 move |connection_event| {
@@ -663,7 +663,7 @@ mod tests {
         let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
         // server
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol
                                                     (LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                      |_connection_event| async {},
@@ -684,7 +684,7 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_ref = Arc::clone(&counter);
         // client
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
         socket_connection_handler.client_for_unresponsive_text_protocol
                                                (LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
                                                 |connection_event| {
@@ -751,7 +751,7 @@ mod tests {
         let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaputt
         let received_messages_count_ref = Arc::clone(&received_messages_count);
         let unordered_ref = Arc::clone(&unordered);
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni<String>, RetryableSenderImpl<String>>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, RetryableSenderImpl<String>>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol
                                                     (LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                       |_connection_event| async {},
@@ -776,7 +776,7 @@ mod tests {
         // client
         let sent_messages_count = Arc::new(AtomicU32::new(0));
         let sent_messages_count_ref = Arc::clone(&sent_messages_count);
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni<String>, RetryableSenderImpl<String>>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, RetryableSenderImpl<String>>::new();
         socket_connection_handler.client_for_unresponsive_text_protocol
                                                (LISTENING_INTERFACE.to_string(), PORT,
                                                 client_shutdown_receiver,
@@ -855,7 +855,7 @@ mod tests {
         // server
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
         socket_connection_handler.server_loop_for_responsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
             |_connection_event| future::ready(()),
             move |_client_addr, _client_port, peer, client_messages_stream| {
@@ -880,7 +880,7 @@ mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
         socket_connection_handler.client_for_responsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
             move |_connection_event| future::ready(()),
             move |_client_addr, _client_port, peer, server_messages_stream| {
@@ -923,7 +923,7 @@ mod tests {
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
             move |connection_event| {
                 let server_disconnected = Arc::clone(&server_disconnected_ref);
@@ -939,7 +939,7 @@ mod tests {
         // wait a bit for the server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_USIZE, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
         socket_connection_handler.client_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
             move |connection_event| {
                 let client_disconnected = Arc::clone(&client_disconnected_ref);

@@ -29,12 +29,12 @@ pub struct Peer<RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages
                 //      Also see those other zero-cost fixes, for different incarnations of the same bug:
                 //        https://play.rust-lang.org/?version=nightly&mode=debug&edition=2021&gist=554fb0f6c23beadeb4d239fcf5b7d433 -- zero-cost fix for bad type inference in the returned future of GAT structs
                 //        https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=a4f501590c778b0dbe78ca620af23b4d  -- zero-cost fix bad type inferences in closures (but only fixes Fn, not FnOnce nor FnMut) -- this happens even when GAT is not involved
-                LocalMessages      : ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug = <RetryableSenderImpl as RetryableSender>::LocalMessages,
-                SenderChannelType  : FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     = <RetryableSenderImpl as RetryableSender>::SenderChannelType,
+                LocalMessages      : ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static = <RetryableSenderImpl as RetryableSender>::LocalMessages,
+                SenderChannelType  : FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static = <RetryableSenderImpl as RetryableSender>::SenderChannelType,
 > {
     pub peer_id:          PeerId,
     pub peer_address:     SocketAddr,
-        retryable_sender: Box<RetryableSenderImpl>,
+        retryable_sender: RetryableSenderImpl,
 }
 
 impl<RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages, SenderChannelType=SenderChannelType> + Send + Sync,
@@ -42,7 +42,7 @@ impl<RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages, SenderCha
      SenderChannelType:   FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>       + Send + Sync>
 Peer<RetryableSenderImpl, LocalMessages, SenderChannelType> {
 
-    pub fn new(retryable_sender: Box<RetryableSenderImpl>, peer_address: SocketAddr) -> Self {
+    pub fn new(retryable_sender: RetryableSenderImpl, peer_address: SocketAddr) -> Self {
         Self {
             peer_id: PEER_COUNTER.fetch_add(1, Relaxed),
             retryable_sender,

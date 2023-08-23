@@ -57,7 +57,7 @@ pub enum ConnectionEvent<RetryableSenderImpl: RetryableSender + Send + Sync + 's
 
 
 /// Controls a Server or Client after they have been started -- shutting down, asking for stats, ....
-pub trait ReactiveProcessorController {
+pub trait ReactiveProcessorController: Send {
     /// Returns an async closure that blocks until [Self::shutdown()] is called.
     /// Example:
     /// ```no_compile
@@ -83,8 +83,8 @@ pub trait ReactiveUnresponsiveProcessor: ReactiveUnresponsiveProcessorAssociated
     /// that will produce non-futures & non-fallibles items that won't be sent to the peer.\
     /// -- if you want the processor to produce "answer messages" to the peers, see [ReactiveResponsiveProcessor::spawn_responsive_processor()].
     async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                              Send + Sync + Debug + 'static,
-                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                + Send                + 'static,
-                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                 + Send,
+                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                + Send + Sync         + 'static,
+                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                 + Send                + 'static,
                                           ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<Self::RetryableSenderImpl>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
                                           ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync         + 'static>
 
@@ -92,7 +92,7 @@ pub trait ReactiveUnresponsiveProcessor: ReactiveUnresponsiveProcessorAssociated
                                           connection_events_callback: ConnectionEventsCallback,
                                           dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                         -> Result<Box<dyn ReactiveProcessorController>, Box<dyn std::error::Error + Sync + Send>>;
+                                         -> Result<Box<dyn ReactiveProcessorController + Send>, Box<dyn std::error::Error + Sync + Send>>;
 
 }
 
@@ -108,7 +108,7 @@ pub trait ReactiveResponsiveProcessor: ReactiveResponsiveProcessorAssociatedType
     /// that will produce non-futures & non-fallibles items that will be sent to the peer.\
     /// -- if you don't want the processor to produce "answer messages", see [ReactiveUnresponsiveProcessor::spawn_unresponsive_processor()].
     async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=Self::LocalMessages>                                                                                                                                                                                  + Send        + 'static,
-                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                 + Send,
+                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                 + Send        + 'static,
                                         ConnectionEventsCallback:        Fn(/*server_event: */ConnectionEvent<Self::RetryableSenderImpl>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                         ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
 

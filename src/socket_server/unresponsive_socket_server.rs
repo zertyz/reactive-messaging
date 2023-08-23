@@ -3,8 +3,6 @@
 //!
 //! The implementations here still allow you to send messages to the client and should be preferred (as far as performance is concerned)
 //! if the messages in don't nearly map 1/1 with the messages out.
-//!
-//! TODO: The retrying mechanism should should be moved to the `peer.sender`
 
 
 use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
@@ -75,6 +73,7 @@ macro_rules! new_unresponsive_socket_server {
      $connection_events_handle_fn: expr,
      $dialog_processor_builder_fn: expr) => {
         {
+            use crate::socket_server::unresponsive_socket_server::UnresponsiveSocketServer;
             const CONFIG:                    usize = $const_config.into();
             const PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
             const PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
@@ -115,6 +114,16 @@ macro_rules! new_unresponsive_socket_server {
     }
 }
 pub use new_unresponsive_socket_server;
+
+#[macro_export]
+macro_rules! unresponsive_socket_server_type {
+    ($const_config:    expr) => {
+        const CONFIG:                    usize = $const_config.into();
+        match $const_config.channel {
+            Channels::Atomic => {},
+            Channels::FullSync => {},
+}
+pub use new_unresponsive_socket_server_type;
 
 
 /// Defines a Socket Server whose `dialog_processor` output stream items won't be sent back to the clients.\
@@ -162,26 +171,26 @@ UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 
 }
 
-#[async_trait]
+//#[async_trait]
 impl<const CONFIG: usize,
      RemoteMessages:       ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:        ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:     GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
      RetryableSenderImpl:  RetryableSender<LocalMessages=LocalMessages>  + Send + Sync                     + 'static>
-ReactiveUnresponsiveProcessor for
+//ReactiveUnresponsiveProcessor for
 UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl> {
 
-    async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                              Send + Sync + Debug + 'static,
-                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                + Send                + 'static,
-                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                 + Send,
-                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<Self::RetryableSenderImpl>)                                                                                                                -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<Self::RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync         + 'static>
+    async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                  Send + Sync + Debug       + 'static,
+                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                    + Send + Sync               + 'static,
+                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                     + Send                      + 'static,
+                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<RetryableSenderImpl>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync               + 'static,
+                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync               + 'static>
 
                                          (mut self,
-                                          connection_events_callback: ConnectionEventsCallback,
+                                          connection_events_callback:  ConnectionEventsCallback,
                                           dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                         -> Result<Box<dyn ReactiveProcessorController>, Box<dyn Error + Sync + Send>> {
+                                         -> Result<impl ReactiveProcessorController, Box<dyn Error + Sync + Send>> {
 
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
@@ -199,7 +208,7 @@ UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
                                                                              connection_events_callback,
                                                                              dialog_processor_builder_fn).await
             .map_err(|err| format!("Error starting UnresponsiveSocketServer @ {listening_interface}:{port}: {:?}", err))?;
-        Ok(Box::new(self))
+        Ok(self)
     }
 }
 
@@ -268,12 +277,17 @@ UnresponsiveSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType
 #[cfg(any(test,doc))]
 mod tests {
     use super::*;
-    use crate::{ron_deserializer, ron_serializer};
+    use crate::{new_unresponsive_socket_client, ron_deserializer, ron_serializer};
     use std::borrow::Borrow;
     use std::future;
     use std::ops::Deref;
+    use std::pin::Pin;
+    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::Ordering::Relaxed;
+    use std::time::Duration;
     use serde::{Deserialize, Serialize};
     use futures::stream::StreamExt;
+    use tokio::sync::Mutex;
 
 
     /// Test that our types can be compiled & instantiated & are ready for usage
@@ -351,6 +365,130 @@ mod tests {
         shutdown_waiter().await?;
 
         Ok(())
+    }
+
+    /// assures the shutdown process is able to:
+    ///   1) communicate with all clients
+    ///   2) wait for up to the given timeout for them to gracefully disconnect
+    ///   3) forcibly disconnect, if needed
+    ///   4) notify any waiter on the server (after all the above steps are done) within the given timeout
+    #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    async fn shutdown_process() {
+        const PORT: u16 = 8051;
+
+        // the shutdown timeout, in milliseconds
+        let expected_max_shutdown_duration_ms = 543;
+        // the tollerance, in milliseconds -- a too small shutdown duration means the server didn't wait for the client's disconnection; too much (possibly eternal) means it didn't enforce the timeout
+        let tollerance_ms = 20;
+
+        // sensors
+        let client_received_messages_count_ref1 = Arc::new(AtomicU32::new(0));
+        let client_received_messages_count_ref2 = Arc::clone(&client_received_messages_count_ref1);
+        let server_received_messages_count_ref1 = Arc::new(AtomicU32::new(0));
+        let server_received_messages_count_ref2 = Arc::clone(&server_received_messages_count_ref1);
+
+        // start the server -- the test logic is here
+//let client_peer_ref1 = Arc::<Mutex<Option<ReactiveMessagingSender<CONFIG, DummyResponsiveClientAndServerMessages, ChannelUniMoveFullSync<DummyResponsiveClientAndServerMessages, SENDER_BUFFER_SIZE, 1>>>>>::new(Mutex::new(None));
+//         let client_peer_ref1 = Arc::new(Mutex::new(None));
+//         let client_peer_ref2 = Arc::clone(&client_peer_ref1);
+
+        const CONFIG: ConstConfig = ConstConfig {
+            channel: Channels::FullSync,
+            ..ConstConfig::default()
+        };
+        type ProcessorUniType = UniZeroCopyFullSync<DummyResponsiveClientAndServerMessages, {CONFIG.receiver_buffer as usize}, 1, {CONFIG.executor_instruments.into()}>;
+        type SenderChannelType = ChannelUniMoveFullSync<DummyResponsiveClientAndServerMessages, {CONFIG.sender_buffer as usize}, 1>;
+        type SenderType = ReactiveMessagingSender<{CONFIG.into()}, DummyResponsiveClientAndServerMessages, SenderChannelType>;
+        let server = UnresponsiveSocketServer :: <{CONFIG.into()},
+                                                                          DummyResponsiveClientAndServerMessages,
+                                                                          DummyResponsiveClientAndServerMessages,
+                                                                          ProcessorUniType,
+                                                                          ReactiveMessagingSender<{CONFIG.into()}, DummyResponsiveClientAndServerMessages, SenderChannelType> >
+                                                                      :: new("127.0.0.1", 805);
+
+        //let connection_events_callback = move |connection_event: ConnectionEvent<SenderType>| {
+        async fn connection_events_callback(connection_event: ConnectionEvent<SenderType>) {
+//                let client_peer = Arc::clone(&client_peer_ref1);
+//                async move {
+                    match connection_event {
+                        ConnectionEvent::PeerConnected { peer } => {
+                            // register the client -- which will initiate the server shutdown further down in this test
+//                            client_peer.lock().await.replace(peer);
+                        },
+                        ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => (),
+                        ConnectionEvent::ApplicationShutdown { timeout_ms } => {
+                            // send a message to the client (the first message, actually... that will initiate a flood of back-and-forth messages)
+                            // then try to close the connection (which would only be gracefully done once all messages were sent... which may never happen).
+//                            let client_peer = client_peer.lock().await;
+//                            let client_peer = client_peer.as_ref().expect("No client is connected");
+                            // send the flood starting message
+//                            let _ = client_peer.send_async(DummyResponsiveClientAndServerMessages::FloodPing).await;
+//                            client_peer.flush_and_close(Duration::from_millis(timeout_ms as u64)).await;
+                            // guarantees this operation will take slightly more than the timeout+tolerance to complete
+                            tokio::time::sleep(Duration::from_millis((timeout_ms+/*tollerance_ms+*/20+10) as u64)).await;
+                        }
+                    }
+//                }
+            };
+
+        //let dialog_processor_builder_fn = move |_, _, _, client_messages: MessagingMutinyStream<ProcessorUniType>| {
+        fn dialog_processor_builder_fn(client_addr: String, connected_port: u16, peer: Arc<Peer<SenderType>>, client_messages: MessagingMutinyStream<ProcessorUniType>) -> impl Stream<Item=DummyResponsiveClientAndServerMessages> {
+                //let server_received_messages_count = Arc::clone(&server_received_messages_count_ref1);
+                client_messages.map(move |client_message| {
+                    std::mem::forget(client_message);   // TODO 2023-07-15: investigate this reactive-mutiny related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
+//                    server_received_messages_count.fetch_add(1, Relaxed);
+                    DummyResponsiveClientAndServerMessages::FloodPing
+                })
+            };
+        let start_future = server.spawn_unresponsive_processor(
+            connection_events_callback,
+            dialog_processor_builder_fn
+        );
+        let start_future = fix_rust_type_inference(start_future);
+        let start_future: Pin<Box<dyn Future<Output=Result<Box<dyn ReactiveProcessorController + Send>, Box<dyn Error + Sync + Send>>>>> = Box::pin(start_future);
+        let mut server = start_future.await.expect("Starting the server");
+
+        /// Workaround a silly Rust Compiler bug that, as it seems, is hard to fix (it has been biting rustaceans for ~1.5 years).
+        /// See: https://github.com/rust-lang/rust/issues/96865
+        ///      https://github.com/rust-lang/rust/issues/102211
+        ///      and the zero cost workaround implemented here: https://play.rust-lang.org/?version=nightly&mode=debug&edition=2021&gist=554fb0f6c23beadeb4d239fcf5b7d433
+        fn fix_rust_type_inference<'f, O>(fut: impl 'f + Send + Future<Output=O>) -> impl 'f + Send + Future<Output=O> { fut }
+
+        // start a client that will engage in a flood ping with the server when provoked (never closing the connection)
+        let _client = new_unresponsive_socket_client!(
+            ConstConfig::default(),
+            "127.0.0.1",
+            8051,
+            DummyResponsiveClientAndServerMessages,
+            DummyResponsiveClientAndServerMessages,
+            |_: ConnectionEvent<_>| async {},
+            move |_, _, _, server_messages| {
+                let client_received_messages_count = Arc::clone(&client_received_messages_count_ref1);
+                server_messages.map(move |server_message| {
+                    std::mem::forget(server_message);   // TODO 2023-07-15: investigate this reactive-mutiny related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
+                    client_received_messages_count.fetch_add(1, Relaxed);
+                    DummyResponsiveClientAndServerMessages::FloodPing
+                })
+            }
+        ).expect("Starting the client");
+
+        // wait for the client to connect
+        // while client_peer_ref2.lock().await.is_none() {
+        //     tokio::time::sleep(Duration::from_millis(1)).await;
+        // }
+        // shutdown the server & wait until the shutdown process is complete
+        let wait_for_server_shutdown = server.shutdown_waiter();
+        server.shutdown(expected_max_shutdown_duration_ms)
+            .expect("Signaling the server of the shutdown intention");
+        let start = std::time::SystemTime::now();
+        wait_for_server_shutdown().await
+            .expect("Waiting for the server to live it's life and to complete the shutdown process");
+        let elapsed_ms = start.elapsed().unwrap().as_millis();
+        assert!(client_received_messages_count_ref2.load(Relaxed) > 1, "The client didn't receive any messages (no 'server is shutting down' notification)");
+        assert!(server_received_messages_count_ref2.load(Relaxed) > 1, "The server didn't receive any messages (no 'gracefully disconnecting' after being notified that the server is shutting down)");
+        assert!(elapsed_ms.abs_diff(expected_max_shutdown_duration_ms as u128) < tollerance_ms as u128,
+                "The server shutdown (of a never compling client) didn't complete in a reasonable time, meaning the shutdown code is wrong. Timeout: {}ms; Tollerance: {}ms; Measured Time: {}ms",
+                expected_max_shutdown_duration_ms, tollerance_ms, elapsed_ms);
     }
 
     #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]

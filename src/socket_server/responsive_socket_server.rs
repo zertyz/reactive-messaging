@@ -62,6 +62,7 @@ macro_rules! new_responsive_socket_server {
      $connection_events_handle_fn: expr,
      $dialog_processor_builder_fn: expr) => {
         {
+            use crate::socket_server::responsive_socket_server::ResponsiveSocketServer;
             const CONFIG:                    usize = $const_config.into();
             const PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
             const PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
