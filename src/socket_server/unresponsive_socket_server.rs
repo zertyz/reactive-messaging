@@ -115,16 +115,6 @@ macro_rules! new_unresponsive_socket_server {
 }
 pub use new_unresponsive_socket_server;
 
-#[macro_export]
-macro_rules! unresponsive_socket_server_type {
-    ($const_config:    expr) => {
-        const CONFIG:                    usize = $const_config.into();
-        match $const_config.channel {
-            Channels::Atomic => {},
-            Channels::FullSync => {},
-}
-pub use new_unresponsive_socket_server_type;
-
 
 /// Defines a Socket Server whose `dialog_processor` output stream items won't be sent back to the clients.\
 /// Users of this struct may prefer to use it through the facility macro [new_responsive_socket_server!()]

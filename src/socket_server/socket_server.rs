@@ -13,9 +13,22 @@
 
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use reactive_mutiny::prelude::advanced::{ChannelUniMoveAtomic, ChannelUniMoveCrossbeam, ChannelUniMoveFullSync, UniMoveCrossbeam, UniZeroCopyAtomic, UniZeroCopyFullSync};
 use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
-use crate::socket_connection::common::ReactiveMessagingSender;
+use crate::socket_connection::common::{ReactiveMessagingSender, RetryableSender};
+use crate::config::{Channels, ConstConfig};
+use reactive_mutiny::prelude::advanced::{
+    ChannelUniMoveAtomic,
+    ChannelUniMoveCrossbeam,
+    ChannelUniMoveFullSync,
+    UniMoveCrossbeam,
+    UniZeroCopyAtomic,
+    UniZeroCopyFullSync,
+    FullDuplexUniChannel,
+    ChannelCommon,
+    ChannelProducer,
+    GenericUni,
+};
+
 
 
 
@@ -26,7 +39,7 @@ macro_rules! new_socket_server {
      $port:            expr,
      $remote_messages: ty,
      $local_messages:  ty) => {{
-        use crate::socket_server:SocketServer;
+        use crate::socket_server::SocketServer;
         const CONFIG:                    u64   = $const_config.into();
         const PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
         const PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
@@ -41,9 +54,9 @@ macro_rules! new_socket_server {
                                             ::Atomic(GenericSocketServer::<CONFIG,
                                                                            $remote_messages,
                                                                            $local_messages,
-                                                                           UniZeroCopyAtomic<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                                           ReactiveMessagingSender<{CONFIG as usize}, LocalMessages, ChannelUniMoveAtomic<LocalMessages, SENDER_BUFFER, 1>> >
-                                                                        ::new() ),
+                                                                           UniZeroCopyAtomic<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                                                           ReactiveMessagingSender<CONFIG, $local_messages, ChannelUniMoveAtomic<$local_messages, SENDER_BUFFER, 1>> >
+                                                                        ::new($interface_ip, $port) ),
             Channels::FullSync => SocketServer::<CONFIG,
                                                  $remote_messages,
                                                  $local_messages,
@@ -53,9 +66,9 @@ macro_rules! new_socket_server {
                                               ::FullSync(GenericSocketServer::<CONFIG,
                                                                                $remote_messages,
                                                                                $local_messages,
-                                                                               UniZeroCopyFullSync<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                                               ReactiveMessagingSender<{CONFIG as usize}, LocalMessages, ChannelUniMoveFullSync<LocalMessages, SENDER_BUFFER, 1>> >
-                                                                            ::new() ),
+                                                                               UniZeroCopyFullSync<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                                                               ReactiveMessagingSender<CONFIG, $local_messages, ChannelUniMoveFullSync<$local_messages, SENDER_BUFFER, 1>> >
+                                                                            ::new($interface_ip, $port) ),
             Channels::Crossbeam => SocketServer::<CONFIG,
                                                   $remote_messages,
                                                   $local_messages,
@@ -65,12 +78,13 @@ macro_rules! new_socket_server {
                                                ::Crossbeam(GenericSocketServer::<CONFIG,
                                                                                  $remote_messages,
                                                                                  $local_messages,
-                                                                                 UniZeroCopyCrossbeam<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                                                 ReactiveMessagingSender<{CONFIG as usize}, LocalMessages, ChannelUniMoveCrossbeam<LocalMessages, SENDER_BUFFER, 1>> >
-                                                                              ::new() ),
+                                                                                 UniMoveCrossbeam<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                 ReactiveMessagingSender<CONFIG, $local_messages, ChannelUniMoveCrossbeam<$local_messages, SENDER_BUFFER, 1>> >
+                                                                              ::new($interface_ip, $port) ),
         }
     }}
 }
+pub use new_socket_server;
 
 
 pub enum SocketServer<const CONFIG:                    u64,
@@ -109,11 +123,80 @@ pub enum SocketServer<const CONFIG:                    u64,
 // }
 
 
-pub struct GenericSocketServer<const CONFIG: u64,
-                               RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
-                               LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + Default + 'static,
-                               Uni,
-                               Sender> {
+pub struct GenericSocketServer<const CONFIG:        u64,
+                               RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+                               LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
+                               ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
+                               RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages>  + Send + Sync                     + 'static> {
 
-    _phantom: PhantomData<(RemoteMessages, LocalMessages, Uni, Sender)>
+    /// The interface to listen to incoming connections
+    interface_ip:                String,
+    /// The port to listen to incoming connections
+    port:                        u16,
+    /// Signaler to stop the server
+    server_shutdown_signaler:    Option<tokio::sync::oneshot::Sender<u32>>,
+    /// Signaler to cause [wait_for_shutdown()] to return
+    local_shutdown_receiver:     Option<tokio::sync::oneshot::Receiver<()>>,
+    _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,RetryableSenderImpl)>
+}
+
+impl<const CONFIG:        u64,
+     RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessages:       ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + 'static,
+     ProcessorUniType:    GenericUni<ItemType=RemoteMessages>           + Send + Sync                     + 'static,
+     RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessages>  + Send + Sync                     + 'static>
+GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, RetryableSenderImpl> {
+
+    /// Creates a new server instance listening on TCP/IP:
+    ///   `interface_ip`:         the interface's IP to listen to -- 0.0.0.0 will cause listening to all network interfaces
+    ///   `port`:                 what port to listen to
+    pub fn new<IntoString: Into<String>>
+              (interface_ip: IntoString,
+               port: u16)
+              -> Self {
+        Self {
+            interface_ip:             interface_ip.into(),
+            port,
+            server_shutdown_signaler: None,
+            local_shutdown_receiver:  None,
+            _phantom:                 PhantomData,
+        }
+    }
+
+}
+
+
+/// Unit tests the [socket_server](self) module
+#[cfg(any(test,doc))]
+mod tests {
+    use super::*;
+
+    /// Test that our instantiation macro is able to produce all types
+    #[cfg_attr(not(doc),test)]
+    fn instantiation() {
+        let atomic_server = new_socket_server!(
+            ConstConfig {
+                channel: Channels::Atomic,
+                ..ConstConfig::default()
+            },
+            "127.0.0.1", 8040, String, String);
+        assert!(matches!(atomic_server, SocketServer::Atomic(_)), "an Atomic Server couldn't be instantiated");
+
+        let fullsync_server  = new_socket_server!(
+            ConstConfig {
+                channel: Channels::Atomic,
+                ..ConstConfig::default()
+            },
+            "127.0.0.1", 8041, String, String);
+        assert!(matches!(fullsync_server, SocketServer::FullSync(_)), "a FullSync Server couldn't be instantiated");
+
+        let crossbeam_server = new_socket_server!(
+            ConstConfig {
+                channel: Channels::Atomic,
+                ..ConstConfig::default()
+            },
+            "127.0.0.1", 8042, String, String);
+        assert!(matches!(crossbeam_server, SocketServer::Crossbeam(_)), "a Crossbeam Server couldn't be instantiated");
+    }
+
 }
