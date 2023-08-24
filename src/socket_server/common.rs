@@ -1,25 +1,31 @@
 //! Contains some functions and other goodies used across this module
 
 
+use std::fmt::Debug;
 use crate::prelude::ConnectionEvent;
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use futures::future::BoxFuture;
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use tokio::sync::Mutex;
 use log::{warn, error};
+use crate::ReactiveMessagingSerializer;
 use crate::socket_connection::common::RetryableSender;
 
 /// Upgrades the user provided `connection_events_callback()` into a callback able to keep track of the shutdown event
 /// -- so the "shutdown is complete" signal may be sent
-pub(crate) fn upgrade_to_shutdown_tracking<RetryableSenderImpl:            RetryableSender   + Send + Sync + 'static,
-                                           ConnectionEventsCallbackFuture: Future<Output=()> + Send>
+#[inline(always)]
+pub(crate) fn upgrade_to_shutdown_tracking<const CONFIG:                   u64,
+                                           LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                                           SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
+                                           ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send>
 
                                           (shutdown_is_complete_signaler:            tokio::sync::oneshot::Sender<()>,
-                                           user_provided_connection_events_callback: impl Fn(ConnectionEvent<RetryableSenderImpl>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                           user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                                          -> impl Fn(ConnectionEvent<RetryableSenderImpl>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
+                                          -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) -> Pin<Box<dyn Future<Output=()> + Send>> {
 
     let shutdown_is_complete_signaler = Arc::new(Mutex::new(Option::Some(shutdown_is_complete_signaler)));
     let user_provided_connection_events_callback = Arc::new(user_provided_connection_events_callback);

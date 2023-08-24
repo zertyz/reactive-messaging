@@ -39,19 +39,19 @@ use crate::socket_connection::peer::Peer;
 //   - handles all combinations of the Stream's output types returned by `dialog_processor_builder_fn()`: futures/non-future & fallible/non-fallible;
 //   - handles unresponsive / responsive output types (also issued by the Streams created by `dialog_processor_builder_fn()`).
 pub struct SocketConnectionHandler<const CONFIG:        u64,
-                                   RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType> + Send + Sync + PartialEq + Debug + 'static,
-                                   LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>    + Send + Sync + PartialEq + Debug + 'static,
-                                   ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>           + Send + Sync                     + 'static,
-                                   RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessagesType>  + Send + Sync                     + 'static> {
-    _phantom:   PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, RetryableSenderImpl)>,
+                                   RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+                                   LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+                                   ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
+                                   SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static> {
+    _phantom:   PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel)>,
 }
 
 impl<const CONFIG:        u64,
-     RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType> + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>    + Send + Sync + PartialEq + Debug + 'static,
-     ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>           + Send + Sync                     + 'static,
-     RetryableSenderImpl: RetryableSender<LocalMessages=LocalMessagesType>  + Send + Sync                     + 'static>
- SocketConnectionHandler<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, RetryableSenderImpl> {
+     RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+     ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
+     SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static>
+ SocketConnectionHandler<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel> {
 
     pub fn new() -> Self {
         Self {
@@ -65,11 +65,11 @@ impl<const CONFIG:        u64,
     ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
     ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
     #[inline(always)]
-    pub async fn server_loop_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
-                                                            OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                       + Send                + 'static,
-                                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                     + Send,
-                                                            ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<RetryableSenderImpl>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                                            ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync         + 'static>
+    pub async fn server_loop_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                          Send + Sync + Debug + 'static,
+                                                            OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                            + Send                + 'static,
+                                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                          + Send,
+                                                            ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                                            ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync         + 'static>
 
                                                            (self,
                                                             listening_interface:         String,
@@ -123,13 +123,13 @@ impl<const CONFIG:        u64,
                 };
 
                 // prepares for the dialog to come with the (just accepted) connection
-                let sender = RetryableSenderImpl::new(format!("Sender for client {addr}"));
+                let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
                 let peer = Arc::new(Peer::new(sender, addr));
                 let peer_ref1 = Arc::clone(&peer);
                 let peer_ref2 = Arc::clone(&peer);
 
                 // issue the connection event
-                connection_events_callback(ConnectionEvent::<RetryableSenderImpl>::PeerConnected {peer: peer.clone()}).await;
+                connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
 
                 let (client_ip, client_port) = match addr {
                     SocketAddr::V4(v4) => (v4.ip().to_string(), v4.port()),
@@ -162,11 +162,11 @@ impl<const CONFIG:        u64,
     ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
     ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
     #[inline(always)]
-    pub async fn client_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
-                                                       OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                       + Send                + 'static,
-                                                       ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                     + Send,
-                                                       ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<RetryableSenderImpl>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                                       ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<RetryableSenderImpl>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
+    pub async fn client_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                          Send + Sync + Debug + 'static,
+                                                       OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                            + Send                + 'static,
+                                                       ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                          + Send,
+                                                       ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                                       ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                       (self,
                                                        server_ipv4_addr:            String,
@@ -181,7 +181,7 @@ impl<const CONFIG:        u64,
         let socket = TcpStream::connect(addr).await?;
 
         // prepares for the dialog to come with the (just accepted) connection
-        let sender = RetryableSenderImpl::new(format!("Sender for client {addr}"));
+        let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
         let peer = Arc::new(Peer::new(sender, addr));
         let peer_ref1 = Arc::clone(&peer);
         let peer_ref2 = Arc::clone(&peer);
@@ -235,7 +235,7 @@ impl<const CONFIG:        u64,
     #[inline(always)]
     async fn dialog_loop_for_textual_protocol(self: Arc<Self>,
                                               mut textual_socket: TcpStream,
-                                              peer:               Arc<Peer<RetryableSenderImpl>>,
+                                              peer:               Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>,
                                               processor_sender:   ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>)
 
                                               -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
@@ -363,8 +363,8 @@ impl<const CONFIG:        u64,
     #[inline(always)]
     pub async fn server_loop_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                        + Send        + 'static,
                                                           ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                     + Send,
-                                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<RetryableSenderImpl>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<RetryableSenderImpl>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync + 'static>
+                                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync + 'static>
 
                                                          (self,
                                                           listening_interface:         String,
@@ -382,7 +382,7 @@ impl<const CONFIG:        u64,
            let dialog_processor_stream = dialog_processor_builder_fn(client_addr, connected_port, Arc::clone(&peer), client_messages_stream);
            self.to_responsive_stream(peer, dialog_processor_stream)
        };
-        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, RetryableSenderImpl>::new();
+        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel>::new();
         unresponsive_socket_connection_handler.server_loop_for_unresponsive_text_protocol(listening_interface.clone(), listening_port, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
             .map_err(|err| Box::from(format!("error when starting server @ {listening_interface}:{listening_port} with `server_loop_for_unresponsive_text_protocol()`: {err}")))
     }
@@ -390,10 +390,10 @@ impl<const CONFIG:        u64,
     /// Similar to [client_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
     /// answers of type `ClientMessages`, which will be automatically routed to the server.
     #[inline(always)]
-    pub async fn client_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                        + Send +        'static,
-                                                     ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                     + Send,
-                                                     ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<RetryableSenderImpl>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                     ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<RetryableSenderImpl>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
+    pub async fn client_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                             + Send +        'static,
+                                                     ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                          + Send,
+                                                     ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                     ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                     (self,
                                                      server_ipv4_addr:            String,
@@ -411,7 +411,7 @@ impl<const CONFIG:        u64,
            let dialog_processor_stream = dialog_processor_builder_fn(server_addr, port, Arc::clone(&peer), server_messages_stream);
            self.to_responsive_stream(peer, dialog_processor_stream)
        };
-        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, RetryableSenderImpl>::new();
+        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel>::new();
         unresponsive_socket_connection_handler.client_for_unresponsive_text_protocol(server_ipv4_addr.clone(), port, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
             .map_err(|err| Box::from(format!("error when starting client for server @ {server_ipv4_addr}:{port} with `client_for_unresponsive_text_protocol()`: {err}")))
     }
@@ -419,7 +419,7 @@ impl<const CONFIG:        u64,
     /// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
     #[inline(always)]
     fn to_responsive_stream(&self,
-                            peer:                     Arc<Peer<RetryableSenderImpl>>,
+                            peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>,
                             request_processor_stream: impl Stream<Item=LocalMessagesType>)
 
                            -> impl Stream<Item = ()>
@@ -457,7 +457,7 @@ impl<const CONFIG:        u64,
     /// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
     #[inline(always)]
     fn _to_responsive_stream_of_fallibles(&self,
-                                          peer:                     Arc<Peer<RetryableSenderImpl>>,
+                                          peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>,
                                           request_processor_stream: impl Stream<Item = Result<LocalMessagesType, Box<dyn std::error::Error + Sync + Send>>>)
 
                                          -> impl Stream<Item = ()>
@@ -512,7 +512,7 @@ mod tests {
     const DEFAULT_TEST_CONFIG_U64:  u64            = DEFAULT_TEST_CONFIG.into();
     const DEFAULT_TEST_UNI_INSTRUMENTS: usize      = DEFAULT_TEST_CONFIG.executor_instruments.into();
     type DefaultTestUni<PayloadType = String>      = UniZeroCopyAtomic<PayloadType, {DEFAULT_TEST_CONFIG.receiver_buffer as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
-    type RetryableSenderImpl<PayloadType = String> = ReactiveMessagingSender<DEFAULT_TEST_CONFIG_U64, PayloadType, ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_buffer as usize}, 1>>;
+    type SenderChannel<PayloadType = String> = ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_buffer as usize}, 1>;
 
 
     #[ctor::ctor]
@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(ConstConfig::from(DEFAULT_TEST_CONFIG_U64), DEFAULT_TEST_CONFIG, "Configs don't match");
         // try to create the objects based on the config (a compilation error is expected if wrong const generic parameters are provided to the `Uni` type)
         let uni    = DefaultTestUni::<String>::new("Can it be instantiated?");
-        let sender = RetryableSenderImpl::<String>::new("Can it be instantiated?");
+        let sender = SenderChannel::<String>::new("Can it be instantiated?");
 
         // `reactive-mutiny` checks
         ///////////////////////////
@@ -541,7 +541,7 @@ mod tests {
         let (mut stream, _stream_id) = sender.create_stream();
         assert!(sender.send(channel_payload.clone()).is_ok(), "`reactive-mutiny`: channel: couldn't send");
         assert_eq!(stream.next().await, Some(channel_payload),      "`reactive-mutiny`: channel: couldn't receive");
-        assert_eq!(sender.channel().gracefully_end_all_streams(Duration::from_millis(100)).await, 1, "`reactive-mutiny` Streams should only be reported as 'gracefully ended' after they are consumed to exhaustion");
+        assert_eq!(sender.gracefully_end_all_streams(Duration::from_millis(100)).await, 1, "`reactive-mutiny` Streams should only be reported as 'gracefully ended' after they are consumed to exhaustion");
         assert_eq!(stream.next().await, None, "`reactive-mutiny`: channel: couldn't end the Stream");
         // channel (zero-copy)
         let sender = ChannelUniZeroCopyAtomic::<String, {DEFAULT_TEST_CONFIG.sender_buffer as usize}, 1>::new("Please work also...");
@@ -557,6 +557,25 @@ mod tests {
                                                                             |_| future::ready(println!("ENDED")));
         assert!(uni.send(String::from("delivered?")).is_ok(), "`reactive-mutiny`: Uni: couldn't send");
         assert!(uni.close(Duration::from_millis(100)).await, "`reactive-mutiny` Streams being executed by an `Uni` should be reported as 'gracefully ended' as they should be promptly consumed to exhaustion");
+
+        // Rust checks
+        //////////////
+        // `Futures` are `Send` -- see compiler bug https://github.com/rust-lang/rust/issues/102211
+        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
+        socket_connection_handler.server_loop_for_unresponsive_text_protocol
+                                                    (String::from("127.0.0.1"), 8579, server_shutdown_receiver,
+                                                     |connection_event| async move {
+                                                         match connection_event {
+                                                             ConnectionEvent::PeerConnected { .. }       => tokio::time::sleep(Duration::from_millis(100)).await,
+                                                             ConnectionEvent::PeerDisconnected { .. }    => tokio::time::sleep(Duration::from_millis(100)).await,
+                                                             ConnectionEvent::ApplicationShutdown { .. } => tokio::time::sleep(Duration::from_millis(100)).await,
+                                                         }
+                                                     },
+                                                     move |_client_addr, _client_port, peer, client_messages_stream|
+                                                         client_messages_stream
+        ).await.expect("Starting the server");
+
     }
 
 
@@ -575,7 +594,7 @@ mod tests {
         // server
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol
                                                     (LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                      |connection_event| {
@@ -610,7 +629,7 @@ mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
-        let client_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let client_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         client_connection_handler.client_for_unresponsive_text_protocol
                                                (LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
                                                 move |connection_event| {
@@ -663,7 +682,7 @@ mod tests {
         let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
         // server
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol
                                                     (LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                      |_connection_event| async {},
@@ -684,7 +703,7 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_ref = Arc::clone(&counter);
         // client
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_connection_handler.client_for_unresponsive_text_protocol
                                                (LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
                                                 |connection_event| {
@@ -751,7 +770,7 @@ mod tests {
         let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaputt
         let received_messages_count_ref = Arc::clone(&received_messages_count);
         let unordered_ref = Arc::clone(&unordered);
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, RetryableSenderImpl<String>>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol
                                                     (LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                       |_connection_event| async {},
@@ -776,7 +795,7 @@ mod tests {
         // client
         let sent_messages_count = Arc::new(AtomicU32::new(0));
         let sent_messages_count_ref = Arc::clone(&sent_messages_count);
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, RetryableSenderImpl<String>>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
         socket_connection_handler.client_for_unresponsive_text_protocol
                                                (LISTENING_INTERFACE.to_string(), PORT,
                                                 client_shutdown_receiver,
@@ -855,7 +874,7 @@ mod tests {
         // server
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_connection_handler.server_loop_for_responsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
             |_connection_event| future::ready(()),
             move |_client_addr, _client_port, peer, client_messages_stream| {
@@ -880,7 +899,7 @@ mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_connection_handler.client_for_responsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
             move |_connection_event| future::ready(()),
             move |_client_addr, _client_port, peer, server_messages_stream| {
@@ -923,7 +942,7 @@ mod tests {
         let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
 
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
             move |connection_event| {
                 let server_disconnected = Arc::clone(&server_disconnected_ref);
@@ -939,7 +958,7 @@ mod tests {
         // wait a bit for the server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, RetryableSenderImpl>::new();
+        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_connection_handler.client_for_unresponsive_text_protocol(LISTENING_INTERFACE.to_string(), PORT, client_shutdown_receiver,
             move |connection_event| {
                 let client_disconnected = Arc::clone(&client_disconnected_ref);

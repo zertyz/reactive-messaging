@@ -38,23 +38,29 @@ pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
 #[async_trait]
 /// Our contract for applying the retrying logic to [FullDuplexUniChannel]s when
 /// sending them out to the remote peer
-pub trait RetryableSender: Send + Sync {
+pub trait RetryableSender {
 
     /// The instance config the implementation adheres to
     const CONST_CONFIG: ConstConfig;
     /// The type of the local messages to be delivered to the remote peer
-    type LocalMessages:     ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug + 'static;
+    type LocalMessages:     ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug;
     type SenderChannelType: FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Send + Sync;
 
     /// Instantiates a new `channel` (from `reactive-mutiny`, with type `Self::SenderChannelType`) and wrap in a way to allow
     /// our special [Self::send()] to operate on
     fn new<IntoString: Into<String>>(channel_name: IntoString) -> Self where Self: Sized;
 
-    fn channel(&self) -> &Arc<Self::SenderChannelType>;
-
     fn create_stream(&self) -> (MutinyStream<'static, Self::LocalMessages, Self::SenderChannelType, Self::LocalMessages>, u32);
 
+    /// IMPLEMENTORS: #[inline(always)]
+    fn pending_items_count(&self) -> u32;
+
+    /// IMPLEMENTORS: #[inline(always)]
+    fn buffer_size(&self) -> u32;
+
     async fn flush_and_close(&self, timeout: Duration) -> u32;
+
+    fn cancel_and_close(&self);
 
     /// Routes `message` to the remote peer,
     /// honoring the configured retrying options.
@@ -204,12 +210,12 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
 /// -- used to send messages to the remote peer
 pub struct ReactiveMessagingSender<const CONFIG:    u64,
                                    LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-                                   OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static> {
+                                   OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync> {
     channel: Arc<OriginalChannel>,
 }
 impl<const CONFIG: u64,
-     LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-     OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static>
+     LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+     OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
 ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 
     /// mapper for eventual first-time-being retrying attempts -- or for fatal errors that might happen during retrying
@@ -224,8 +230,8 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 
 #[async_trait]
 impl<const CONFIG: u64,
-     LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-     OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static>
+     LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+     OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
 RetryableSender for
 ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
     const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
@@ -238,16 +244,26 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
         }
     }
 
-    fn channel(&self) -> &Arc<OriginalChannel> {
-        &self.channel
-    }
-
     fn create_stream(&self) -> (MutinyStream<'static, LocalMessages, OriginalChannel, LocalMessages>, u32) {
         self.channel.create_stream()
     }
 
+    #[inline(always)]
+    fn pending_items_count(&self) -> u32 {
+        self.channel.pending_items_count()
+    }
+
+    #[inline(always)]
+    fn buffer_size(&self) -> u32 {
+        self.channel.buffer_size()
+    }
+
     async fn flush_and_close(&self, timeout: Duration) -> u32 {
         self.channel.gracefully_end_all_streams(timeout).await
+    }
+
+    fn cancel_and_close(&self) {
+        self.channel.cancel_all_streams();
     }
 
     #[inline(always)]
