@@ -1,11 +1,11 @@
 //! Resting place for [ServerProtocolProcessor]
 
 use std::cell::UnsafeCell;
+use std::fmt::Debug;
+use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::Arc;
-use reactive_messaging::prelude::{
-    Peer,
-    ProcessorRemoteStreamType
-};
+use reactive_messaging::prelude::{Peer, MessagingMutinyStream, ConstConfig};
 use crate::common::{
     logic::{ping_pong_logic::Umpire,
     ping_pong_models::{GameStates, Players, TurnFlipEvents, PingPongEvent, GameOverStates},
@@ -16,6 +16,7 @@ use dashmap::DashMap;
 use futures::stream::{self, Stream, StreamExt};
 use reactive_messaging::prelude::ConnectionEvent;
 use log::{debug, info, warn, error};
+use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 
 
 /// Session for each connected peer
@@ -26,12 +27,10 @@ struct Session {
 unsafe impl Send for Session {}
 unsafe impl Sync for Session {}
 
-pub struct ServerProtocolProcessor<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> {
+pub struct ServerProtocolProcessor {
     sessions: Arc<DashMap<u32, Arc<Session>>>,
 }
-impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize>
-Default for
-ServerProtocolProcessor<BUFFERED_MESSAGES_PER_PEER_COUNT> {
+impl Default for ServerProtocolProcessor {
     fn default() -> Self {
         Self {
             sessions: Arc::new(DashMap::new()),
@@ -39,13 +38,15 @@ ServerProtocolProcessor<BUFFERED_MESSAGES_PER_PEER_COUNT> {
     }
 }
 
-impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ServerProtocolProcessor<BUFFERED_MESSAGES_PER_PEER_COUNT> {
+impl ServerProtocolProcessor {
 
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn server_events_callback(&self, connection_event: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>) {
+    pub fn server_events_callback<const CONFIG:  u64,
+                                  SenderChannel: FullDuplexUniChannel<ItemType=ServerMessages, DerivedItemType=ServerMessages> + Send + Sync>
+                                  (&self, connection_event: ConnectionEvent<CONFIG, ServerMessages, SenderChannel>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 debug!("Connected: {:?}", peer);
@@ -62,11 +63,14 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ServerProtocolProcessor<BUFF
         }
     }
 
-    pub fn dialog_processor(&self,
+    pub fn dialog_processor<const CONFIG:   u64,
+                            SenderChannel:  FullDuplexUniChannel<ItemType=ServerMessages, DerivedItemType=ServerMessages> + Send + Sync,
+                            StreamItemType: AsRef<ClientMessages> + Debug>
+                           (&self,
                             _client_addr:           String,
                             _port:                  u16,
-                            peer:                   Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>>,
-                            client_messages_stream: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>)
+                            peer:                   Arc<Peer<CONFIG, ServerMessages, SenderChannel>>,
+                            client_messages_stream: impl Stream<Item=StreamItemType>)
 
                            -> impl Stream<Item=ServerMessages> {
                             
@@ -80,20 +84,20 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ServerProtocolProcessor<BUFF
             let umpire_option = unsafe { &mut * (session.umpire.get()) };
             let Some(umpire) = umpire_option else {
                 return {
-                    if let ClientMessages::Config(match_config) = &*client_message {
+                    if let ClientMessages::Config(match_config) = client_message.as_ref() {
                         // instantiate the game
-                        let umpire = Umpire::new(match_config, Players::Opponent);
+                        let umpire = Umpire::new(&match_config, Players::Opponent);
                         umpire_option.replace(umpire);
                         vec![ServerMessages::GameStarted]
                     } else {
-                        vec![ServerMessages::Error(format!("The first message sent must be `Config(match_config)` -- the received one was `{:?}`", client_message))]
+                        vec![ServerMessages::Error(format!("The first message sent must be `Config(match_config)` -- the received one was `{:?}`", client_message.as_ref()))]
                     }
                 }
             };
 
             // from this point on, we have a configured umpire in the `umpire` variable
 
-            match &*client_message {
+            match client_message.as_ref() {
 
                 ClientMessages::Config(offending_match_config) => {
                     // protocol offense

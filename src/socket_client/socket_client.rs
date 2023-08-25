@@ -70,47 +70,46 @@ macro_rules! new_socket_client {
      $port:            expr,
      $remote_messages: ty,
      $local_messages:  ty) => {{
-        use crate::socket_client::{SocketClient, GenericSocketClient};
-        const CONFIG:                    u64   = $const_config.into();
-        const PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
-        const PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
-        const SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
+        const _CONFIG:                    u64   = $const_config.into();
+        const _PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
+        const _PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
+        const _SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
         match $const_config.channel {
-            Channels::Atomic => SocketClient::<CONFIG,
+            Channels::Atomic => SocketClient::<_CONFIG,
                                                $remote_messages,
                                                $local_messages,
-                                               PROCESSOR_BUFFER,
-                                               PROCESSOR_UNI_INSTRUMENTS,
-                                               SENDER_BUFFER>
-                                            ::Atomic(GenericSocketClient::<CONFIG,
+                                               _PROCESSOR_BUFFER,
+                                               _PROCESSOR_UNI_INSTRUMENTS,
+                                               _SENDER_BUFFER>
+                                            ::Atomic(GenericSocketClient::<_CONFIG,
                                                                            $remote_messages,
                                                                            $local_messages,
-                                                                           UniZeroCopyAtomic<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                                           ChannelUniMoveAtomic<$local_messages, SENDER_BUFFER, 1> >
+                                                                           UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                           ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1> >
                                                                         ::new($ip, $port) ),
-            Channels::FullSync => SocketClient::<CONFIG,
+            Channels::FullSync => SocketClient::<_CONFIG,
                                                  $remote_messages,
                                                  $local_messages,
-                                                 PROCESSOR_BUFFER,
-                                                 PROCESSOR_UNI_INSTRUMENTS,
-                                                 SENDER_BUFFER>
-                                              ::FullSync(GenericSocketClient::<CONFIG,
+                                                 _PROCESSOR_BUFFER,
+                                                 _PROCESSOR_UNI_INSTRUMENTS,
+                                                 _SENDER_BUFFER>
+                                              ::FullSync(GenericSocketClient::<_CONFIG,
                                                                                $remote_messages,
                                                                                $local_messages,
-                                                                               UniZeroCopyFullSync<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                                               ChannelUniMoveFullSync<$local_messages, SENDER_BUFFER, 1> >
+                                                                               UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                               ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1> >
                                                                             ::new($ip, $port) ),
-            Channels::Crossbeam => SocketClient::<CONFIG,
+            Channels::Crossbeam => SocketClient::<_CONFIG,
                                                   $remote_messages,
                                                   $local_messages,
-                                                  PROCESSOR_BUFFER,
-                                                  PROCESSOR_UNI_INSTRUMENTS,
-                                                  SENDER_BUFFER>
-                                               ::Crossbeam(GenericSocketClient::<CONFIG,
+                                                  _PROCESSOR_BUFFER,
+                                                  _PROCESSOR_UNI_INSTRUMENTS,
+                                                  _SENDER_BUFFER>
+                                               ::Crossbeam(GenericSocketClient::<_CONFIG,
                                                                                  $remote_messages,
                                                                                  $local_messages,
-                                                                                 UniMoveCrossbeam<$remote_messages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                                                                 ChannelUniMoveCrossbeam<$local_messages, SENDER_BUFFER, 1> >
+                                                                                 UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                 ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1> >
                                                                               ::new($ip, $port) ),
         }
     }}
@@ -124,12 +123,10 @@ macro_rules! spawn_unresponsive_client_processor {
     ($socket_server:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        use crate::socket_client::SocketClient;
         match &mut $socket_server {
             SocketClient::Atomic    (generic_socket_client)       => generic_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
             SocketClient::FullSync  (generic_socket_client)       => generic_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
             SocketClient::Crossbeam (generic_socket_client)       => generic_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            SocketClient::BadConfig { config: _config, _phantom } => unreachable!(),
         }
     }}
 }
@@ -142,12 +139,10 @@ macro_rules! spawn_responsive_client_processor {
     ($socket_client:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        use crate::socket_client::SocketClient;
         match &mut $socket_client {
             SocketClient::Atomic    (generic_socket_client)       => generic_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
             SocketClient::FullSync  (generic_socket_client)       => generic_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
             SocketClient::Crossbeam (generic_socket_client)       => generic_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            SocketClient::BadConfig { config: _config, _phantom } => unreachable!(),
         }
     }}
 }
@@ -180,10 +175,6 @@ pub enum SocketClient<const CONFIG:                    u64,
                                     LocalMessages,
                                     UniMoveCrossbeam<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
                                     ChannelUniMoveCrossbeam<LocalMessages, SENDER_BUFFER, 1> >),
-    BadConfig {
-        config:   u64,
-        _phantom: PhantomData<(RemoteMessages, LocalMessages)>
-    },
 }
  impl<const CONFIG:                    u64,
       RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
@@ -199,7 +190,6 @@ pub enum SocketClient<const CONFIG:                    u64,
              SocketClient::Atomic    (generic_socket_client) => Box::new(generic_socket_client.shutdown_waiter()),
              SocketClient::FullSync  (generic_socket_client) => Box::new(generic_socket_client.shutdown_waiter()),
              SocketClient::Crossbeam (generic_socket_client) => Box::new(generic_socket_client.shutdown_waiter()),
-             SocketClient::BadConfig { config: _config, _phantom } => unreachable!(),
          }
      }
 
@@ -209,10 +199,8 @@ pub enum SocketClient<const CONFIG:                    u64,
              SocketClient::Atomic    (generic_socket_client) => generic_socket_client.shutdown(timeout_ms),
              SocketClient::FullSync  (generic_socket_client) => generic_socket_client.shutdown(timeout_ms),
              SocketClient::Crossbeam (generic_socket_client) => generic_socket_client.shutdown(timeout_ms),
-             SocketClient::BadConfig { config: _config, _phantom }               => unreachable!(),
          }
      }
-
 }
 
 

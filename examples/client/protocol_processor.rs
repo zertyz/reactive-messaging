@@ -8,11 +8,7 @@ use crate::common::{
         protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault},
     }
 };
-use reactive_messaging::prelude::{
-    ConnectionEvent,
-    Peer,
-    SocketProcessorDerivedType,
-};
+use reactive_messaging::prelude::{ConnectionEvent, MessagingMutinyStream, Peer};
 use std::{
     sync::{
         Arc,
@@ -20,7 +16,9 @@ use std::{
     },
     time::Instant,
 };
-use reactive_mutiny::prelude::ChannelProducer;
+use std::marker::PhantomData;
+use std::ops::Deref;
+use reactive_mutiny::prelude::{ChannelProducer, FullDuplexUniChannel, GenericUni};
 use futures::{Stream, stream, StreamExt};
 use log::{debug,info,error};
 
@@ -37,12 +35,12 @@ const MATCH_CONFIG: MatchConfig = MatchConfig {
     ball_out_probability:   0.007,
 };
 
-pub struct ClientProtocolProcessor<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> {
+pub struct ClientProtocolProcessor {
     start_instant:     Instant,
     in_messages_count: AtomicU64,
 }
 
-impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ClientProtocolProcessor<BUFFERED_MESSAGES_PER_PEER_COUNT> {
+impl ClientProtocolProcessor {
 
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -51,11 +49,13 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ClientProtocolProcessor<BUFF
         })
     }
 
-    pub fn client_events_callback(self: &Arc<Self>, connection_event: ConnectionEvent<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>) {
+    pub fn client_events_callback<const CONFIG:     u64,
+                                  SenderChannel:    FullDuplexUniChannel<ItemType=ClientMessages, DerivedItemType=ClientMessages> + Send + Sync>
+                                 (self: &Arc<Self>, connection_event: ConnectionEvent<CONFIG, ClientMessages, SenderChannel>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 debug!("Connected: {:?}", peer);
-                peer.sender.try_send(|slot| *slot = ClientMessages::Config(MATCH_CONFIG));
+                _ = peer.send(ClientMessages::Config(MATCH_CONFIG));
             },
             ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
                 let in_messages_count = self.in_messages_count.load(Relaxed);
@@ -70,18 +70,20 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ClientProtocolProcessor<BUFF
         }
     }
 
-    pub fn dialog_processor<RemoteStreamType: Stream<Item=SocketProcessorDerivedType<BUFFERED_MESSAGES_PER_PEER_COUNT, ServerMessages>>>
+    pub fn dialog_processor<const CONFIG:     u64,
+                            SenderChannel:    FullDuplexUniChannel<ItemType=ClientMessages, DerivedItemType=ClientMessages> + Send + Sync,
+                            StreamItemType: AsRef<ServerMessages>>
                            (self:                   &Arc<Self>,
                             server_addr:            String,
                             port:                   u16,
-                            peer:                   Arc<Peer<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>>,
-                            server_messages_stream: RemoteStreamType)
+                            peer:                   Arc<Peer<CONFIG, ClientMessages, SenderChannel>>,
+                            server_messages_stream: impl Stream<Item=StreamItemType>)
                            -> impl Stream<Item=ClientMessages> {
         let cloned_self = Arc::clone(self);
         let mut umpire = Umpire::new(&MATCH_CONFIG, Players::Ourself);
         server_messages_stream.map(move |server_message| {
             cloned_self.in_messages_count.fetch_add(1, Relaxed);
-            match &*server_message {
+            match server_message.as_ref() {
 
                 ServerMessages::GameStarted => {
                     vec![ClientMessages::Version]
@@ -101,27 +103,27 @@ impl<const BUFFERED_MESSAGES_PER_PEER_COUNT: usize> ClientProtocolProcessor<BUFF
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "WaitingForService",
                                                                                        |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
-                                                                                       opponent_action,
+                                                                                       &opponent_action,
                                                                                        /*reported_ping_pong_event*/PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulService }))
                                 ],
                                 TurnFlipEvents::SoftFaultService => vec![
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "WaitingForService` or `Rally",
                                                                                        |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
-                                                                                       opponent_action,
+                                                                                       &opponent_action,
                                                                                        /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SoftFaultService }))
                                 ],
                                 TurnFlipEvents::SuccessfulRebate => vec![
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "Rally",
                                                                                        |rs| matches!(rs, GameStates::Rally),
-                                                                                       opponent_action,
+                                                                                       &opponent_action,
                                                                                        /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulRebate }))
                                 ],
                             }
                         },
                         PingPongEvent::HardFault { player_action: opponent_action, resulting_fault_event } => {
-                            react_to_hard_fault(&mut umpire, opponent_action, resulting_fault_event).into_iter()
+                            react_to_hard_fault(&mut umpire, opponent_action, &resulting_fault_event).into_iter()
                                 .map(ClientMessages::PingPongEvent)
                                 .collect()
                         },

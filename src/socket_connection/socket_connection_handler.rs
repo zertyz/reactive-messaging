@@ -449,6 +449,8 @@ impl<const CONFIG:        u64,
                             warn!("reactive-messaging: Slow reader detected while sending the closing message to {:?}: {error_msg}", peer);
                         }
                     }
+                    // TODO 2023-08-25: there should be a proper method to call out of async context (in Peer) that will allow us not to forcibly sleep here.
+                    std::thread::sleep(Duration::from_millis(10));
                     peer.cancel_and_close();
                 }
             })

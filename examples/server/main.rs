@@ -1,39 +1,39 @@
-/*#[path = "../common/mod.rs"] mod common;
+#[path = "../common/mod.rs"] mod common;
 
 pub mod protocol_processor;
 
+use crate::common::protocol_model::ServerMessages;
 use protocol_processor::ServerProtocolProcessor;
 use common::protocol_model::ClientMessages;
 use std::{future, sync::Arc, time::Duration};
-use reactive_messaging::prelude::ProcessorRemoteStreamType;
+use futures::stream;
+use reactive_messaging::prelude::*;
 use log::warn;
 
 
 const LISTENING_INTERFACE: &str = "0.0.0.0";
 const LISTENING_PORT:      u16  = 1234;
+const CONFIG: ConstConfig = ConstConfig {
+    ..ConstConfig::default()
+};
 
-const BUFFERED_MESSAGES_PER_PEER_COUNT: usize = 2048;
-*/
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-/*    simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
+    simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
 
     warn!("Ping-Pong server starting at {LISTENING_INTERFACE}:{LISTENING_PORT}");
 
     let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);
 
-    let mut socket_server = reactive_messaging::SocketServer::<BUFFERED_MESSAGES_PER_PEER_COUNT>::new(LISTENING_INTERFACE.to_string(), LISTENING_PORT);
-
-    socket_server.spawn_responsive_processor(
-        move |connection_events| {
-            server_processor_ref1.server_events_callback(connection_events);
+    let mut socket_server = new_socket_server!(CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ClientMessages, ServerMessages);
+    spawn_responsive_server_processor!(socket_server,
+        move |connection_event| {
+            server_processor_ref1.server_events_callback(connection_event);
             future::ready(())
         },
-        move |client_addr, port, peer, client_messages_stream: ProcessorRemoteStreamType<BUFFERED_MESSAGES_PER_PEER_COUNT, ClientMessages>| {
-            server_processor_ref2.dialog_processor(client_addr, port, peer, client_messages_stream)
-        }
-    ).await?;
+        move |client_addr, port, peer, client_messages_stream| server_processor_ref2.dialog_processor(client_addr, port, peer, client_messages_stream)
+    )?;
 
     let wait_for_shutdown = socket_server.shutdown_waiter();
 tokio::spawn( async move {
@@ -41,7 +41,7 @@ tokio::spawn( async move {
     socket_server.shutdown(5000).expect("FAILED TO SHUTDOWN");
 });
     wait_for_shutdown().await?;
-*/
+
     Ok(())
     //let (processor_stream, stream_producer, stream_closer) = socket_server.set_processor()
 

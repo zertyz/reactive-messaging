@@ -56,16 +56,18 @@
 //! for the triggered reason.
 
 use std::error::Error;
+use std::ops::Deref;
 use super::logic::ping_pong_models::*;
 use serde::{Serialize, Deserialize};
-use reactive_messaging::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ResponsiveMessages, ReactiveMessagingSerializer};
+use reactive_messaging::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use reactive_messaging::prelude::ResponsiveMessages;
 
 
 pub const PROTOCOL_VERSION: &str = "2023-06-21";
 
 
 /// Messages coming from the clients, suitable to be deserialized by the server
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum ClientMessages {
 
     /// First message that the client must send, upon establishing a connection
@@ -89,6 +91,7 @@ pub enum ClientMessages {
     /////////////////////////////////
 
     /// Asks the server version, which should cause the server to respond with [ServerMessages::Version]
+    #[default]
     Version,
     /// States that the last command wasn't correctly processed or was not recognized as valid
     Error(/*explanation: */String),
@@ -103,10 +106,11 @@ pub enum ClientMessages {
 }
 
 /// Messages coming from the server, suitable to be deserialized by the clients
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum ServerMessages {
 
     /// Issued after a [ClientMessages::Config] has been received, indicating the client should service the first ball of the game
+    #[default]
     GameStarted,
 
     /// When asked, at any time, through [ClientMessages::DumpConfig], informs the match config in place
@@ -133,6 +137,14 @@ pub enum ServerMessages {
 
 // implementation of the RON SerDe & Responsive traits
 //////////////////////////////////////////////////////
+
+impl AsRef<ClientMessages> for ClientMessages {
+    #[inline(always)]
+    fn as_ref(&self) -> &ClientMessages {
+        &self
+    }
+}
+
 
 impl ReactiveMessagingSerializer<ClientMessages> for ClientMessages {
 
@@ -166,6 +178,13 @@ impl ResponsiveMessages<ClientMessages> for ClientMessages {
     #[inline(always)]
     fn is_no_answer_message(processor_answer: &ClientMessages) -> bool {
         matches!(processor_answer, ClientMessages::NoAnswer)
+    }
+}
+
+impl AsRef<ServerMessages> for ServerMessages {
+    #[inline(always)]
+    fn as_ref(&self) -> &ServerMessages {
+        &self
     }
 }
 

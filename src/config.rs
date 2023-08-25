@@ -186,13 +186,13 @@ impl ConstConfig {
     pub const fn default() -> ConstConfig {
         ConstConfig {
             msg_size_hint:                  1024,
-            sender_buffer:                  2048,
-            receiver_buffer:                2048,
+            sender_buffer:                  1024,
+            receiver_buffer:                1024,
             graceful_close_timeout_millis:  256,
             retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(20),
             socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
             channel:                        Channels::Atomic,
-            executor_instruments:           Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
+            executor_instruments:           Instruments::from(Instruments::NoInstruments.into()),
         }
     }
 
