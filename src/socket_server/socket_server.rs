@@ -458,7 +458,7 @@ mod tests {
         assert!(matches!(crossbeam_server, SocketServer::Crossbeam(_)), "a Crossbeam Server couldn't be instantiated");
     }
 
-    /// Test that our types can be compiled & instantiated & are ready for usage
+    /// Test that our server types are ready for usage
     #[cfg_attr(not(doc),tokio::test)]
     async fn doc_usage() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
@@ -495,8 +495,8 @@ mod tests {
         server.shutdown(200)?;
         shutdown_waiter().await?;
 
-        // demonstrates how to build an responsive server
-        /////////////////////////////////////////////////
+        // demonstrates how to build a responsive server
+        ////////////////////////////////////////////////
         // using fully typed generic functions that will work with all possible configs
         let mut server = new_socket_server!(
             ConstConfig::default(),

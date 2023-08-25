@@ -472,4 +472,156 @@ mod tests {
             REMOTE_SERVER, 443, String, String);
         assert!(matches!(crossbeam_client, SocketClient::Crossbeam(_)), "a Crossbeam Client couldn't be instantiated");
     }
+
+    /// Test that our client types are ready for usage
+    #[cfg_attr(not(doc),tokio::test)]
+    async fn doc_usage() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+
+        // demonstrates how to build an unresponsive client
+        ///////////////////////////////////////////////////
+        // using fully typed generic functions that will work with all possible configs
+        let mut client = new_socket_client!(
+            ConstConfig::default(),
+            REMOTE_SERVER,
+            443,
+            DummyClientAndServerMessages,
+            DummyClientAndServerMessages);
+        spawn_unresponsive_client_processor!(client,
+            connection_events_handler,
+            unresponsive_processor
+        )?;
+        async fn connection_events_handler<const CONFIG:  u64,
+                                           LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+                                           SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
+                                          (_event: ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) {
+        }
+        fn unresponsive_processor<const CONFIG:   u64,
+                                  LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+                                  SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+                                  StreamItemType: Deref<Target=DummyClientAndServerMessages>>
+                                 (client_addr:            String,
+                                  connected_port:         u16,
+                                  peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel>>,
+                                  client_messages_stream: impl Stream<Item=StreamItemType>)
+                                 -> impl Stream<Item=()> {
+            client_messages_stream.map(|payload| ())
+        }
+        let shutdown_waiter = client.shutdown_waiter();
+        client.shutdown(200)?;
+        shutdown_waiter().await?;
+
+        // demonstrates how to build a responsive server
+        ////////////////////////////////////////////////
+        // using fully typed generic functions that will work with all possible configs
+        let mut client = new_socket_client!(
+            ConstConfig::default(),
+            REMOTE_SERVER,
+            443,
+            DummyClientAndServerMessages,
+            DummyClientAndServerMessages);
+        spawn_responsive_client_processor!(client,
+            connection_events_handler,
+            responsive_processor
+        )?;
+        fn responsive_processor<const CONFIG:   u64,
+                                SenderChannel:  FullDuplexUniChannel<ItemType=DummyClientAndServerMessages, DerivedItemType=DummyClientAndServerMessages> + Send + Sync,
+                                StreamItemType: Deref<Target=DummyClientAndServerMessages>>
+                               (client_addr:            String,
+                                connected_port:         u16,
+                                peer:                   Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
+                                client_messages_stream: impl Stream<Item=StreamItemType>)
+                               -> impl Stream<Item=DummyClientAndServerMessages> {
+            client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
+        }
+        let shutdown_waiter = client.shutdown_waiter();
+        client.shutdown(200)?;
+        shutdown_waiter().await?;
+
+        // demonstrates how to use it with closures -- also allowing for any channel in the configs
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        let mut client = new_socket_client!(
+            ConstConfig::default(),
+            REMOTE_SERVER,
+            443,
+            DummyClientAndServerMessages,
+            DummyClientAndServerMessages);
+        spawn_unresponsive_client_processor!(client,
+            |_| future::ready(()),
+            |_, _, _, client_messages_stream| client_messages_stream.map(|payload| DummyClientAndServerMessages::FloodPing)
+        )?;
+        let shutdown_waiter = client.shutdown_waiter();
+        client.shutdown(200)?;
+        shutdown_waiter().await?;
+
+        // demonstrates how to use the concrete type
+        ////////////////////////////////////////////
+        // notice there may be a discrepancy in the `ConstConfig` you provide and the actual concrete types
+        // you also provide for `UniProcessor` and `SenderChannel` -- therefore, this usage is not recommended
+        // (but it is here anyway since it may bring, theoretically, a infinitesimal performance benefit)
+        const CONFIG: ConstConfig = ConstConfig {
+            receiver_buffer:      2048,
+            sender_buffer:        1024,
+            channel:              Channels::FullSync,
+            executor_instruments: reactive_mutiny::prelude::Instruments::LogsWithExpensiveMetrics,
+            ..ConstConfig::default()
+        };
+        type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CONFIG.receiver_buffer as usize}, 1, {CONFIG.executor_instruments.into()}>;
+        type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CONFIG.sender_buffer as usize}, 1>;
+        let mut client = GenericSocketClient :: <{CONFIG.into()},
+                                                                     DummyClientAndServerMessages,
+                                                                     DummyClientAndServerMessages,
+                                                                     ProcessorUniType,
+                                                                     SenderChannelType>
+                                                                 :: new("66.45.249.218",443);
+        client.spawn_unresponsive_processor(
+            |_| future::ready(()),
+            |_, _, _, client_messages_stream| client_messages_stream.map(|payload| DummyClientAndServerMessages::FloodPing)
+        ).await?;
+        let shutdown_waiter = client.shutdown_waiter();
+        client.shutdown(200)?;
+        shutdown_waiter().await?;
+
+        Ok(())
+    }
+
+    #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+    enum DummyClientAndServerMessages {
+        #[default]
+        FloodPing,
+    }
+
+    impl Deref for DummyClientAndServerMessages {
+        type Target = DummyClientAndServerMessages;
+        fn deref(&self) -> &Self::Target {
+            self
+        }
+    }
+
+    impl ReactiveMessagingSerializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {
+        #[inline(always)]
+        fn serialize(remote_message: &DummyClientAndServerMessages, buffer: &mut Vec<u8>) {
+            ron_serializer(remote_message, buffer)
+                .expect("unresponsive_socket_client.rs unit tests: No errors should have happened here!")
+        }
+        #[inline(always)]
+        fn processor_error_message(err: String) -> DummyClientAndServerMessages {
+            panic!("unresponsive_socket_client.rs unit tests: protocol error when none should have happened: {err}");
+        }
+    }
+    impl ResponsiveMessages<DummyClientAndServerMessages> for DummyClientAndServerMessages {
+        #[inline(always)]
+        fn is_disconnect_message(_processor_answer: &DummyClientAndServerMessages) -> bool {
+            false
+        }
+        #[inline(always)]
+        fn is_no_answer_message(_processor_answer: &DummyClientAndServerMessages) -> bool {
+            false
+        }
+    }
+    impl ReactiveMessagingDeserializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {
+        #[inline(always)]
+        fn deserialize(local_message: &[u8]) -> Result<DummyClientAndServerMessages, Box<dyn std::error::Error + Sync + Send>> {
+            ron_deserializer(local_message)
+        }
+    }
 }
