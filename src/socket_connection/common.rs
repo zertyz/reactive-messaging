@@ -132,7 +132,7 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
         match Self::CONST_CONFIG.retrying_strategy {
             RetryingStrategies::DoNotRetry => {
                 retryable
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
                             Self::retry_error_mapper(false, format!("Relaying received message '{:?}' to the internal processor failed. Won't retry (ignoring the error) due to retrying config {:?}",
@@ -141,7 +141,7 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
             },
             RetryingStrategies::EndCommunications => {
                 retryable
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
                             Self::retry_error_mapper(false, format!("Relaying received message '{:?}' to the internal processor failed. Connection will be aborted (without retrying) due to retrying config {:?}",
@@ -157,7 +157,7 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
                     ))
                     .with_delays((10..=(10*steps as u64)).step_by(10).map(|millis| Duration::from_millis(millis)))
                     .await
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("Relaying received message '{:?}' to the internal processor failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
@@ -173,7 +173,7 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
                     ))
                     .yielding_until_timeout(Duration::from_millis(millis as u64), || ())
                     .await
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("Relaying received message '{:?}' to the internal processor failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
@@ -275,7 +275,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
         match Self::CONST_CONFIG.retrying_strategy {
             RetryingStrategies::DoNotRetry => {
                 retryable
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
                             Self::retry_error_mapper(false, format!("sync-Sending '{:?}' failed. Won't retry (ignoring the error) due to retrying config {:?}",
@@ -284,7 +284,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
             },
             RetryingStrategies::EndCommunications => {
                 retryable
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
                             Self::retry_error_mapper(true, format!("sync-Sending '{:?}' failed. Connection will be aborted (without retrying) due to retrying config {:?}",
@@ -299,7 +299,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                             .map_input(|message| (message, retry_start) )
                     )
                     .with_delays((10..=(10*steps as u64)).step_by(10).map(|millis| Duration::from_millis(millis)))
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("sync-Sending '{:?}' failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
@@ -314,7 +314,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                             .map_input(|message| (message, retry_start) )
                     )
                     .spinning_until_timeout(Duration::from_millis(millis as u64), ())
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("sync-Sending '{:?}' failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
@@ -336,7 +336,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
         match Self::CONST_CONFIG.retrying_strategy {
             RetryingStrategies::DoNotRetry => {
                 retryable
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
                             Self::retry_error_mapper(false, format!("async-Sending '{:?}' failed. Won't retry (ignoring the error) due to retrying config {:?}",
@@ -345,7 +345,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
             },
             RetryingStrategies::EndCommunications => {
                 retryable
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
                             Self::retry_error_mapper(true, format!("async-Sending '{:?}' failed. Connection will be aborted (without retrying) due to retrying config {:?}",
@@ -361,7 +361,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                     ))
                     .with_delays((10..=(10*steps as u64)).step_by(10).map(|millis| Duration::from_millis(millis)))
                     .await
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("async-Sending '{:?}' failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
@@ -377,7 +377,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                     ))
                     .yielding_until_timeout(Duration::from_millis(millis as u64), || ())
                     .await
-                    .map_inputs_and_errors(
+                    .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("async-Sending '{:?}' failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
