@@ -4,7 +4,6 @@ use crate::{
     ReactiveMessagingSerializer,
     socket_connection::common::{
         ReactiveMessagingSender,
-        RetryableSender,
     },
 };
 use std::{

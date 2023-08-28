@@ -3,8 +3,12 @@
 Provides `Stream`-based reactive client/server communications focused on high performance -- through sockets, shared mem IPCs and other goodies -- async-powered by `Tokio`.
 
 The distinct features of this library are:
-  - a through protocol modeling, with the help of Rust's powerful `enum`s;
-  - ease of logic decoupling by using reactive `Stream`s for the client / server logic.
+  - a thorough protocol modeling, with the help of Rust's powerful `enum`s;
+  - ease of logic decoupling by using reactive `Stream`s for the client / server logic;
+  - the main network loop for both client & server is fully optimized;
+  - const-time (yet powerful) configurations, to achieve the most performance possible;
+  - zero-cost retrying strategies & dropping the connection vs ignoring on errors through const time configs & the `keen-retry` lib
+  - for version 1: only textual socket protocols are supported by now -- binary & shared mem IPCs to be added later;
 
 
 # Taste it
@@ -17,10 +21,9 @@ Take a look at the ping-pong game in `example/`, which shows some nice patterns 
   - How straight-forward it is to create flexible server & client applications once the processors are complete. 
 
 
-# alpha status
-Research & core developments are just done:
-  - The main network loop for both client & server is complete & fully optimized;
-  - A nice message & network events API eases the modeling of elaborated protocols, with a fully working `example/`;
-  - The most performant reactive library & channels has been picked up, as determined by `benches/`;
-  - Only textual socket protocols are supported by now -- binary & shared mem IPCs to be added later;
-  - The API is not complete -- only "responsive" communications for `Stream`s that generate non-fallible & non-future elements are supported by now.
+# beta status
+The API has been stabilized -- new features yet to be added for v1.0:
+  - allow reactive processors to produce all combinations of fallible/non-fallible & futures/non-futures for
+    responsive & unresponsive logic processors (currently, only `Stream`s of non-fallible & non-future items are allowed)
+  - better docs
+  - clean the code for the ping-pong example and the recommended patterns for using this lib

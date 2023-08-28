@@ -13,7 +13,7 @@ use reactive_mutiny::types::FullDuplexUniChannel;
 use log::{error, warn};
 use tokio::sync::Mutex;
 use crate::ReactiveMessagingSerializer;
-use crate::socket_connection::common::{ReactiveMessagingSender, RetryableSender};
+use crate::socket_connection::common::ReactiveMessagingSender;
 
 /// Upgrades the user provided `connection_events_callback` into a callback able to keep track of disconnection events
 /// as well as shutdown events, so any waiters on the client shutdown event may be notified

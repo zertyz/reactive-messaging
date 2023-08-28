@@ -8,7 +8,7 @@ use crate::{
     types::*,
     serde::ReactiveMessagingDeserializer,
     socket_connection::{
-        common::{ReactiveMessagingSender, ReactiveMessagingUniSender, RetryableSender, upgrade_processor_uni_retrying_logic},
+        common::{ReactiveMessagingSender, ReactiveMessagingUniSender, upgrade_processor_uni_retrying_logic},
         peer::Peer,
     },
 };

@@ -699,11 +699,11 @@ mod tests {
         #[inline(always)]
         fn serialize(remote_message: &DummyClientAndServerMessages, buffer: &mut Vec<u8>) {
             ron_serializer(remote_message, buffer)
-                .expect("unresponsive_socket_server.rs unit tests: No errors should have happened here!")
+                .expect("socket_server.rs unit tests: No errors should have happened here!")
         }
         #[inline(always)]
         fn processor_error_message(err: String) -> DummyClientAndServerMessages {
-            panic!("unresponsive_socket_server.rs unit tests: protocol error when none should have happened: {err}");
+            panic!("socket_server.rs unit tests: protocol error when none should have happened: {err}");
         }
     }
     impl ResponsiveMessages<DummyClientAndServerMessages> for DummyClientAndServerMessages {

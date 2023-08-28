@@ -39,7 +39,7 @@ use crate::socket_connection::{Peer, SocketConnectionHandler};
 use crate::socket_client::common::upgrade_to_shutdown_and_connected_state_tracking;
 use crate::types::{ConnectionEvent, MessagingMutinyStream, ResponsiveMessages};
 use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
-use crate::socket_connection::common::{ReactiveMessagingSender, RetryableSender};
+use crate::socket_connection::common::ReactiveMessagingSender;
 use crate::config::{Channels, ConstConfig};
 use reactive_mutiny::prelude::advanced::{
     ChannelUniMoveAtomic,
@@ -584,11 +584,11 @@ mod tests {
         #[inline(always)]
         fn serialize(remote_message: &DummyClientAndServerMessages, buffer: &mut Vec<u8>) {
             ron_serializer(remote_message, buffer)
-                .expect("unresponsive_socket_client.rs unit tests: No errors should have happened here!")
+                .expect("socket_client.rs unit tests: No errors should have happened here!")
         }
         #[inline(always)]
         fn processor_error_message(err: String) -> DummyClientAndServerMessages {
-            panic!("unresponsive_socket_client.rs unit tests: protocol error when none should have happened: {err}");
+            panic!("socket_client.rs unit tests: protocol error when none should have happened: {err}");
         }
     }
     impl ResponsiveMessages<DummyClientAndServerMessages> for DummyClientAndServerMessages {
