@@ -56,7 +56,7 @@ fn bench_same_thread_latency(criterion: &mut Criterion) {
 
     let bench_id = "reactive-mutiny's Atomic Stream";
     group.bench_function(bench_id, |bencher| bencher.iter(|| {
-        while !atomic_sender.try_send(|slot| *slot = ItemType::default()) {}
+        while !atomic_sender.send_with(|slot| *slot = ItemType::default()).is_ok() {}
         while futures::executor::block_on(atomic_stream.next()).is_none() {}
     }));
 
@@ -141,7 +141,7 @@ fn bench_inter_thread_latency(criterion: &mut Criterion) {
 
     bench_it(&mut group,
              "reactive-mutiny's Atomic Stream",
-             || while !atomic_sender.try_send(|slot| *slot = ItemType::default()) {std::hint::spin_loop()},
+             || while !atomic_sender.send_with(|slot| *slot = ItemType::default()).is_ok() {std::hint::spin_loop()},
              || while futures::executor::block_on(atomic_stream.next()).is_none() {std::hint::spin_loop()});
 
     bench_it(&mut group,
@@ -167,7 +167,7 @@ fn bench_same_thread_throughput(criterion: &mut Criterion) {
     let bench_id = "reactive-mutiny's Atomic Stream";
     group.bench_function(bench_id, |bencher| bencher.iter(|| {
         for _ in 0..BUFFER_SIZE {
-            while !atomic_sender.try_send(|slot| *slot = ItemType::default()) {};
+            while !atomic_sender.send_with(|slot| *slot = ItemType::default()).is_ok() {};
         }
         for _ in 0..BUFFER_SIZE {
             while futures::executor::block_on(atomic_stream.next()).is_none() {};
@@ -222,7 +222,7 @@ fn bench_inter_thread_throughput(criterion: &mut Criterion) {
     bench_it(&mut group,
              "reactive-mutiny's Atomic Stream",
              || for _ in 0..BUFFER_SIZE {
-                            if !atomic_sender.try_send(|slot| *slot = ItemType::default()) {std::hint::spin_loop();std::hint::spin_loop();std::hint::spin_loop()}
+                            if !atomic_sender.send_with(|slot| *slot = ItemType::default()).is_ok() {std::hint::spin_loop();std::hint::spin_loop();std::hint::spin_loop()}
                         },
              || for _ in 0..(BUFFER_SIZE>>5) { while futures::executor::block_on(atomic_stream.next()).is_none() {std::hint::spin_loop()} });
 

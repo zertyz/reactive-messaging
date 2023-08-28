@@ -1,17 +1,16 @@
 //! Contains some functions and other goodies used across this module
 
 
-use std::fmt::Debug;
-use std::future;
-use std::future::Future;
-use std::process::Output;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use crate::{
+    config::{
+        ConstConfig,
+        RetryingStrategies,
+    },
+    ReactiveMessagingSerializer
+};
+use std::{fmt::Debug, future::{self}, sync::Arc, time::{Duration, SystemTime}};
 use async_trait::async_trait;
-use reactive_mutiny::prelude::{GenericUni, MutinyStream};
-use reactive_mutiny::types::FullDuplexUniChannel;
-use crate::config::{ConstConfig, RetryingStrategies};
-use crate::ReactiveMessagingSerializer;
+use reactive_mutiny::prelude::{GenericUni, MutinyStream,FullDuplexUniChannel};
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `COFNIG_USIZE`
 pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
@@ -155,7 +154,7 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
                         self.uni.send(message)
                             .map_input(|message| (message, retry_start) )
                     ))
-                    .with_delays((10..=(10*steps as u64)).step_by(10).map(|millis| Duration::from_millis(millis)))
+                    .with_delays((10..=(10*steps as u64)).step_by(10).map(Duration::from_millis))
                     .await
                     .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
@@ -180,8 +179,8 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
                         |_| (false, String::with_capacity(0)) )
                     .into()
             },
-            RetryingStrategies::RetrySpinningForUpToMillis(millis) => {
-                /// this option is deprecated
+            RetryingStrategies::RetrySpinningForUpToMillis(_millis) => {
+                // this option is deprecated
                 unreachable!()
             },
         }
@@ -298,7 +297,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                         self.channel.send(message)
                             .map_input(|message| (message, retry_start) )
                     )
-                    .with_delays((10..=(10*steps as u64)).step_by(10).map(|millis| Duration::from_millis(millis)))
+                    .with_delays((10..=(10*steps as u64)).step_by(10).map(Duration::from_millis))
                     .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("sync-Sending '{:?}' failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
@@ -321,8 +320,9 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                         |_| (false, String::with_capacity(0)) )
                     .into()
             },
-            RetryingStrategies::RetrySpinningForUpToMillis(millis) => {
-                panic!("deprecated")
+            RetryingStrategies::RetrySpinningForUpToMillis(_millis) => {
+                // this option is deprecated
+                unreachable!()
             },
         }
     }
@@ -359,7 +359,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                         self.channel.send(message)
                             .map_input(|message| (message, retry_start) )
                     ))
-                    .with_delays((10..=(10*steps as u64)).step_by(10).map(|millis| Duration::from_millis(millis)))
+                    .with_delays((10..=(10*steps as u64)).step_by(10).map(Duration::from_millis))
                     .await
                     .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
@@ -384,8 +384,9 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                         |_| (false, String::with_capacity(0)) )
                     .into()
             },
-            RetryingStrategies::RetrySpinningForUpToMillis(millis) => {
-                panic!("deprecated")
+            RetryingStrategies::RetrySpinningForUpToMillis(_millis) => {
+                // this option is deprecated
+                unreachable!()
             },
         }
     }

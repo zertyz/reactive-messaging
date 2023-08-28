@@ -20,18 +20,28 @@
 //!                        - https://github.com/rust-lang/rust/issues/96865
 
 
-use std::fmt::Debug;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::sync::Arc;
-use futures::future::BoxFuture;
-use futures::Stream;
-use crate::socket_connection::{Peer, SocketConnectionHandler};
-use crate::socket_server::common::upgrade_to_shutdown_tracking;
-use crate::types::{ConnectionEvent, MessagingMutinyStream, ResponsiveMessages};
-use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
-use crate::socket_connection::common::{ReactiveMessagingSender, RetryableSender};
-use crate::config::{Channels, ConstConfig};
+use crate::{
+    socket_connection::{Peer, SocketConnectionHandler},
+    socket_server::common::upgrade_to_shutdown_tracking,
+    types::{
+        ConnectionEvent,
+        MessagingMutinyStream,
+        ResponsiveMessages,
+    },
+    ReactiveMessagingDeserializer,
+    ReactiveMessagingSerializer,
+    config::{
+        Channels,
+        ConstConfig,
+    },
+};
+use std::{
+    fmt::Debug,
+    future::Future,
+    marker::PhantomData,
+    sync::Arc,
+};
+use futures::{future::BoxFuture, Stream};
 use reactive_mutiny::prelude::advanced::{
     ChannelUniMoveAtomic,
     ChannelUniMoveCrossbeam,
@@ -40,8 +50,6 @@ use reactive_mutiny::prelude::advanced::{
     UniZeroCopyAtomic,
     UniZeroCopyFullSync,
     FullDuplexUniChannel,
-    ChannelCommon,
-    ChannelProducer,
     GenericUni,
 };
 use log::warn;
@@ -185,7 +193,7 @@ pub enum SocketServer<const CONFIG:                    u64,
      }
 
      /// See [GenericSocketServer::shutdown()]
-     pub fn shutdown(mut self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     pub fn shutdown(self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
          match self {
              SocketServer::Atomic    (generic_socket_server) => generic_socket_server.shutdown(timeout_ms),
              SocketServer::FullSync  (generic_socket_server) => generic_socket_server.shutdown(timeout_ms),
@@ -408,15 +416,22 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 #[cfg(any(test,doc))]
 mod tests {
     use super::*;
-    use crate::{SocketClient, GenericSocketClient, new_socket_client, ron_deserializer, ron_serializer, spawn_responsive_client_processor};
-    use std::future;
-    use std::ops::Deref;
-    use std::sync::atomic::AtomicU32;
-    use std::sync::atomic::Ordering::Relaxed;
-    use std::time::Duration;
-    use std::pin::Pin;
-    use futures::StreamExt;
+    use crate::prelude::{
+        SocketClient,
+        GenericSocketClient,
+        new_socket_client,
+        ron_deserializer,
+        ron_serializer,
+        spawn_responsive_client_processor,
+    };
+    use std::{
+        future,
+        ops::Deref,
+        sync::atomic::{AtomicU32, Ordering::Relaxed},
+        time::Duration,
+    };
     use serde::{Deserialize, Serialize};
+    use futures::StreamExt;
     use tokio::sync::Mutex;
 
 
@@ -474,12 +489,12 @@ mod tests {
                                   LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
                                   SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
                                   StreamItemType: Deref<Target=DummyClientAndServerMessages>>
-                                 (client_addr:            String,
-                                  connected_port:         u16,
-                                  peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel>>,
+                                 (_client_addr:           String,
+                                  _connected_port:        u16,
+                                  _peer:                  Arc<Peer<CONFIG, LocalMessages, SenderChannel>>,
                                   client_messages_stream: impl Stream<Item=StreamItemType>)
                                  -> impl Stream<Item=()> {
-            client_messages_stream.map(|payload| ())
+            client_messages_stream.map(|_payload| ())
         }
         let shutdown_waiter = server.shutdown_waiter();
         server.shutdown(200)?;
@@ -501,9 +516,9 @@ mod tests {
         fn responsive_processor<const CONFIG:   u64,
                                 SenderChannel:  FullDuplexUniChannel<ItemType=DummyClientAndServerMessages, DerivedItemType=DummyClientAndServerMessages> + Send + Sync,
                                 StreamItemType: Deref<Target=DummyClientAndServerMessages>>
-                               (client_addr:            String,
-                                connected_port:         u16,
-                                peer:                   Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
+                               (_client_addr:           String,
+                                _connected_port:        u16,
+                                _peer:                  Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
                                 client_messages_stream: impl Stream<Item=StreamItemType>)
                                -> impl Stream<Item=DummyClientAndServerMessages> {
             client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
@@ -522,7 +537,7 @@ mod tests {
             DummyClientAndServerMessages);
         spawn_unresponsive_server_processor!(server,
             |_| future::ready(()),
-            |_, _, _, client_messages_stream| client_messages_stream.map(|payload| DummyClientAndServerMessages::FloodPing)
+            |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         )?;
         let shutdown_waiter = server.shutdown_waiter();
         server.shutdown(200)?;
@@ -549,7 +564,7 @@ mod tests {
                                                                  :: new("127.0.0.1", 8043);
         server.spawn_unresponsive_processor(
             |_| future::ready(()),
-            |_, _, _, client_messages_stream| client_messages_stream.map(|payload| DummyClientAndServerMessages::FloodPing)
+            |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await?;
         let shutdown_waiter = server.shutdown_waiter();
         server.shutdown(200)?;

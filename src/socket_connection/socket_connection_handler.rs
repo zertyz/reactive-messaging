@@ -7,32 +7,28 @@ use crate::{
     config::*,
     types::*,
     serde::ReactiveMessagingDeserializer,
+    socket_connection::{
+        common::{ReactiveMessagingSender, ReactiveMessagingUniSender, RetryableSender, upgrade_processor_uni_retrying_logic},
+        peer::Peer,
+    },
 };
 use std::{
     fmt::Debug,
-    future,
     future::Future,
     net::SocketAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicU32, Ordering::Relaxed},
-    },
+    sync::Arc,
     time::Duration,
-    fmt::Formatter,
     net::{IpAddr, Ipv4Addr},
     str::FromStr,
+    marker::PhantomData,
 };
-use std::marker::PhantomData;
-use std::time::SystemTime;
-use reactive_mutiny::prelude::advanced::{Uni, GenericUni, ChannelCommon, ChannelUni, ChannelProducer, FullDuplexUniChannel, OgreAllocator};
-use futures::{StreamExt, Stream, TryFutureExt};
+use reactive_mutiny::prelude::advanced::{GenericUni, ChannelCommon, ChannelUni, ChannelProducer, FullDuplexUniChannel};
+use futures::{StreamExt, Stream};
 use tokio::{
     io::{self,AsyncReadExt,AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 use log::{trace, debug, warn, error};
-use crate::socket_connection::common::{ReactiveMessagingSender, ReactiveMessagingUniSender, RetryableSender, upgrade_processor_uni_retrying_logic};
-use crate::socket_connection::peer::Peer;
 
 
 // Contains abstractions, useful for clients and servers, for dealing with socket connections handled by Stream Processors:\
@@ -492,15 +488,20 @@ impl<const CONFIG:        u64,
 /// Unit tests the [tokio_message_io](self) module
 #[cfg(any(test,doc))]
 mod tests {
+    use super::*;
+    use std::{
+        future,
+        time::SystemTime,
+        sync::atomic::{
+            AtomicBool,
+            AtomicU32,
+            Ordering::Relaxed,
+        },
+    };
+    use reactive_mutiny::prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic};
     use futures::stream;
     use tokio::sync::Mutex;
 
-    use super::*;
-    use std::{
-        time::SystemTime, sync::atomic::AtomicBool,
-    };
-    use reactive_mutiny::prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic};
-    use reactive_mutiny::prelude::Instruments;
 
     #[cfg(debug_assertions)]
     const DEBUG: bool = true;
@@ -563,7 +564,7 @@ mod tests {
         // Rust checks
         //////////////
         // `Futures` are `Send` -- see compiler bug https://github.com/rust-lang/rust/issues/102211
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let (_server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol
                                                     (String::from("127.0.0.1"), 8579, server_shutdown_receiver,
@@ -574,7 +575,7 @@ mod tests {
                                                              ConnectionEvent::ApplicationShutdown { .. } => tokio::time::sleep(Duration::from_millis(100)).await,
                                                          }
                                                      },
-                                                     move |_client_addr, _client_port, peer, client_messages_stream|
+                                                     move |_client_addr, _client_port, _peer, client_messages_stream|
                                                          client_messages_stream
         ).await.expect("Starting the server");
 

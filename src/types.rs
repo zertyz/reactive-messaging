@@ -1,18 +1,15 @@
 //! Common types used across this crate
 
-use crate::socket_connection::Peer;
+use crate::{
+    socket_connection::Peer,
+    ReactiveMessagingSerializer,
+};
 use std::{
     fmt::Debug,
     sync::Arc,
 };
-use std::future::Future;
-use async_trait::async_trait;
-use futures::future::BoxFuture;
-use futures::Stream;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni, MutinyStream};
-use reactive_mutiny::prelude::advanced::{AllocatorAtomicArray, OgreUnique};
-use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
-use crate::socket_connection::common::RetryableSender;
+
 
 
 /// Concrete type of the `Stream`s this crate produces.\

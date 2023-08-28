@@ -333,13 +333,13 @@ const fn set_bits_from_power_of_2_u16(config: u64, bits: RangeInclusive<usize>, 
 }
 
 /// Retrieves 3 `bits` from `configs` that represents a power of 2 over the `u8` space
-const fn get_power_of_3_u8_bits(config: u64, bits: RangeInclusive<usize>) -> u8 {
+const fn _get_power_of_3_u8_bits(config: u64, bits: RangeInclusive<usize>) -> u8 {
     let value = get_bits(config, bits);
     1 << value
 }
 
 /// Packs, optimally, the `power_of_2_u8_value` into 3 `bits`, returning the new value for the given `config`
-const fn set_bits_from_power_of_2_u8(config: u64, bits: RangeInclusive<usize>, power_of_2_u8_value: u8) -> u64 {
+const fn _set_bits_from_power_of_2_u8(config: u64, bits: RangeInclusive<usize>, power_of_2_u8_value: u8) -> u64 {
     if power_of_2_u8_value.is_power_of_two() {
         set_bits(config, bits, power_of_2_u8_value.ilog2() as u64)
     } else {
@@ -359,21 +359,21 @@ const fn unwrap_bool_or_default(option: Option<bool>) -> bool {
     }
 }
 /// same as Option::<u8>::unwrap_or(0), but const
-const fn unwrap_u8_or_default(option: Option<u8>) -> u8 {
+const fn _unwrap_u8_or_default(option: Option<u8>) -> u8 {
     match option {
         Some(v) => v,
         None => 0,
     }
 }
 /// same as Option::<u16>::unwrap_or(0), but const
-const fn unwrap_u16_or_default(option: Option<u16>) -> u16 {
+const fn _unwrap_u16_or_default(option: Option<u16>) -> u16 {
     match option {
         Some(v) => v,
         None => 0,
     }
 }
 /// same as Option::<u32>::unwrap_or(0), but const
-const fn unwrap_u32_or_default(option: Option<u32>) -> u32 {
+const fn _unwrap_u32_or_default(option: Option<u32>) -> u32 {
     match option {
         Some(v) => v,
         None => 0,

@@ -1,15 +1,22 @@
 //! Resting place for [Peer], representing the remote part on a TCP/IP socket connection
 
-use std::fmt::{Debug, Formatter};
-use std::future::Future;
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::Relaxed;
-use std::net::SocketAddr;
-use std::time::Duration;
-use reactive_mutiny::prelude::{ChannelCommon, ChannelUni, MutinyStream};
-use reactive_mutiny::types::FullDuplexUniChannel;
-use crate::ReactiveMessagingSerializer;
-use crate::socket_connection::common::{ReactiveMessagingSender, RetryableSender};
+use crate::{
+    ReactiveMessagingSerializer,
+    socket_connection::common::{
+        ReactiveMessagingSender,
+        RetryableSender,
+    },
+};
+use std::{
+    fmt::{Debug, Formatter},
+    sync::atomic::{AtomicU32, Ordering::Relaxed},
+    net::SocketAddr,
+    time::Duration,
+};
+use reactive_mutiny::prelude::advanced::{
+    MutinyStream,
+    FullDuplexUniChannel,
+};
 
 
 static PEER_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -60,7 +67,7 @@ Peer<CONFIG, LocalMessages, SenderChannel> {
                             message: LocalMessages)
                            -> Result<(), (/*abort_the_connection?*/bool, /*error_message: */String)> {
 
-        return self.retryable_sender.send_async_trait(message).await;
+        self.retryable_sender.send_async_trait(message).await
     }
 
     #[inline(always)]

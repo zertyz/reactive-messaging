@@ -6,6 +6,7 @@ pub use crate::socket_server::*;
 pub use crate::socket_client::*;
 pub use super::socket_connection::Peer;
 pub use crate::{ron_serializer, ron_deserializer};
+pub use crate::ReactiveMessagingSerializer;
 
 // from `reactive-mutiny`:
 pub use reactive_mutiny::prelude::advanced::*;

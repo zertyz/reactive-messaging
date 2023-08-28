@@ -1,18 +1,20 @@
 //! Contains some functions and other goodies used across this module
 
 
-use std::fmt::Debug;
-use crate::prelude::ConnectionEvent;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::time::Duration;
-use futures::future::BoxFuture;
+use crate::prelude::{
+    ReactiveMessagingSerializer,
+    ConnectionEvent,
+};
+use std::{
+    fmt::Debug,
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use tokio::sync::Mutex;
 use log::{warn, error};
-use crate::ReactiveMessagingSerializer;
-use crate::socket_connection::common::RetryableSender;
 
 /// Upgrades the user provided `connection_events_callback()` into a callback able to keep track of the shutdown event
 /// -- so the "shutdown is complete" signal may be sent

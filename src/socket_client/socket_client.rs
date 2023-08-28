@@ -514,9 +514,9 @@ mod tests {
         fn responsive_processor<const CONFIG:   u64,
                                 SenderChannel:  FullDuplexUniChannel<ItemType=DummyClientAndServerMessages, DerivedItemType=DummyClientAndServerMessages> + Send + Sync,
                                 StreamItemType: Deref<Target=DummyClientAndServerMessages>>
-                               (client_addr:            String,
-                                connected_port:         u16,
-                                peer:                   Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
+                               (_client_addr:           String,
+                                _connected_port:        u16,
+                                _peer:                  Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
                                 client_messages_stream: impl Stream<Item=StreamItemType>)
                                -> impl Stream<Item=DummyClientAndServerMessages> {
             client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
@@ -535,7 +535,7 @@ mod tests {
             DummyClientAndServerMessages);
         spawn_unresponsive_client_processor!(client,
             |_| future::ready(()),
-            |_, _, _, client_messages_stream| client_messages_stream.map(|payload| DummyClientAndServerMessages::FloodPing)
+            |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         )?;
         let shutdown_waiter = client.shutdown_waiter();
         client.shutdown(200)?;
@@ -563,7 +563,7 @@ mod tests {
                                                                  :: new("66.45.249.218",443);
         client.spawn_unresponsive_processor(
             |_| future::ready(()),
-            |_, _, _, client_messages_stream| client_messages_stream.map(|payload| DummyClientAndServerMessages::FloodPing)
+            |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await?;
         let shutdown_waiter = client.shutdown_waiter();
         client.shutdown(200)?;
