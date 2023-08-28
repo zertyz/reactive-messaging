@@ -419,15 +419,10 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 #[cfg(any(test,doc))]
 mod tests {
     use super::*;
-    use std::future;
-    use std::ops::Deref;
-    use std::sync::atomic::AtomicU32;
-    use std::sync::atomic::Ordering::Relaxed;
-    use std::time::Duration;
+    use crate::{ron_deserializer, ron_serializer};
+    use std::{future, ops::Deref};
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
-    use tokio::sync::Mutex;
-    use crate::{ron_deserializer, ron_serializer};
 
 
     const REMOTE_SERVER: &str = "66.45.249.218";
@@ -487,9 +482,9 @@ mod tests {
                                   LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
                                   SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
                                   StreamItemType: Deref<Target=DummyClientAndServerMessages>>
-                                 (client_addr:            String,
-                                  connected_port:         u16,
-                                  peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel>>,
+                                 (_client_addr:           String,
+                                  _connected_port:        u16,
+                                  _peer:                  Arc<Peer<CONFIG, LocalMessages, SenderChannel>>,
                                   client_messages_stream: impl Stream<Item=StreamItemType>)
                                  -> impl Stream<Item=()> {
             client_messages_stream.map(|payload| ())
