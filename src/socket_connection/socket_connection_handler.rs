@@ -1,4 +1,4 @@
-//! Common code for reactive clients and servers
+//! Common & low-level code for reactive clients and servers
 
 
 use crate::ReactiveMessagingSerializer;
