@@ -8,9 +8,13 @@ use crate::{
     },
     ReactiveMessagingSerializer
 };
-use std::{fmt::Debug, future::{self}, sync::Arc, time::{Duration, SystemTime}};
-use async_trait::async_trait;
 use reactive_mutiny::prelude::{GenericUni, MutinyStream,FullDuplexUniChannel};
+use std::{
+    fmt::Debug,
+    future::{self},
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `COFNIG_USIZE`
 pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,

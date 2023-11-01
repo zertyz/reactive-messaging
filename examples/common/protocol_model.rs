@@ -140,7 +140,7 @@ pub enum ServerMessages {
 impl AsRef<ClientMessages> for ClientMessages {
     #[inline(always)]
     fn as_ref(&self) -> &ClientMessages {
-        &self
+        self
     }
 }
 
@@ -183,7 +183,7 @@ impl ResponsiveMessages<ClientMessages> for ClientMessages {
 impl AsRef<ServerMessages> for ServerMessages {
     #[inline(always)]
     fn as_ref(&self) -> &ServerMessages {
-        &self
+        self
     }
 }
 

@@ -22,7 +22,7 @@ use std::{
     str::FromStr,
     marker::PhantomData,
 };
-use reactive_mutiny::prelude::advanced::{GenericUni, ChannelCommon, ChannelUni, ChannelProducer, FullDuplexUniChannel};
+use reactive_mutiny::prelude::advanced::{GenericUni, FullDuplexUniChannel};
 use futures::{StreamExt, Stream};
 use tokio::{
     io::{self,AsyncReadExt,AsyncWriteExt},
@@ -498,7 +498,7 @@ mod tests {
             Ordering::Relaxed,
         },
     };
-    use reactive_mutiny::prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic};
+    use reactive_mutiny::{prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic}, types::{ChannelCommon, ChannelUni, ChannelProducer}};
     use futures::stream;
     use tokio::sync::Mutex;
 
@@ -516,7 +516,7 @@ mod tests {
     const DEFAULT_TEST_CONFIG_U64:  u64            = DEFAULT_TEST_CONFIG.into();
     const DEFAULT_TEST_UNI_INSTRUMENTS: usize      = DEFAULT_TEST_CONFIG.executor_instruments.into();
     type DefaultTestUni<PayloadType = String>      = UniZeroCopyAtomic<PayloadType, {DEFAULT_TEST_CONFIG.receiver_buffer as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
-    type SenderChannel<PayloadType = String> = ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_buffer as usize}, 1>;
+    type SenderChannel<PayloadType = String>       = ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_buffer as usize}, 1>;
 
 
     #[ctor::ctor]
@@ -815,13 +815,11 @@ mod tests {
                                                                     assert!(send_result.is_ok(), "couldn't send: {:?}", send_result.unwrap_err());
                                                                     n += 1;
                                                                     // flush & bailout check for timeout every 128k messages
-                                                                    if n % (1<<17) == 0 {
-                                                                        if start.elapsed().unwrap().as_millis() as u64 >= TEST_DURATION_MS  {
-                                                                            println!("Client sent {} messages before bailing out", n);
-                                                                            sent_messages_count.store(n, Relaxed);
-                                                                            assert_eq!(peer.flush_and_close(Duration::from_secs(1)).await, 0, "couldn't flush!");
-                                                                            break;
-                                                                        }
+                                                                    if n % (1<<17) == 0 && start.elapsed().unwrap().as_millis() as u64 >= TEST_DURATION_MS {
+                                                                        println!("Client sent {} messages before bailing out", n);
+                                                                        sent_messages_count.store(n, Relaxed);
+                                                                        assert_eq!(peer.flush_and_close(Duration::from_secs(1)).await, 0, "couldn't flush!");
+                                                                        break;
                                                                     }
                                                                 }
                                                             });
