@@ -56,7 +56,6 @@
 //! for the triggered reason.
 
 use std::error::Error;
-use std::ops::Deref;
 use super::logic::ping_pong_models::*;
 use serde::{Serialize, Deserialize};
 use reactive_messaging::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};

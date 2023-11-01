@@ -1,22 +1,21 @@
 //! Resting place for [ServerProtocolProcessor]
 
-use std::cell::UnsafeCell;
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::ops::Deref;
-use std::sync::Arc;
-use reactive_messaging::prelude::{Peer, MessagingMutinyStream, ConstConfig};
 use crate::common::{
     logic::{ping_pong_logic::Umpire,
     ping_pong_models::{GameStates, Players, TurnFlipEvents, PingPongEvent, GameOverStates},
     protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault}},
     protocol_model::{ClientMessages, PROTOCOL_VERSION, ServerMessages}
 };
+use std::{
+    cell::UnsafeCell,
+    fmt::Debug,
+    sync::Arc,
+};
+use reactive_messaging::prelude::{ConnectionEvent, Peer};
+use reactive_mutiny::prelude::FullDuplexUniChannel;
 use dashmap::DashMap;
 use futures::stream::{self, Stream, StreamExt};
-use reactive_messaging::prelude::ConnectionEvent;
 use log::{debug, info, warn, error};
-use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 
 
 /// Session for each connected peer
@@ -44,9 +43,10 @@ impl ServerProtocolProcessor {
         Self::default()
     }
 
-    pub fn server_events_callback<const CONFIG:  u64,
-                                  SenderChannel: FullDuplexUniChannel<ItemType=ServerMessages, DerivedItemType=ServerMessages> + Send + Sync>
-                                  (&self, connection_event: ConnectionEvent<CONFIG, ServerMessages, SenderChannel>) {
+    pub fn server_events_callback<const NETWORK_CONFIG: u64,
+                                  SenderChannel:        FullDuplexUniChannel<ItemType=ServerMessages, DerivedItemType=ServerMessages> + Send + Sync>
+                                  (&self,
+                                   connection_event: ConnectionEvent<NETWORK_CONFIG, ServerMessages, SenderChannel>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 debug!("Connected: {:?}", peer);
@@ -63,13 +63,14 @@ impl ServerProtocolProcessor {
         }
     }
 
-    pub fn dialog_processor<const CONFIG:   u64,
-                            SenderChannel:  FullDuplexUniChannel<ItemType=ServerMessages, DerivedItemType=ServerMessages> + Send + Sync,
-                            StreamItemType: AsRef<ClientMessages> + Debug>
+    pub fn dialog_processor<const NETWORK_CONFIG: u64,
+                            SenderChannel:        FullDuplexUniChannel<ItemType=ServerMessages, DerivedItemType=ServerMessages> + Send + Sync,
+                            StreamItemType:       AsRef<ClientMessages> + Debug>
+                            
                            (&self,
                             _client_addr:           String,
                             _port:                  u16,
-                            peer:                   Arc<Peer<CONFIG, ServerMessages, SenderChannel>>,
+                            peer:                   Arc<Peer<NETWORK_CONFIG, ServerMessages, SenderChannel>>,
                             client_messages_stream: impl Stream<Item=StreamItemType>)
 
                            -> impl Stream<Item=ServerMessages> {
@@ -86,7 +87,7 @@ impl ServerProtocolProcessor {
                 return {
                     if let ClientMessages::Config(match_config) = client_message.as_ref() {
                         // instantiate the game
-                        let umpire = Umpire::new(&match_config, Players::Opponent);
+                        let umpire = Umpire::new(match_config, Players::Opponent);
                         umpire_option.replace(umpire);
                         vec![ServerMessages::GameStarted]
                     } else {

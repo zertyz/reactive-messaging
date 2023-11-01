@@ -28,19 +28,34 @@
 ///   - `LocalMessage`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.
 
 
-use std::fmt::Debug;
-use std::future::Future;
-use std::marker::PhantomData;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use futures::future::BoxFuture;
-use futures::Stream;
-use crate::socket_connection::{Peer, SocketConnectionHandler};
-use crate::socket_client::common::upgrade_to_shutdown_and_connected_state_tracking;
-use crate::types::{ConnectionEvent, MessagingMutinyStream, ResponsiveMessages};
-use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
-use crate::socket_connection::common::ReactiveMessagingSender;
-use crate::config::{Channels, ConstConfig};
+use crate::{
+    socket_connection::{
+        Peer,
+        SocketConnectionHandler,
+    },
+    socket_client::common::upgrade_to_shutdown_and_connected_state_tracking,
+    types::{
+        ConnectionEvent,
+        MessagingMutinyStream,
+        ResponsiveMessages,
+    },
+    ReactiveMessagingDeserializer,
+    ReactiveMessagingSerializer,
+    config::{
+        Channels,
+        ConstConfig,
+    },
+};
+use std::{
+    fmt::Debug,
+    future::Future,
+    marker::PhantomData,
+    sync::{
+        Arc,
+        atomic::AtomicBool,
+    },
+};
+use futures::{future::BoxFuture, Stream};
 use reactive_mutiny::prelude::advanced::{
     ChannelUniMoveAtomic,
     ChannelUniMoveCrossbeam,
@@ -49,8 +64,6 @@ use reactive_mutiny::prelude::advanced::{
     UniZeroCopyAtomic,
     UniZeroCopyFullSync,
     FullDuplexUniChannel,
-    ChannelCommon,
-    ChannelProducer,
     GenericUni,
 };
 use log::warn;
@@ -194,7 +207,7 @@ pub enum SocketClient<const CONFIG:                    u64,
      }
 
      /// See [GenericSocketClient::shutdown()]
-     pub fn shutdown(mut self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     pub fn shutdown(self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
          match self {
              SocketClient::Atomic    (generic_socket_client) => generic_socket_client.shutdown(timeout_ms),
              SocketClient::FullSync  (generic_socket_client) => generic_socket_client.shutdown(timeout_ms),
@@ -487,7 +500,7 @@ mod tests {
                                   _peer:                  Arc<Peer<CONFIG, LocalMessages, SenderChannel>>,
                                   client_messages_stream: impl Stream<Item=StreamItemType>)
                                  -> impl Stream<Item=()> {
-            client_messages_stream.map(|payload| ())
+            client_messages_stream.map(|_payload| ())
         }
         let shutdown_waiter = client.shutdown_waiter();
         client.shutdown(200)?;

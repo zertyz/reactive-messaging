@@ -2,24 +2,22 @@
 
 mod protocol_processor;
 
-use common::protocol_model::ServerMessages;
-use crate::common::protocol_model::ClientMessages;
+use common::protocol_model::{ServerMessages,ClientMessages};
 use crate::protocol_processor::ClientProtocolProcessor;
 use std::{
     future,
-    ops::Deref,
     sync::Arc,
     time::Duration,
 };
 use reactive_messaging::prelude::*;
-use futures::{Stream,StreamExt};
+use futures::StreamExt;
 use log::warn;
 
 
-const SERVER_IP: &str = "127.0.0.1";
-const PORT:      u16  = 1234;
-const INSTANCES: u16  = 2;
-const CONFIG: ConstConfig = ConstConfig {
+const SERVER_IP:      &str        = "127.0.0.1";
+const PORT:           u16         = 1234;
+const INSTANCES:      u16         = 2;
+const NETWORK_CONFIG: ConstConfig = ConstConfig {
     ..ConstConfig::default()
 };
 
@@ -43,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         let client_processor_ref1 = Arc::new(ClientProtocolProcessor::new());
         let client_processor_ref2 = Arc::clone(&client_processor_ref1);
 
-        let mut socket_client = new_socket_client!(CONFIG, SERVER_IP, PORT, ServerMessages, ClientMessages);
+        let mut socket_client = new_socket_client!(NETWORK_CONFIG, SERVER_IP, PORT, ServerMessages, ClientMessages);
         spawn_responsive_client_processor!(socket_client,
             move |connection_event| {
                 client_processor_ref1.client_events_callback(connection_event);

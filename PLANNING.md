@@ -21,6 +21,26 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 
 # Backlog
+
+**(f6)** 2023-11-01: Support Composite Protocol Stacking -- Complex authenticated protocols as well as WebSockets would benefit from this feature, as the whole composite stack could be modeled by different `enums`, avoiding unrepresentable states:
+  1) The `socket_connection_handler.rs` main logic should be upgraded to:
+    a) start processing already opened connections
+    b) bailing out without closing, returning the connection when the dialog functions are over
+  2) The client code, that owns the client instance, would have to receive generic enum with the `CompositeProtocols`:
+    a) The processor code, upon commanding the protocol upgrade, would arrange for an instance of `CompositeProtocols` to be returned to the owner of the instance
+       containing both the connection and any (custom) session information -- so that the code from the owner could use that connection to spawn a new client.
+  3) On the counter-part, the server processor would now receive a "ProtocolUpgradeFn" that would simply spawn a new server task with the connection -- like we do today.
+
+**(f5)** 2023-09-04: Introduce "reconnection" on the client. For this:
+  - a new pub method `reconnect()` is to be built: the old connection will be shutdown (if not already) and another one will be created
+    -- the connection events callback will be called for the right events
+  - a new pub "clone_sender()" must also be introduced:
+    - the client keeps track of connections & reconnections, re-writing its internal "sender" channel, cloning & returning it here;
+    - its docs must tell the users that the "sender channel" shared via connection events callback is valid only through the connection
+      (when a reconnection happens, another "sender channel" will be created and that one is useless and needs to be dropped)
+    - it must also be told that using this method has a performance cost and that performant user code must keep track of the sender when
+      it is first received in the "connection events callback" -- and that, most probably, Option<UnsafeCell> needs to be used
+
 **(f4)** 2023-08-27: added the extra possibilities for the combinations of fallible & future items yielded by the Streams + those minor things:
 1) move the 'end connection' logic inside the `peer.send()` method, so the users don't need to bother to what the `ConstConfig` says about retrying & bailing out
 2) review the docs everywhere, specially in the README.md and the PingPong example

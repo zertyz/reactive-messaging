@@ -510,6 +510,7 @@ mod tests {
 
     const DEFAULT_TEST_CONFIG: ConstConfig         = ConstConfig {
         //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
+        retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(5),
         ..ConstConfig::default()
     };
     const DEFAULT_TEST_CONFIG_U64:  u64            = DEFAULT_TEST_CONFIG.into();
@@ -775,7 +776,7 @@ mod tests {
         let unordered_ref = Arc::clone(&unordered);
         let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
         socket_connection_handler.server_loop_for_unresponsive_text_protocol
-                                                    (LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
+                                                     (LISTENING_INTERFACE.to_string(), PORT, server_shutdown_receiver,
                                                       |_connection_event| async {},
                                                       move |_listening_interface, _listening_port, _peer, client_messages| {
                                                           let received_messages_count = Arc::clone(&received_messages_count_ref);
@@ -813,8 +814,8 @@ mod tests {
                                                                     let send_result = peer.send_async(format!("DoNotAnswer({})", n)).await;
                                                                     assert!(send_result.is_ok(), "couldn't send: {:?}", send_result.unwrap_err());
                                                                     n += 1;
-                                                                    // flush & bailout check for timeout every 1024 messages
-                                                                    if n % (1<<10) == 0 {
+                                                                    // flush & bailout check for timeout every 128k messages
+                                                                    if n % (1<<17) == 0 {
                                                                         if start.elapsed().unwrap().as_millis() as u64 >= TEST_DURATION_MS  {
                                                                             println!("Client sent {} messages before bailing out", n);
                                                                             sent_messages_count.store(n, Relaxed);

@@ -8,7 +8,7 @@ use crate::common::{
         protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault},
     }
 };
-use reactive_messaging::prelude::{ConnectionEvent, MessagingMutinyStream, Peer};
+use reactive_messaging::prelude::{ConnectionEvent, Peer};
 use std::{
     sync::{
         Arc,
@@ -16,9 +16,7 @@ use std::{
     },
     time::Instant,
 };
-use std::marker::PhantomData;
-use std::ops::Deref;
-use reactive_mutiny::prelude::{ChannelProducer, FullDuplexUniChannel, GenericUni};
+use reactive_mutiny::prelude::FullDuplexUniChannel;
 use futures::{Stream, stream, StreamExt};
 use log::{debug,info,error};
 
@@ -49,9 +47,10 @@ impl ClientProtocolProcessor {
         })
     }
 
-    pub fn client_events_callback<const CONFIG:     u64,
-                                  SenderChannel:    FullDuplexUniChannel<ItemType=ClientMessages, DerivedItemType=ClientMessages> + Send + Sync>
-                                 (self: &Arc<Self>, connection_event: ConnectionEvent<CONFIG, ClientMessages, SenderChannel>) {
+    pub fn client_events_callback<const NETWORK_CONFIG: u64,
+                                  SenderChannel:        FullDuplexUniChannel<ItemType=ClientMessages, DerivedItemType=ClientMessages> + Send + Sync>
+                                 (self: &Arc<Self>,
+                                  connection_event: ConnectionEvent<NETWORK_CONFIG, ClientMessages, SenderChannel>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 debug!("Connected: {:?}", peer);
@@ -70,15 +69,18 @@ impl ClientProtocolProcessor {
         }
     }
 
-    pub fn dialog_processor<const CONFIG:     u64,
-                            SenderChannel:    FullDuplexUniChannel<ItemType=ClientMessages, DerivedItemType=ClientMessages> + Send + Sync,
-                            StreamItemType: AsRef<ServerMessages>>
+    pub fn dialog_processor<const NETWORK_CONFIG: u64,
+                            SenderChannel:        FullDuplexUniChannel<ItemType=ClientMessages, DerivedItemType=ClientMessages> + Send + Sync,
+                            StreamItemType:       AsRef<ServerMessages>>
+
                            (self:                   &Arc<Self>,
                             server_addr:            String,
                             port:                   u16,
-                            peer:                   Arc<Peer<CONFIG, ClientMessages, SenderChannel>>,
+                            peer:                   Arc<Peer<NETWORK_CONFIG, ClientMessages, SenderChannel>>,
                             server_messages_stream: impl Stream<Item=StreamItemType>)
+
                            -> impl Stream<Item=ClientMessages> {
+                            
         let cloned_self = Arc::clone(self);
         let mut umpire = Umpire::new(&MATCH_CONFIG, Players::Ourself);
         server_messages_stream.map(move |server_message| {
@@ -103,27 +105,27 @@ impl ClientProtocolProcessor {
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "WaitingForService",
                                                                                        |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
-                                                                                       &opponent_action,
+                                                                                       opponent_action,
                                                                                        /*reported_ping_pong_event*/PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulService }))
                                 ],
                                 TurnFlipEvents::SoftFaultService => vec![
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "WaitingForService` or `Rally",
                                                                                        |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
-                                                                                       &opponent_action,
+                                                                                       opponent_action,
                                                                                        /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SoftFaultService }))
                                 ],
                                 TurnFlipEvents::SuccessfulRebate => vec![
                                     ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
                                                                                        "Rally",
                                                                                        |rs| matches!(rs, GameStates::Rally),
-                                                                                       &opponent_action,
+                                                                                       opponent_action,
                                                                                        /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulRebate }))
                                 ],
                             }
                         },
                         PingPongEvent::HardFault { player_action: opponent_action, resulting_fault_event } => {
-                            react_to_hard_fault(&mut umpire, opponent_action, &resulting_fault_event).into_iter()
+                            react_to_hard_fault(&mut umpire, opponent_action, resulting_fault_event).into_iter()
                                 .map(ClientMessages::PingPongEvent)
                                 .collect()
                         },

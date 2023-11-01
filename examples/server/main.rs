@@ -2,18 +2,20 @@
 
 pub mod protocol_processor;
 
-use crate::common::protocol_model::ServerMessages;
+use common::protocol_model::{ClientMessages, ServerMessages};
 use protocol_processor::ServerProtocolProcessor;
-use common::protocol_model::ClientMessages;
-use std::{future, sync::Arc, time::Duration};
-use futures::stream;
+use std::{
+    future,
+    sync::Arc,
+    time::Duration,
+};
 use reactive_messaging::prelude::*;
 use log::warn;
 
 
-const LISTENING_INTERFACE: &str = "0.0.0.0";
-const LISTENING_PORT:      u16  = 1234;
-const CONFIG: ConstConfig = ConstConfig {
+const LISTENING_INTERFACE: &str        = "0.0.0.0";
+const LISTENING_PORT:      u16         = 1234;
+const NETWORK_CONFIG:      ConstConfig = ConstConfig {
     ..ConstConfig::default()
 };
 
@@ -26,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);
 
-    let mut socket_server = new_socket_server!(CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ClientMessages, ServerMessages);
+    let mut socket_server = new_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ClientMessages, ServerMessages);
     spawn_responsive_server_processor!(socket_server,
         move |connection_event| {
             server_processor_ref1.server_events_callback(connection_event);

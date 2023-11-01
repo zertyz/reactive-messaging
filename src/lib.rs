@@ -1,3 +1,6 @@
+#![doc = include_str!("../README.md")]
+
+
 pub(crate) mod config;
 
 mod socket_connection;
