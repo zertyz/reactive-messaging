@@ -41,10 +41,7 @@ use crate::{
     },
     ReactiveMessagingDeserializer,
     ReactiveMessagingSerializer,
-    config::{
-        Channels,
-        ConstConfig,
-    },
+    config::Channels,
 };
 use std::{
     fmt::Debug,
@@ -432,7 +429,7 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 #[cfg(any(test,doc))]
 mod tests {
     use super::*;
-    use crate::{ron_deserializer, ron_serializer};
+    use crate::{config::ConstConfig, ron_deserializer, ron_serializer};
     use std::{future, ops::Deref};
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};

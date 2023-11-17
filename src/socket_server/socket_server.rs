@@ -30,10 +30,7 @@ use crate::{
     },
     ReactiveMessagingDeserializer,
     ReactiveMessagingSerializer,
-    config::{
-        Channels,
-        ConstConfig,
-    },
+    config::Channels,
 };
 use std::{
     fmt::Debug,
@@ -417,6 +414,7 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 mod tests {
     use super::*;
     use crate::prelude::{
+        ConstConfig,
         SocketClient,
         GenericSocketClient,
         new_socket_client,
