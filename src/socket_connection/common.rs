@@ -16,7 +16,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-/// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `COFNIG_USIZE`
+/// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `COFNIG`
 pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
                                             ItemType:        Send + Sync + Debug + 'static,
                                             DerivedItemType: Send + Sync + Debug + 'static,

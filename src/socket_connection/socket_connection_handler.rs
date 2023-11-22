@@ -144,7 +144,12 @@ impl<const CONFIG:        u64,
                                                                                                                                                      (processor_sender);
                 // spawn a task to handle communications with that client
                 let cloned_self = Arc::clone(&arc_self);
-                tokio::spawn(tokio::task::unconstrained(cloned_self.dialog_loop_for_textual_protocol(socket, peer, processor_sender)));
+                tokio::spawn(tokio::task::unconstrained(async move {
+                    let mut socket = cloned_self.dialog_loop_for_textual_protocol(socket, peer.clone(), processor_sender).await?;
+                    socket.shutdown().await
+                        .map_err(|err| format!("error shutting down the server textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
+                    Ok::<(), Box<dyn std::error::Error + Sync + Send>>(())
+                }));
             }
             debug!("SocketServer: bailing out of network loop -- we should be undergoing a shutdown...");
         });
@@ -200,7 +205,12 @@ impl<const CONFIG:        u64,
 
         // spawn the processor
         let arc_self = Arc::new(self);
-        tokio::spawn(tokio::task::unconstrained(arc_self.dialog_loop_for_textual_protocol(socket, peer, processor_sender)));
+        tokio::spawn(tokio::task::unconstrained(async move {
+            let mut socket = arc_self.dialog_loop_for_textual_protocol(socket, peer.clone(), processor_sender).await?;
+            socket.shutdown().await
+                .map_err(|err| format!("error shutting down the client textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
+            Ok::<(), Box<dyn std::error::Error + Sync + Send>>(())
+        }));
         // spawn the shutdown listener
         tokio::spawn(async move {
             let timeout_ms = match shutdown_signaler.await {
@@ -228,13 +238,14 @@ impl<const CONFIG:        u64,
     ///   - `peer` represents the remote end of the connection;
     ///   - `processor_sender` is a [reactive_mutiny::Uni], to which incoming messages will be sent;
     ///   - conversely, `peer.sender` is the [reactive_mutiny::Uni] to receive outgoing messages.
+    ///   - after the processor is done with the `textual_socket`, the method returns it back to the caller if no errors had happened.
     #[inline(always)]
     async fn dialog_loop_for_textual_protocol(self: Arc<Self>,
                                               mut textual_socket: TcpStream,
                                               peer:               Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>,
                                               processor_sender:   ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>)
 
-                                              -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+                                              -> Result<TcpStream, Box<dyn std::error::Error + Sync + Send>> {
 
         let config = ConstConfig::from(CONFIG);
         // socket
@@ -350,8 +361,8 @@ impl<const CONFIG:        u64,
         _ = processor_sender.close(Duration::from_millis(config.graceful_close_timeout_millis as u64)).await;
         peer.cancel_and_close();
         textual_socket.flush().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
-        textual_socket.shutdown().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
-        Ok(())
+        //textual_socket.shutdown().await.map_err(|err| format!("error shutting down the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
+        Ok(textual_socket)
     }
 
     /// Similar to [UnresponsiveSocketConnectionHandle::server_loop_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
