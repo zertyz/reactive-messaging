@@ -14,7 +14,7 @@
 //! struct, instead of requiring several const generic parameters.
 //!
 //! IMPLEMENTATION NOTE: There would be a common trait (that is no longer present) binding [SocketServer] to [GenericSocketServer]
-//!                      -- the reason being Rust 1.71 still not supporting zero-cost async in traits.
+//!                      -- the reason being Rust 1.71 still not supporting zero-cost async fn in traits.
 //!                      Other API designs had been attempted, but using async in traits (through the `async-trait` crate) and the
 //!                      necessary GATs to provide zero-cost-abstracts, revealed a compiler bug making writing processors very difficult to compile:
 //!                        - https://github.com/rust-lang/rust/issues/96865
