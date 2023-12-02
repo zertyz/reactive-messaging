@@ -1,7 +1,7 @@
 //! Common types used across this crate
 
 use crate::{
-    socket_connection::Peer,
+    socket_connection::peer::Peer,
     ReactiveMessagingSerializer,
 };
 use std::{

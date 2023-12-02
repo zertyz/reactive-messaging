@@ -30,8 +30,8 @@
 
 use crate::{
     socket_connection::{
-        Peer,
-        SocketConnectionHandler,
+        peer::Peer,
+        socket_connection_handler::SocketConnectionHandler,
     },
     socket_client::common::upgrade_to_shutdown_and_connected_state_tracking,
     types::{
@@ -311,12 +311,12 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let connection_events_callback = upgrade_to_shutdown_and_connected_state_tracking(&self.connected, local_shutdown_sender, connection_events_callback);
 
-        let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
-        socket_connection_handler.client_for_unresponsive_text_protocol(ip.clone(),
-                                                                        port,
-                                                                        client_shutdown_receiver,
-                                                                        connection_events_callback,
-                                                                        dialog_processor_builder_fn).await
+        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
+        socket_communications_handler.client_for_unresponsive_text_protocol(&ip,
+                                                                            port,
+                                                                            client_shutdown_receiver,
+                                                                            connection_events_callback,
+                                                                            dialog_processor_builder_fn).await
             .map_err(|err| format!("Error starting unresponsive GenericSocketClient @ {ip}:{port}: {:?}", err))?;
         Ok(())
     }
@@ -368,9 +368,9 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let connection_events_callback = upgrade_to_shutdown_and_connected_state_tracking(&self.connected, local_shutdown_sender, connection_events_callback);
 
-        let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
-        socket_connection_handler.client_for_responsive_text_protocol
-            (ip.clone(),
+        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
+        socket_communications_handler.client_for_responsive_text_protocol
+            (&ip,
              port,
              server_shutdown_receiver,
              connection_events_callback,

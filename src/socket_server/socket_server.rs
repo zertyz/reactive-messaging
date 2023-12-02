@@ -21,7 +21,11 @@
 
 
 use crate::{
-    socket_connection::{Peer, SocketConnectionHandler},
+    socket_connection::{
+        peer::Peer,
+        socket_connection_handler::SocketConnectionHandler,
+        connection_provider::ServerConnectionHandler,
+    },
     socket_server::common::upgrade_to_shutdown_tracking,
     types::{
         ConnectionEvent,
@@ -286,21 +290,27 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
                                              -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
-        self.server_shutdown_signaler = Some(server_shutdown_sender);
         self.local_shutdown_receiver = Some(local_shutdown_receiver);
         let listening_interface = self.interface_ip.clone();
         let port = self.port;
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
-        let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
-        socket_connection_handler.server_loop_for_unresponsive_text_protocol(listening_interface.clone(),
-                                                                             port,
-                                                                             server_shutdown_receiver,
-                                                                             connection_events_callback,
-                                                                             dialog_processor_builder_fn).await
+        let mut connection_provider = ServerConnectionHandler::new(&listening_interface, port).await
+            .map_err(|err| format!("SocketServer: couldn't start the Connection Provider server event loop: {err}"))?;
+        let connection_receiver = connection_provider.connection_receiver()
+            .ok_or_else(|| format!("SocketServer: couldn't move the Connection Receiver out of the Connection Provider"))?;
+        // TODO: THE NEXT STEPS ARE FOR THE COMPOSITE SOCKET SERVER ONLY:
+        //       allow the current server to add connections to the handler
+        //       (other dialog processor may require a reference to this server so to add connections to them)
+
+        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
+        socket_communications_handler.server_loop_for_unresponsive_text_protocol(&listening_interface,
+                                                                                 port,
+                                                                                 connection_receiver,
+                                                                                 connection_events_callback,
+                                                                                 dialog_processor_builder_fn).await
             .map_err(|err| format!("Error starting an unresponsive GenericSocketServer @ {listening_interface}:{port}: {:?}", err))?;
         Ok(())
     }
@@ -352,11 +362,16 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
-        let socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
-        socket_connection_handler.server_loop_for_responsive_text_protocol
-            (listening_interface.clone(),
+        let mut connection_provider = ServerConnectionHandler::new(&listening_interface, port).await
+            .map_err(|err| format!("SocketServer: couldn't start the Connection Provider server event loop: {err}"))?;
+        let connection_receiver = connection_provider.connection_receiver()
+            .ok_or_else(|| format!("SocketServer: couldn't move the Connection Receiver out of the Connection Provider"))?;
+
+        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
+        socket_communications_handler.server_loop_for_responsive_text_protocol
+            (&listening_interface,
              port,
-             server_shutdown_receiver,
+             connection_receiver,
              connection_events_callback,
              dialog_processor_builder_fn).await
             .map_err(|err| format!("Error starting a responsive GenericSocketServer @ {listening_interface}:{port}: {:?}", err))?;

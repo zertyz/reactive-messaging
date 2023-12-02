@@ -91,7 +91,8 @@ impl ServerConnectionHandler {
 
     /// Creates a new instance of a server, binding to the specified `listening_interface` and `listening_port`.\
     /// Incoming connections are [feed()] as they arrive -- but you can also do so manually, by calling the mentioned method.
-    pub async fn new(listening_interface: String, listening_port: u16) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+    pub async fn new<IntoString: Into<String>>(listening_interface: IntoString, listening_port: u16) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let listening_interface = listening_interface.into();
         let connection_channel = ConnectionChannel::new();
         let connection_sender = connection_channel.sender.clone();
         let (network_event_loop_sender, network_event_loop_receiver) = tokio::sync::oneshot::channel::<()>();
