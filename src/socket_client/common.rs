@@ -45,15 +45,15 @@ pub fn upgrade_to_shutdown_and_connected_state_tracking<const CONFIG:           
                     connected_state.store(false, Relaxed);
                     user_provided_connection_events_callback(connection_event).await;
                 },
-                ConnectionEvent::ApplicationShutdown { timeout_ms } => {
-                    let _ = tokio::time::timeout(Duration::from_millis(timeout_ms as u64), user_provided_connection_events_callback(connection_event)).await;
+                ConnectionEvent::ApplicationShutdown  => {
                     let Some(shutdown_is_complete_signaler) = shutdown_is_complete_signaler.lock().await.take()
                     else {
                         warn!("Socket Client: a shutdown was asked, but a previous shutdown seems to have already taken place. There is a bug in your shutdown logic. Ignoring the current shutdown request...");
                         return
                     };
+                    user_provided_connection_events_callback(connection_event).await;
                     if let Err(_sent_value) = shutdown_is_complete_signaler.send(()) {
-                        error!("Socket Client BUG: couldn't send shutdown signal to the local `one_shot` channel. Program is, likely, hanged. Please, investigate and fix!");
+                        error!("Socket Client BUG: couldn't send shutdown-is-complete signal to the local `one_shot` channel. Program is, likely, hanged. Please, investigate and fix!");
                     }
                 },
             }

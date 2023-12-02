@@ -81,65 +81,62 @@ impl<const CONFIG:        u64,
         let arc_self = Arc::new(self);
         let connection_events_callback = Arc::new(connection_events_callback);
         let listening_interface_and_port = format!("{}:{}", listening_interface, listening_port);
-        let listener = TcpListener::bind(&listening_interface_and_port).await?;
 
         tokio::spawn( async move {
 
-            loop {
+            while let Some(connection) = connection_receiver.recv().await {
 
-                while let Some(connection) = connection_receiver.recv().await {
+                // client info
+                let addr = match connection.peer_addr() {
+                    Ok(addr) => addr,
+                    Err(err) => {
+                        error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while determining an incoming client's address: {err}");
+                        continue;
+                    },
+                };
+                let (client_ip, client_port) = match addr {
+                    SocketAddr::V4(v4) => (v4.ip().to_string(), v4.port()),
+                    SocketAddr::V6(v6) => (v6.ip().to_string(), v6.port()),
+                };
 
-                    // client info
-                    let addr = match connection.peer_addr() {
-                        Ok(addr) => addr,
+                // prepares for the dialog to come with the (just accepted) connection
+                let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
+                let peer = Arc::new(Peer::new(sender, addr));
+                let peer_ref1 = Arc::clone(&peer);
+                let peer_ref2 = Arc::clone(&peer);
+
+                // issue the connection event
+                connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
+
+                let connection_events_callback_ref = Arc::clone(&connection_events_callback);
+                let processor_sender = ProcessorUniType::new(format!("Server processor for remote client {addr} @ {listening_interface_and_port}"))
+                    .spawn_non_futures_non_fallibles_executors(1,
+                                                               |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
+                                                               move |executor| async move {
+                                                                   // issue the async disconnect event
+                                                                   connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
+                                                               });
+                let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>
+                    (processor_sender);
+                // spawn a task to handle communications with that client
+                let cloned_self = Arc::clone(&arc_self);
+                let listening_interface_and_port = listening_interface_and_port.clone();
+                tokio::spawn(tokio::task::unconstrained(async move {
+                    let mut connection = match cloned_self.dialog_loop_for_textual_protocol(connection, peer.clone(), processor_sender).await {
+                        Ok(connection) => connection,
                         Err(err) => {
-                            error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while determining an incoming client's address: {err}");
-                            continue;
-                        },
-                    };
-                    let (client_ip, client_port) = match addr {
-                        SocketAddr::V4(v4) => (v4.ip().to_string(), v4.port()),
-                        SocketAddr::V6(v6) => (v6.ip().to_string(), v6.port()),
-                    };
-
-                    // prepares for the dialog to come with the (just accepted) connection
-                    let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
-                    let peer = Arc::new(Peer::new(sender, addr));
-                    let peer_ref1 = Arc::clone(&peer);
-                    let peer_ref2 = Arc::clone(&peer);
-
-                    // issue the connection event
-                    connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
-
-                    let connection_events_callback_ref = Arc::clone(&connection_events_callback);
-                    let processor_sender = ProcessorUniType::new(format!("Server processor for remote client {addr} @ {listening_interface_and_port}"))
-                        .spawn_non_futures_non_fallibles_executors(1,
-                                                                   |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
-                                                                   move |executor| async move {
-                                                                       // issue the async disconnect event
-                                                                       connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
-                                                                   });
-                    let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>
-                        (processor_sender);
-                    // spawn a task to handle communications with that client
-                    let cloned_self = Arc::clone(&arc_self);
-                    let listening_interface_and_port = listening_interface_and_port.clone();
-                    tokio::spawn(tokio::task::unconstrained(async move {
-                        let mut connection = match cloned_self.dialog_loop_for_textual_protocol(connection, peer.clone(), processor_sender).await {
-                            Ok(connection) => connection,
-                            Err(err) => {
-                                error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while starting the dialog with client {client_ip}:{client_port}: {err}");
-                                return
-                            }
-                        };
-                        if let Err(err) = connection.shutdown().await {
-                            error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while shutting down the socket with client {client_ip}:{client_port}: {err}");
+                            error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while starting the dialog with client {client_ip}:{client_port}: {err}");
+                            return
                         }
-                    }));
-                }
-
+                    };
+                    if let Err(err) = connection.shutdown().await {
+                        error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while shutting down the socket with client {client_ip}:{client_port}: {err}");
+                    }
+                }));
             }
             debug!("`reactive-messaging::SocketServer`: bailing out of network loop -- we should be undergoing a shutdown...");
+            // issue the shutdown event
+            connection_events_callback(ConnectionEvent::ApplicationShutdown).await;
         });
 
         Ok(())
@@ -213,7 +210,7 @@ impl<const CONFIG:        u64,
                 },
             };
             // issue the shutdown event
-            connection_events_callback_ref2(ConnectionEvent::ApplicationShutdown {timeout_ms}).await;
+            connection_events_callback_ref2(ConnectionEvent::ApplicationShutdown).await;
             // close the connection
             peer_ref3.flush_and_close(Duration::from_millis(timeout_ms as u64)).await;
         });
@@ -614,8 +611,8 @@ mod tests {
                          assert!(peer.send(String::from("Welcome! State your business!")).is_ok(), "couldn't send");
                      },
                      ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => {},
-                     ConnectionEvent::ApplicationShutdown { timeout_ms } => {
-                         println!("Test Server: shutdown was requested ({timeout_ms}ms timeout)... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
+                     ConnectionEvent::ApplicationShutdown => {
+                         println!("Test Server: shutdown was requested... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
                      }
                  }
                  future::ready(())
@@ -651,7 +648,7 @@ mod tests {
                                                         ConnectionEvent::PeerDisconnected { peer, stream_stats: _ } => {
                                                             println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
                                                         },
-                                                        ConnectionEvent::ApplicationShutdown { timeout_ms: _ } => {}
+                                                        ConnectionEvent::ApplicationShutdown => {}
                                                     }
                                                     future::ready(())
                                                 },
@@ -912,7 +909,7 @@ mod tests {
                        }])
                })
             }
-        ).await.expect("Starting the server");
+        ).await.expect("ERROR starting the server");
 
         println!("### Waiting a little for the server to start...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -979,7 +976,7 @@ mod tests {
                 }
             },
             move |_client_addr, _client_port, _peer, client_messages_stream| client_messages_stream
-        ).await.expect("Starting the server");
+        ).await.expect("ERROR starting the server");
 
         // wait a bit for the server to start
         tokio::time::sleep(Duration::from_millis(10)).await;

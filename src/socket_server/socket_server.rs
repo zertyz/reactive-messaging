@@ -194,11 +194,11 @@ pub enum SocketServer<const CONFIG:                    u64,
      }
 
      /// See [GenericSocketServer::shutdown()]
-     pub fn shutdown(self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     pub async fn shutdown(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
          match self {
-             SocketServer::Atomic    (generic_socket_server) => generic_socket_server.shutdown(timeout_ms),
-             SocketServer::FullSync  (generic_socket_server) => generic_socket_server.shutdown(timeout_ms),
-             SocketServer::Crossbeam (generic_socket_server) => generic_socket_server.shutdown(timeout_ms),
+             SocketServer::Atomic    (generic_socket_server) => generic_socket_server.shutdown().await,
+             SocketServer::FullSync  (generic_socket_server) => generic_socket_server.shutdown().await,
+             SocketServer::Crossbeam (generic_socket_server) => generic_socket_server.shutdown().await,
          }
      }
 
@@ -224,8 +224,9 @@ pub struct GenericSocketServer<const CONFIG:        u64,
     interface_ip: String,
     /// The port to listen to incoming connections
     port: u16,
-    /// Signaler to stop this server
-    server_shutdown_signaler: Option<tokio::sync::oneshot::Sender<u32>>,
+    /// The abstraction containing the network look that accepts connections for us + facilities to start processing already
+    /// opened connections (enabling the "Composite Protocol Stacking" design pattern)
+    connection_provider: Option<ServerConnectionHandler>,
     /// Signaler to cause [wait_for_shutdown()] to return
     local_shutdown_receiver: Option<tokio::sync::oneshot::Receiver<()>>,
     _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,SenderChannel)>
@@ -247,7 +248,7 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         Self {
             interface_ip:             interface_ip.into(),
             port,
-            server_shutdown_signaler: None,
+            connection_provider:      None,
             local_shutdown_receiver:  None,
             _phantom:                 PhantomData,
         }
@@ -301,10 +302,10 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
             .map_err(|err| format!("SocketServer: couldn't start the Connection Provider server event loop: {err}"))?;
         let connection_receiver = connection_provider.connection_receiver()
             .ok_or_else(|| format!("SocketServer: couldn't move the Connection Receiver out of the Connection Provider"))?;
+        self.connection_provider.replace(connection_provider);
         // TODO: THE NEXT STEPS ARE FOR THE COMPOSITE SOCKET SERVER ONLY:
         //       allow the current server to add connections to the handler
         //       (other dialog processor may require a reference to this server so to add connections to them)
-
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(&listening_interface,
                                                                                  port,
@@ -353,9 +354,7 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
                                            where LocalMessages: ResponsiveMessages<LocalMessages> {
 
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
         let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
-        self.server_shutdown_signaler = Some(server_shutdown_sender);
         self.local_shutdown_receiver = Some(local_shutdown_receiver);
         let listening_interface = self.interface_ip.clone();
         let port = self.port;
@@ -366,7 +365,7 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
             .map_err(|err| format!("SocketServer: couldn't start the Connection Provider server event loop: {err}"))?;
         let connection_receiver = connection_provider.connection_receiver()
             .ok_or_else(|| format!("SocketServer: couldn't move the Connection Receiver out of the Connection Provider"))?;
-
+        self.connection_provider.replace(connection_provider);
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
         socket_communications_handler.server_loop_for_responsive_text_protocol
             (&listening_interface,
@@ -405,15 +404,12 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
     /// A shutdown is considered graceful if it could be accomplished in less than `timeout_ms` milliseconds.\
     /// It is a good practice that the `connection_events_handler()` you provided when starting the server
     /// uses this time to inform all clients that a remote-initiated disconnection (due to a shutdown) is happening.
-    pub fn shutdown(mut self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        match self.server_shutdown_signaler.take() {
-            Some(server_sender) => {
-                warn!("GenericSocketServer: Shutdown asked & initiated for server @ {}:{} -- timeout: {timeout_ms}ms", self.interface_ip, self.port);
-                if let Err(_sent_value) = server_sender.send(timeout_ms) {
-                    Err(Box::from("GenericSocketServer BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix!"))
-                } else {
-                    Ok(())
-                }
+    pub async fn shutdown(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        match self.connection_provider.take() {
+            Some(connection_provider) => {
+                warn!("GenericSocketServer: Shutdown asked & initiated for server @ {}:{}", self.interface_ip, self.port);
+                connection_provider.shutdown().await;
+                Ok(())
             }
             None => {
                 Err(Box::from("GenericSocketServer: Shutdown requested, but the service was not started. Ignoring..."))
@@ -510,7 +506,7 @@ mod tests {
             client_messages_stream.map(|_payload| ())
         }
         let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown(200)?;
+        server.shutdown().await?;
         shutdown_waiter().await?;
 
         // demonstrates how to build a responsive server
@@ -537,7 +533,7 @@ mod tests {
             client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         }
         let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown(200)?;
+        server.shutdown().await?;
         shutdown_waiter().await?;
 
         // demonstrates how to use it with closures -- also allowing for any channel in the configs
@@ -553,7 +549,7 @@ mod tests {
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         )?;
         let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown(200)?;
+        server.shutdown().await?;
         shutdown_waiter().await?;
 
         // demonstrates how to use the internal & generic implementation
@@ -580,7 +576,7 @@ mod tests {
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await?;
         let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown(200)?;
+        server.shutdown().await?;
         shutdown_waiter().await?;
 
         Ok(())
@@ -598,7 +594,7 @@ mod tests {
         // the shutdown timeout, in milliseconds
         let expected_max_shutdown_duration_ms = 543;
         // the tollerance, in milliseconds -- a too small shutdown duration means the server didn't wait for the client's disconnection; too much (possibly eternal) means it didn't enforce the timeout
-        let tollerance_ms = 20;
+        let max_time_ms = 20;
 
         // sensors
         let client_received_messages_count_ref1 = Arc::new(AtomicU32::new(0));
@@ -617,8 +613,8 @@ mod tests {
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CONFIG.receiver_buffer as usize}, 1, {CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CONFIG.sender_buffer as usize}, 1>;
         let mut server = GenericSocketServer :: <{CONFIG.into()},
-            DummyClientAndServerMessages,
-            DummyClientAndServerMessages,
+                                                                     DummyClientAndServerMessages,
+                                                                     DummyClientAndServerMessages,
                                                                      ProcessorUniType,
                                                                      SenderChannelType >
                                                                  :: new("127.0.0.1", PORT);
@@ -632,16 +628,14 @@ mod tests {
                             client_peer.lock().await.replace(peer);
                         },
                         ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => (),
-                        ConnectionEvent::ApplicationShutdown { timeout_ms } => {
+                        ConnectionEvent::ApplicationShutdown => {
                             // send a message to the client (the first message, actually... that will initiate a flood of back-and-forth messages)
                             // then try to close the connection (which would only be gracefully done once all messages were sent... which may never happen).
                             let client_peer = client_peer.lock().await;
                             let client_peer = client_peer.as_ref().expect("No client is connected");
                             // send the flood starting message
                             let _ = client_peer.send_async(DummyClientAndServerMessages::FloodPing).await;
-                            client_peer.flush_and_close(Duration::from_millis(timeout_ms as u64)).await;
-                            // guarantees this operation will take slightly more than the timeout+tolerance to complete
-                            tokio::time::sleep(Duration::from_millis((timeout_ms+/*tollerance_ms+*/20+10) as u64)).await;
+                            client_peer.flush_and_close(Duration::ZERO).await;
                         }
                     }
                 }
@@ -682,17 +676,17 @@ mod tests {
         }
         // shutdown the server & wait until the shutdown process is complete
         let wait_for_server_shutdown = server.shutdown_waiter();
-        server.shutdown(expected_max_shutdown_duration_ms)
-            .expect("Signaling the server of the shutdown intention");
+        server.shutdown().await
+            .expect("ERROR Signaling the server of the shutdown intention");
         let start = std::time::SystemTime::now();
-        wait_for_server_shutdown().await
-            .expect("Waiting for the server to live it's life and to complete the shutdown process");
+        _ = tokio::time::timeout(Duration::from_secs(5), wait_for_server_shutdown()).await
+            .expect("ERROR Waiting for the server to live it's life and to complete the shutdown process");
         let elapsed_ms = start.elapsed().unwrap().as_millis();
         assert!(client_received_messages_count_ref2.load(Relaxed) > 1, "The client didn't receive any messages (not even the 'server is shutting down' notification)");
         assert!(server_received_messages_count_ref2.load(Relaxed) > 1, "The server didn't receive any messages (not even 'gracefully disconnecting' after being notified that the server is shutting down)");
-        assert!(elapsed_ms.abs_diff(expected_max_shutdown_duration_ms as u128) < tollerance_ms as u128,
-                "The server shutdown (of a never compling client) didn't complete in a reasonable time, meaning the shutdown code is wrong. Timeout: {}ms; Tollerance: {}ms; Measured Time: {}ms",
-                expected_max_shutdown_duration_ms, tollerance_ms, elapsed_ms);
+        assert!(elapsed_ms <= max_time_ms as u128,
+                "The server shutdown (of a never complying client) didn't complete in a reasonable time, meaning the shutdown code is wrong. Maximum acceptable time: {}ms; Measured Time: {}ms",
+                max_time_ms, elapsed_ms);
     }
 
     #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]

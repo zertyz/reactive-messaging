@@ -53,5 +53,5 @@ pub enum ConnectionEvent<const CONFIG:  u64,
                          SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync> {
     PeerConnected       {peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel>>},
     PeerDisconnected    {peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send>},
-    ApplicationShutdown {timeout_ms: u32},
+    ApplicationShutdown,
 }

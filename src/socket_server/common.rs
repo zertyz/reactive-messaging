@@ -35,15 +35,15 @@ pub(crate) fn upgrade_to_shutdown_tracking<const CONFIG:                   u64,
         let shutdown_is_complete_signaler = Arc::clone(&shutdown_is_complete_signaler);
         let user_provided_connection_events_callback = Arc::clone(&user_provided_connection_events_callback);
         Box::pin(async move {
-            if let ConnectionEvent::ApplicationShutdown { timeout_ms } = connection_event {
-                let _ = tokio::time::timeout(Duration::from_millis(timeout_ms as u64), user_provided_connection_events_callback(connection_event)).await;
+            if let ConnectionEvent::ApplicationShutdown { } = connection_event {
                 let Some(shutdown_is_complete_signaler) = shutdown_is_complete_signaler.lock().await.take()
                 else {
                     warn!("Socket Server: a shutdown was asked, but a previous shutdown seems to have already taken place. There is a bug in your shutdown logic. Ignoring the current shutdown request...");
                     return
                 };
+                user_provided_connection_events_callback(connection_event).await;
                 if let Err(_sent_value) = shutdown_is_complete_signaler.send(()) {
-                    error!("Socket Server BUG: couldn't send shutdown signal to the local `one_shot` channel. Program is, likely, hanged. Please, investigate and fix!");
+                    error!("Socket Server BUG: couldn't send shutdown-is-complete signal to the local `one_shot` channel. Program is, likely, hanged. Please, investigate and fix!");
                 }
             } else {
                 user_provided_connection_events_callback(connection_event).await;

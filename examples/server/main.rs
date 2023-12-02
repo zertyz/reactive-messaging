@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let wait_for_shutdown = socket_server.shutdown_waiter();
 tokio::spawn( async move {
     tokio::time::sleep(Duration::from_secs(300)).await;
-    socket_server.shutdown(5000).expect("FAILED TO SHUTDOWN");
+    socket_server.shutdown().await.expect("FAILED TO SHUTDOWN");
 });
     wait_for_shutdown().await?;
 
