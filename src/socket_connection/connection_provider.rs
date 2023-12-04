@@ -5,7 +5,7 @@
 //!     See [ServerConnectionHandler] and the lower level [ConnectionChannel].
 //!   * Enables the pattern also for clients -- active connections may either be made or an existing one
 //!     may be reused.\
-//!     See [ClientConnection]
+//!     See [ClientConnectionManager]
 //!   * Abstracts out the TCP/IP intricacies for establishing (and retrying) connections.
 //! IMPLEMENTATION NOTE: this code may be improved when Rust allows "async fn in traits": a common trait
 //!                      may be implemented.
@@ -14,30 +14,92 @@ use std::future;
 use std::future::Future;
 use std::iter::Peekable;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::ops::RangeInclusive;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::vec::IntoIter;
-use keen_retry::{RetryProducerResult, RetryResult};
+use keen_retry::{ExponentialJitter, ResolvedResult, RetryProducerResult, RetryResult};
 use tokio::net::{ TcpStream, TcpListener };
-use log::{trace,error};
+use log::{trace, error, warn};
+use tokio::sync::Mutex;
+use crate::config::{ConstConfig, RetryingStrategies};
 
+
+type ConnectionFuture = Pin < Box < dyn Future < Output=RetryProducerResult<TcpStream, Box<dyn std::error::Error + Sync + Send>> > > >;
 
 /// Abstracts out the TCP/IP intricacies for establishing (and retrying) connections,
 /// while still enabling the "Protocol Stack Composition" pattern by accepting existing
 /// connections to be provided (instead of opening new ones).
-pub struct ClientConnection {}
+pub struct ClientConnectionManager<const CONFIG_U64: u64> {
+    host:                         String,
+    port:                         u16,
+    connect_continuation_closure: Arc < Mutex < Box<dyn FnMut() -> ConnectionFuture> > >,
+}
 
-type ConnectionFnMut = Pin < Box < dyn Future < Output=RetryProducerResult<TcpStream, Box<dyn std::error::Error + Sync + Send>> > > >;
+impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
 
-impl ClientConnection {
+    pub fn new<IntoString: Into<String>>(host: IntoString, port: u16) -> Self {
+        let host = host.into();
+        let connect_closure = Box::new(Self::build_connect_continuation_closure(&host, port));
+        Self { host, port, connect_continuation_closure: Arc::new(Mutex::new(connect_closure)) }
+    }
+
+    pub async fn connect_retryable(&mut self) -> Result<TcpStream, Box<dyn std::error::Error + Send + Sync>> {
+        let config = ConstConfig::from(CONFIG_U64);
+        let retry_result_supplier = |retrying_start_time| {
+            let mut connect_continuation_closure = self.connect_continuation_closure.try_lock().expect("BUG!!! ERROR LoCkInG!!!!");
+            async move {
+                connect_continuation_closure().await
+                    .map_ok(|_, connection| (Duration::ZERO, connection) )
+                    .map_input(|_| retrying_start_time)
+            }
+        };
+        let resolved_result = match config.retrying_strategy {
+            RetryingStrategies::DoNotRetry |
+            RetryingStrategies::EndCommunications =>
+                ResolvedResult::from_retry_result(retry_result_supplier(SystemTime::now()).await),
+            RetryingStrategies::RetryWithBackoffUpTo(attempts) =>
+                retry_result_supplier(SystemTime::now()).await
+                    .retry_with_async(retry_result_supplier)
+                    .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
+                        backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+                        re_attempts: attempts,
+                        jitter_ratio: 0.2,
+                    })
+                    .await,
+            RetryingStrategies::RetryYieldingForUpToMillis(millis) =>
+                retry_result_supplier(SystemTime::now()).await
+                    .retry_with_async(retry_result_supplier)
+                    .yielding_until_timeout(Duration::from_millis(millis as u64), || Box::from(format!("Timed out (>{millis}ms) while attempting to connect to {}:{}", self.host, self.port)))
+                    .await,
+            RetryingStrategies::RetrySpinningForUpToMillis(millis) =>
+                todo!("THIS OPTION SHOULD BE REMOVED, AS IT IS NOT SUPPORTED BY KEEN-RETRY")
+        };
+        resolved_result
+            .inspect_recovered(|retrying_duration, _, errors|
+               warn!("`reactive-messaging::SocketClient`: Connection to {}:{} SUCCEEDED Succeeded after retrying {} times in {:?}. Transient errors: {}",
+                     self.host, self.port, errors.len(), retrying_duration, keen_retry::loggable_retry_errors(&errors)) )
+           .inspect_given_up(|retrying_duration, mut transient_errors, fatal_error|
+               error!("`reactive-messaging::SocketClient`: Connection to {}:{} was GIVEN UP after retrying {} times in {:?}, with transient errors {}. The last error was {}",
+                      self.host, self.port, transient_errors.len()+1, retrying_duration, keen_retry::loggable_retry_errors(&transient_errors), fatal_error) )
+           .inspect_unrecoverable(|retrying_duration, transient_errors, fatal_error|
+               error!("`reactive-messaging::SocketClient`: Connection to {}:{} FAILED FATABLY after retrying {} times in {:?}, with transient errors {}. The fatal error was {}",
+                      self.host, self.port, transient_errors.len(), retrying_duration, keen_retry::loggable_retry_errors(&transient_errors), fatal_error) )
+            .into_result()
+    }
+
+    /// Consumes this object and returns the underlying connect closure
+    fn into_connect_continuation_closure(self) -> Arc < Mutex < Box<dyn FnMut() -> ConnectionFuture> > > {
+        self.connect_continuation_closure
+    }
 
     /// Advanced connection procedure suitable for retrying: returns an async closure that does the connection with advanced and special features:
     ///   * If the `server` is a name and it resolves to several IPs, calling the returned closure again will attempt to connect to the next IP
     ///   * If the IPs list is over, a new host resolution will be done and the process above repeats
     ///   * The continuation closure may be indefinitely stored by the client, so an easy reconnection might be attempted at any time, in case it drops.
     /// IMPLEMENTATION NOTE: this method implements the "Partial Completion with Continuation Closure", as described in the `keen-retry` crate's book.
-    pub fn connect_continuation_closure(host: &str, port: u16) -> impl FnMut() -> ConnectionFnMut {
+    fn build_connect_continuation_closure(host: &str, port: u16) -> impl FnMut() -> ConnectionFuture {
         let address = format!("{}:{}", host, port);
         let mut opt_addrs: Option<Peekable<IntoIter<SocketAddr>>> = None;
         move || {
@@ -73,7 +135,6 @@ impl ClientConnection {
             })
         }
     }
-
 }
 
 
@@ -303,7 +364,7 @@ mod tests {
         Ok(())
     }
 
-    /// Checks that [ClientConnection] works according to the specification
+    /// Checks that [ClientConnectionManager] works according to the specification
     #[tokio::test]
     async fn client_connection() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         let expected_count = 10;
@@ -315,7 +376,10 @@ mod tests {
         let stream_ended_ref = stream_ended.clone();
 
         // attempt to connect to a non-existing host
-        let mut connect = ClientConnection::connect_continuation_closure("non-existing-host.com.br", port);
+        let mut connect_shareable = ClientConnectionManager::<{ConstConfig::default().into()}>::new("non-existing-host.com.br", port)
+            .into_connect_continuation_closure();
+        let mut connect = connect_shareable
+            .lock().await;
         let error_message = connect().await
             .expect_fatal(&format!("Tried to connect to a non-existing host, but the result of a connection attempt was not a `Fatal` error"))
             .into_result()
@@ -323,7 +387,10 @@ mod tests {
             .to_string();
         assert_eq!(error_message, "Unable to resolve address 'non-existing-host.com.br:8357': failed to lookup address information: Name or service not known", "Wrong error message");
 
-        let mut connect = ClientConnection::connect_continuation_closure(interface, port);
+        let connect_shareable = ClientConnectionManager::<{ConstConfig::default().into()}>::new(interface, port)
+            .into_connect_continuation_closure();
+        let mut connect = connect_shareable
+            .lock().await;
 
         // attempt to connect to an existing host, but to a server that is not there
         let error_message = connect().await

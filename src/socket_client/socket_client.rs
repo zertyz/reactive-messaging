@@ -157,6 +157,7 @@ macro_rules! spawn_responsive_client_processor {
     }}
 }
 pub use spawn_responsive_client_processor;
+use crate::socket_connection::connection_provider::ClientConnectionManager;
 
 
 /// Represents a client built out of `CONFIG` (a `u64` version of [ConstConfig], from which the other const generic parameters derive).\
@@ -311,9 +312,11 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let connection_events_callback = upgrade_to_shutdown_and_connected_state_tracking(&self.connected, local_shutdown_sender, connection_events_callback);
 
+        let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
+        let connection = connection_manager.connect_retryable().await
+            .map_err(|err| format!("Error making client connection: {err}"))?;
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
-        socket_communications_handler.client_for_unresponsive_text_protocol(&ip,
-                                                                            port,
+        socket_communications_handler.client_for_unresponsive_text_protocol(connection,
                                                                             client_shutdown_receiver,
                                                                             connection_events_callback,
                                                                             dialog_processor_builder_fn).await
@@ -368,10 +371,12 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let connection_events_callback = upgrade_to_shutdown_and_connected_state_tracking(&self.connected, local_shutdown_sender, connection_events_callback);
 
+        let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
+        let connection = connection_manager.connect_retryable().await
+            .map_err(|err| format!("Error making client connection: {err}"))?;
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
         socket_communications_handler.client_for_responsive_text_protocol
-            (&ip,
-             port,
+            (connection,
              server_shutdown_receiver,
              connection_events_callback,
              dialog_processor_builder_fn).await

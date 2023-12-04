@@ -302,10 +302,7 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
             .map_err(|err| format!("SocketServer: couldn't start the Connection Provider server event loop: {err}"))?;
         let connection_receiver = connection_provider.connection_receiver()
             .ok_or_else(|| format!("SocketServer: couldn't move the Connection Receiver out of the Connection Provider"))?;
-        self.connection_provider.replace(connection_provider);
-        // TODO: THE NEXT STEPS ARE FOR THE COMPOSITE SOCKET SERVER ONLY:
-        //       allow the current server to add connections to the handler
-        //       (other dialog processor may require a reference to this server so to add connections to them)
+        _ = self.connection_provider.insert(connection_provider);
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(&listening_interface,
                                                                                  port,
@@ -365,7 +362,7 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
             .map_err(|err| format!("SocketServer: couldn't start the Connection Provider server event loop: {err}"))?;
         let connection_receiver = connection_provider.connection_receiver()
             .ok_or_else(|| format!("SocketServer: couldn't move the Connection Receiver out of the Connection Provider"))?;
-        self.connection_provider.replace(connection_provider);
+        _ = self.connection_provider.insert(connection_provider);
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
         socket_communications_handler.server_loop_for_responsive_text_protocol
             (&listening_interface,
@@ -672,7 +669,7 @@ mod tests {
 
         // wait for the client to connect
         while client_peer_ref2.lock().await.is_none() {
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            tokio::time::sleep(Duration::from_millis(2)).await;
         }
         // shutdown the server & wait until the shutdown process is complete
         let wait_for_server_shutdown = server.shutdown_waiter();

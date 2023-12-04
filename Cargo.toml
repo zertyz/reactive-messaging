@@ -32,7 +32,7 @@ strum        = { version = "0.25", features = ["derive"] }      # enums serializ
 strum_macros = "0.25"
 
 # for the retrying mechanism
-keen-retry = "0.3"
+keen-retry = "0.3.2"
 
 # soon to be dropped when Rust finally goes forward in late 2023...
 # (in this crate, the costs of async traits are only paid for functions out of the hot path)

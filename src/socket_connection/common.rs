@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
+use keen_retry::ExponentialJitter;
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `COFNIG`
 pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
@@ -91,14 +92,18 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
                                                                                     message, Self::CONST_CONFIG.retrying_strategy)) )
                     .into_result()
             },
-            RetryingStrategies::RetrySleepingArithmetically(steps) => {
+            RetryingStrategies::RetryWithBackoffUpTo(attempts) => {
                 retryable
                     .map_input(|message| ( message, SystemTime::now()) )
                     .retry_with_async(|(message, retry_start)| future::ready(
                         self.uni.send(message)
                             .map_input(|message| (message, retry_start) )
                     ))
-                    .with_delays((10..=(10*steps as u64)).step_by(10).map(Duration::from_millis))
+                    .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
+                        backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+                        re_attempts: attempts,
+                        jitter_ratio: 0.2,
+                    })
                     .await
                     .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
@@ -225,14 +230,18 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                                                                                    message, Self::CONST_CONFIG.retrying_strategy)) )
                     .into_result()
             },
-            RetryingStrategies::RetrySleepingArithmetically(steps) => {
+            RetryingStrategies::RetryWithBackoffUpTo(attempts) => {
                 retryable
                     .map_input(|message| ( message, SystemTime::now()) )
                     .retry_with(|(message, retry_start)|
                         self.channel.send(message)
                             .map_input(|message| (message, retry_start) )
                     )
-                    .with_delays((10..=(10*steps as u64)).step_by(10).map(Duration::from_millis))
+                    .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
+                        backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+                        re_attempts: attempts,
+                        jitter_ratio: 0.2,
+                    })
                     .map_input_and_errors(
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("sync-Sending '{:?}' failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
@@ -292,14 +301,18 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                                                                                    message, Self::CONST_CONFIG.retrying_strategy)) )
                     .into_result()
             },
-            RetryingStrategies::RetrySleepingArithmetically(steps) => {
+            RetryingStrategies::RetryWithBackoffUpTo(attempts) => {
                 retryable
                     .map_input(|message| ( message, SystemTime::now()) )
                     .retry_with_async(|(message, retry_start)| future::ready(
                         self.channel.send(message)
                             .map_input(|message| (message, retry_start) )
                     ))
-                    .with_delays((10..=(10*steps as u64)).step_by(10).map(Duration::from_millis))
+                    .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
+                        backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+                        re_attempts: attempts,
+                        jitter_ratio: 0.2,
+                    })
                     .await
                     .map_input_and_errors(
                         |(message, retry_start), _fatal_err|

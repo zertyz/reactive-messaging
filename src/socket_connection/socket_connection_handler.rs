@@ -155,18 +155,14 @@ impl<const CONFIG:        u64,
                                                        ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                       (self,
-                                                       server_ipv4_addr:            &str,
-                                                       port:                        u16,
+                                                       socket:                      TcpStream,
                                                        shutdown_signaler:           tokio::sync::oneshot::Receiver<u32>,
                                                        connection_events_callback:  ConnectionEventsCallback,
                                                        dialog_processor_builder_fn: ProcessorBuilderFn)
 
                                                       -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str(server_ipv4_addr)?), port);
-        let socket = TcpStream::connect(addr).await?;
-
-        // prepares for the dialog to come with the (just accepted) connection
+        let addr = socket.peer_addr()?;
         let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
         let peer = Arc::new(Peer::new(sender, addr));
         let peer_ref1 = Arc::clone(&peer);
@@ -180,7 +176,7 @@ impl<const CONFIG:        u64,
         let connection_events_callback_ref2 = Arc::clone(&connection_events_callback_ref1);
         let processor_sender = ProcessorUniType::new(format!("Client Processor for remote server @ {addr}"))
             .spawn_non_futures_non_fallibles_executors(1,
-                                                    |in_stream| dialog_processor_builder_fn(server_ipv4_addr.to_string(), port, peer_ref1.clone(), in_stream),
+                                                    |in_stream| dialog_processor_builder_fn(addr.ip().to_string(), addr.port(), peer_ref1.clone(), in_stream),
                                                     move |executor| async move {
                                                         // issue the async disconnect event
                                                         connection_events_callback_ref1(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
@@ -197,15 +193,15 @@ impl<const CONFIG:        u64,
             Ok::<(), Box<dyn std::error::Error + Sync + Send>>(())
         }));
         // spawn the shutdown listener
-        let server_ipv4_addr = server_ipv4_addr.to_string();
+        let addr = addr.to_string();
         tokio::spawn(async move {
             let timeout_ms = match shutdown_signaler.await {
                 Ok(timeout_millis) => {
-                    trace!("reactive-messaging: SHUTDOWN requested for client connected to server @ {server_ipv4_addr}:{port} -- with timeout {}ms: notifying & dropping the connection", timeout_millis);
+                    trace!("reactive-messaging: SHUTDOWN requested for client connected to server @ {addr} -- with timeout {}ms: notifying & dropping the connection", timeout_millis);
                     timeout_millis
                 },
                 Err(err) => {
-                    error!("reactive-messaging: PROBLEM in the `shutdown signaler` client connected to server @ {server_ipv4_addr}:{port} (a client shutdown will be commanded now due to this occurrence): {:?}", err);
+                    error!("reactive-messaging: PROBLEM in the `shutdown signaler` client connected to server @ {addr} (a client shutdown will be commanded now due to this occurrence): {:?}", err);
                     5000    // consider this as the "problematic shutdown timeout (millis) constant"
                 },
             };
@@ -389,8 +385,7 @@ impl<const CONFIG:        u64,
                                                      ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                     (self,
-                                                     server_ipv4_addr:            &str,
-                                                     port:                        u16,
+                                                     socket:                      TcpStream,
                                                      shutdown_signaler:           tokio::sync::oneshot::Receiver<u32>,
                                                      connection_events_callback:  ConnectionEventsCallback,
                                                      dialog_processor_builder_fn: ProcessorBuilderFn)
@@ -399,14 +394,15 @@ impl<const CONFIG:        u64,
 
                                                     where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
 
-       // upgrade the "unresponsive" streams from `dialog_processor_builder_fn()` to "responsive" streams that will send the outcome to clients
-       let dialog_processor_builder_fn = |server_addr, port, peer, server_messages_stream| {
-           let dialog_processor_stream = dialog_processor_builder_fn(server_addr, port, Arc::clone(&peer), server_messages_stream);
-           self.to_responsive_stream(peer, dialog_processor_stream)
-       };
+        let addr = socket.peer_addr()?;
+        // upgrade the "unresponsive" streams from `dialog_processor_builder_fn()` to "responsive" streams that will send the outcome to clients
+        let dialog_processor_builder_fn = |server_addr, port, peer, server_messages_stream| {
+            let dialog_processor_stream = dialog_processor_builder_fn(server_addr, port, Arc::clone(&peer), server_messages_stream);
+            self.to_responsive_stream(peer, dialog_processor_stream)
+        };
         let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel>::new();
-        unresponsive_socket_connection_handler.client_for_unresponsive_text_protocol(server_ipv4_addr.clone(), port, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
-            .map_err(|err| Box::from(format!("error when starting client for server @ {server_ipv4_addr}:{port} with `client_for_unresponsive_text_protocol()`: {err}")))
+        unresponsive_socket_connection_handler.client_for_unresponsive_text_protocol(socket, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
+            .map_err(|err| Box::from(format!("error when starting client for server @ {addr} with `client_for_unresponsive_text_protocol()`: {err}")))
     }
 
     /// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
@@ -495,6 +491,7 @@ mod tests {
             Ordering::Relaxed,
         },
     };
+    use std::net::ToSocketAddrs;
     use reactive_mutiny::{prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic}, types::{ChannelCommon, ChannelUni, ChannelProducer}};
     use futures::stream;
     use tokio::sync::Mutex;
@@ -637,31 +634,32 @@ mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
-        let client_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        client_connection_handler.client_for_unresponsive_text_protocol
-                                               (LISTENING_INTERFACE, PORT, client_shutdown_receiver,
-                                                move |connection_event| {
-                                                    match connection_event {
-                                                        ConnectionEvent::PeerConnected { peer } => {
-                                                            assert!(peer.send(client_secret.clone()).is_ok(), "couldn't send");
-                                                        },
-                                                        ConnectionEvent::PeerDisconnected { peer, stream_stats: _ } => {
-                                                            println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
-                                                        },
-                                                        ConnectionEvent::ApplicationShutdown => {}
-                                                    }
-                                                    future::ready(())
-                                                },
-                                                move |_client_addr, _client_port, _peer, server_messages_stream| {
-                                                    let observed_secret_ref = Arc::clone(&observed_secret_ref);
-                                                    server_messages_stream.then(move |server_message| {
-                                                        let observed_secret_ref = Arc::clone(&observed_secret_ref);
-                                                        async move {
-                                                            println!("Server said: '{}'", server_message);
-                                                            let _ = observed_secret_ref.lock().await.insert(server_message);
-                                                        }
-                                                    })
-                                                }
+        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let client_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
+        client_communications_handler.client_for_unresponsive_text_protocol(
+            socket, client_shutdown_receiver,
+            move |connection_event| {
+                match connection_event {
+                    ConnectionEvent::PeerConnected { peer } => {
+                        assert!(peer.send(client_secret.clone()).is_ok(), "couldn't send");
+                    },
+                    ConnectionEvent::PeerDisconnected { peer, stream_stats: _ } => {
+                        println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
+                    },
+                    ConnectionEvent::ApplicationShutdown => {}
+                }
+                future::ready(())
+            },
+            move |_client_addr, _client_port, _peer, server_messages_stream| {
+                let observed_secret_ref = Arc::clone(&observed_secret_ref);
+                server_messages_stream.then(move |server_message| {
+                    let observed_secret_ref = Arc::clone(&observed_secret_ref);
+                    async move {
+                        println!("Server said: '{}'", server_message);
+                        let _ = observed_secret_ref.lock().await.insert(server_message);
+                    }
+                })
+            }
         ).await.expect("Starting the client");
         println!("### Started a client -- which is running concurrently, in the background... it has 100ms to do its thing!");
 
@@ -715,34 +713,35 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_ref = Arc::clone(&counter);
         // client
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        socket_connection_handler.client_for_unresponsive_text_protocol
-                                               (LISTENING_INTERFACE, PORT, client_shutdown_receiver,
-                                                |connection_event| {
-                                                    match connection_event {
-                                                        ConnectionEvent::PeerConnected { peer } => {
-                                                            // conversation starter
-                                                            assert!(peer.send(String::from("Ping(0)")).is_ok(), "couldn't send");
-                                                        },
-                                                        ConnectionEvent::PeerDisconnected { .. } => {},
-                                                        ConnectionEvent::ApplicationShutdown { .. } => {},
-                                                    }
-                                                    future::ready(())
-                                                },
-                                                move |_listening_interface, _listening_port, peer, server_messages| {
-                                                    let counter_ref = Arc::clone(&counter_ref);
-                                                    server_messages.inspect(move |server_message| {
-                                                        // Receives: "Pong(n)"
-                                                        let n_str = &server_message[5..(server_message.len()-1)];
-                                                        let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original server message: '{}'. Parsing error: {:?}", n_str, server_message, err));
-                                                        let current_count = counter_ref.fetch_add(1, Relaxed);
-                                                        if n != current_count {
-                                                            panic!("Received '{}', where Client was expecting 'Pong({})'", server_message, current_count);
-                                                        }
-                                                        // Answers: "Ping(n+1)"
-                                                        assert!(peer.send(format!("Ping({})", current_count+1)).is_ok(), "couldn't send");
-                                                    })
-                                                }
+        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
+        socket_communications_handler.client_for_unresponsive_text_protocol(
+            socket, client_shutdown_receiver,
+            |connection_event| {
+                match connection_event {
+                    ConnectionEvent::PeerConnected { peer } => {
+                        // conversation starter
+                        assert!(peer.send(String::from("Ping(0)")).is_ok(), "couldn't send");
+                    },
+                    ConnectionEvent::PeerDisconnected { .. } => {},
+                    ConnectionEvent::ApplicationShutdown { .. } => {},
+                }
+                future::ready(())
+            },
+            move |_listening_interface, _listening_port, peer, server_messages| {
+                let counter_ref = Arc::clone(&counter_ref);
+                server_messages.inspect(move |server_message| {
+                    // Receives: "Pong(n)"
+                    let n_str = &server_message[5..(server_message.len()-1)];
+                    let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original server message: '{}'. Parsing error: {:?}", n_str, server_message, err));
+                    let current_count = counter_ref.fetch_add(1, Relaxed);
+                    if n != current_count {
+                        panic!("Received '{}', where Client was expecting 'Pong({})'", server_message, current_count);
+                    }
+                    // Answers: "Ping(n+1)"
+                    assert!(peer.send(format!("Ping({})", current_count+1)).is_ok(), "couldn't send");
+                })
+            }
         ).await.expect("Starting the client");
 
         println!("### Measuring latency for {TEST_DURATION_MS} milliseconds...");
@@ -811,39 +810,40 @@ mod tests {
         // client
         let sent_messages_count = Arc::new(AtomicU32::new(0));
         let sent_messages_count_ref = Arc::clone(&sent_messages_count);
+        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
         let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
-        socket_connection_handler.client_for_unresponsive_text_protocol
-                                               (LISTENING_INTERFACE, PORT,
-                                                client_shutdown_receiver,
-                                                move |connection_event| {
-                                                    let sent_messages_count = Arc::clone(&sent_messages_count_ref);
-                                                    match connection_event {
-                                                        ConnectionEvent::PeerConnected { peer } => {
-                                                            tokio::spawn(async move {
-                                                                let start = SystemTime::now();
-                                                                let mut n = 0;
-                                                                loop {
-                                                                    let send_result = peer.send_async(format!("DoNotAnswer({})", n)).await;
-                                                                    assert!(send_result.is_ok(), "couldn't send: {:?}", send_result.unwrap_err());
-                                                                    n += 1;
-                                                                    // flush & bailout check for timeout every 128k messages
-                                                                    if n % (1<<17) == 0 && start.elapsed().unwrap().as_millis() as u64 >= TEST_DURATION_MS {
-                                                                        println!("Client sent {} messages before bailing out", n);
-                                                                        sent_messages_count.store(n, Relaxed);
-                                                                        assert_eq!(peer.flush_and_close(Duration::from_secs(1)).await, 0, "couldn't flush!");
-                                                                        break;
-                                                                    }
-                                                                }
-                                                            });
-                                                        },
-                                                        ConnectionEvent::PeerDisconnected { .. } => {},
-                                                        ConnectionEvent::ApplicationShutdown { .. } => {},
-                                                    }
-                                                    future::ready(())
-                                                },
-                                                move |_listening_interface, _listening_port, _peer, server_messages| {
-                                                    server_messages
-                                                }
+        socket_connection_handler.client_for_unresponsive_text_protocol(
+            socket,
+            client_shutdown_receiver,
+            move |connection_event| {
+                let sent_messages_count = Arc::clone(&sent_messages_count_ref);
+                match connection_event {
+                    ConnectionEvent::PeerConnected { peer } => {
+                        tokio::spawn(async move {
+                            let start = SystemTime::now();
+                            let mut n = 0;
+                            loop {
+                                let send_result = peer.send_async(format!("DoNotAnswer({})", n)).await;
+                                assert!(send_result.is_ok(), "couldn't send: {:?}", send_result.unwrap_err());
+                                n += 1;
+                                // flush & bailout check for timeout every 128k messages
+                                if n % (1<<17) == 0 && start.elapsed().unwrap().as_millis() as u64 >= TEST_DURATION_MS {
+                                    println!("Client sent {} messages before bailing out", n);
+                                    sent_messages_count.store(n, Relaxed);
+                                    assert_eq!(peer.flush_and_close(Duration::from_secs(1)).await, 0, "couldn't flush!");
+                                    break;
+                                }
+                            }
+                        });
+                    },
+                    ConnectionEvent::PeerDisconnected { .. } => {},
+                    ConnectionEvent::ApplicationShutdown { .. } => {},
+                }
+                future::ready(())
+            },
+            move |_listening_interface, _listening_port, _peer, server_messages| {
+                server_messages
+            }
         ).await.expect("Starting the client");
         println!("### Measuring latency for 2 seconds...");
 
@@ -917,10 +917,11 @@ mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        socket_connection_handler.client_for_responsive_text_protocol(LISTENING_INTERFACE, PORT, client_shutdown_receiver,
-            move |_connection_event| future::ready(()),
-            move |_client_addr, _client_port, peer, server_messages_stream| {
+        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
+        socket_communications_handler.client_for_responsive_text_protocol(socket, client_shutdown_receiver,
+                                                                          move |_connection_event| future::ready(()),
+                                                                          move |_client_addr, _client_port, peer, server_messages_stream| {
                 let observed_secret_ref = Arc::clone(&observed_secret_ref);
                 assert!(peer.send(client_secret.clone()).is_ok(), "couldn't send");
                 server_messages_stream
@@ -981,8 +982,10 @@ mod tests {
         // wait a bit for the server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        socket_connection_handler.client_for_unresponsive_text_protocol(LISTENING_INTERFACE, PORT, client_shutdown_receiver,
+        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
+        socket_communications_handler.client_for_unresponsive_text_protocol(
+            socket, client_shutdown_receiver,
             move |connection_event| {
                 let client_disconnected = Arc::clone(&client_disconnected_ref);
                 async move {

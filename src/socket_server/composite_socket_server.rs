@@ -4,6 +4,10 @@
 use std::sync::Arc;
 use crate::prelude::Peer;
 
+// TODO: from code taken after the latest refactorings -- THE NEXT STEPS ARE FOR THE COMPOSITE SOCKET SERVER ONLY:
+//       allow the current server to add connections to the handler
+//       (other dialog processor may require a reference to this server so to add connections to them)
+
 /*
 pub type A<const CONFIG: u64,
            _Self,

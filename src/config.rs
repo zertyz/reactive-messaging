@@ -28,9 +28,11 @@ pub enum RetryingStrategies {
     EndCommunications,
 
     /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieve.\
-    /// Starting at 10ms, waits further 10ms on each attempt -- for up to 255 attempts, with 2.55s being the last sleeping time.\
-    /// Total retrying time: 5*(n²+n) (milliseconds) -- for up to ~5.5 minutes total retrying time
-    RetrySleepingArithmetically(u8),
+    /// Uses an Exponential Backoff strategy with factor 2.526 and 20% jitter, giving the milliseconds to sleep between,
+    /// at most, the given number of attempts.\
+    /// The total retrying time would be the sum of the geometric progression: (-1+2.526^n)/(1.526) -- in milliseconds.\
+    /// Example: for up to 5 minutes retrying, use 14 attempts.
+    RetryWithBackoffUpTo(u8),
 
     /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieve
     /// during the specified milliseconds -- during which retrying will be performed in a pool loop, yielding
@@ -48,7 +50,7 @@ impl RetryingStrategies {
         match self {
             Self::DoNotRetry => 0,
             Self::EndCommunications                    => 1,
-            Self::RetrySleepingArithmetically(n) => 2 | (*n as u16) << 3,
+            Self::RetryWithBackoffUpTo(n)        => 2 | (*n as u16) << 3,
             Self::RetryYieldingForUpToMillis(n)  => 3 | (*n as u16) << 3,
             Self::RetrySpinningForUpToMillis(n)  => 4 | (*n as u16) << 3,
         }
@@ -59,7 +61,7 @@ impl RetryingStrategies {
         match variant {
             0 => Self::DoNotRetry,
             1 => Self::EndCommunications,
-            2 => Self::RetrySleepingArithmetically(n as u8),
+            2 => Self::RetryWithBackoffUpTo(n as u8),
             3 => Self::RetryYieldingForUpToMillis(n as u8),
             4 => Self::RetrySpinningForUpToMillis(n as u8),
             _ => unreachable!(),    // If this errors, did a new enum member was added?
@@ -189,7 +191,7 @@ impl ConstConfig {
             sender_buffer:                  1024,
             receiver_buffer:                1024,
             graceful_close_timeout_millis:  256,
-            retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(20),
+            retrying_strategy:              RetryingStrategies::RetryWithBackoffUpTo(20),
             socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
             channel:                        Channels::Atomic,
             executor_instruments:           Instruments::from(Instruments::NoInstruments.into()),
@@ -402,7 +404,7 @@ mod tests {
                 RetryingStrategies::DoNotRetry,
                 RetryingStrategies::EndCommunications,
             ].into_iter(),
-            (0..8).map(|n| RetryingStrategies::RetrySleepingArithmetically(1<<n)).collect::<Vec<_>>().into_iter(),
+            (0..8).map(|n| RetryingStrategies::RetryWithBackoffUpTo(1<<n)).collect::<Vec<_>>().into_iter(),
             (0..8).map(|n| RetryingStrategies::RetryYieldingForUpToMillis(1<<n)).collect::<Vec<_>>().into_iter(),
             (0..8).map(|n| RetryingStrategies::RetrySpinningForUpToMillis(1<<n)).collect::<Vec<_>>().into_iter(),
         ].into_iter().flatten();
@@ -448,7 +450,7 @@ mod tests {
             sender_buffer:                  2048,
             receiver_buffer:                2048,
             graceful_close_timeout_millis:  256,
-            retrying_strategy:              RetryingStrategies::RetrySleepingArithmetically(14),
+            retrying_strategy:              RetryingStrategies::RetryWithBackoffUpTo(14),
             socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
             channel:                        Channels::Atomic,
             executor_instruments:           Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
