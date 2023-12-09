@@ -160,6 +160,9 @@ pub use spawn_responsive_client_processor;
 use crate::socket_connection::connection_provider::ClientConnectionManager;
 
 
+/// This client implementation doesn't use StateTypes -- a feature of the [ComposableSocketClient].
+type NoStateType = ();
+
 /// Represents a client built out of `CONFIG` (a `u64` version of [ConstConfig], from which the other const generic parameters derive).\
 /// Don't instantiate this struct directly -- use [new_socket_client!()] instead.
 pub enum SocketClient<const CONFIG:                    u64,
@@ -291,11 +294,11 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
     ///     ```
     /// -- if you want the processor to produce answer messages of type `LocalMessages` to be sent to the server, see [Self::spawn_responsive_processor()]:
     #[inline(always)]
-    pub async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                                   Send + Sync + Debug       + 'static,
-                                              ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                     + Send                      + 'static,
-                                              ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                      + Send                      + 'static,
-                                              ConnectionEventsCallback:       Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync               + 'static,
-                                              ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync               + 'static>
+    pub async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                                                Send + Sync + Debug       + 'static,
+                                              ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                  + Send                      + 'static,
+                                              ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                   + Send                      + 'static,
+                                              ConnectionEventsCallback:       Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, NoStateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync               + 'static,
+                                              ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, NoStateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync               + 'static>
 
                                              (&mut self,
                                               connection_events_callback:  ConnectionEventsCallback,
@@ -315,7 +318,7 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
         let connection = connection_manager.connect_retryable().await
             .map_err(|err| format!("Error making client connection: {err}"))?;
-        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
+        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
         socket_communications_handler.client_for_unresponsive_text_protocol(connection,
                                                                             client_shutdown_receiver,
                                                                             connection_events_callback,
@@ -349,10 +352,10 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
     ///     ```
     /// Notice that this method requires that `LocalMessages` implements, additionally, [ResponsiveMessages<>].\
     /// -- if you don't want the processor to produce answer messages, see [Self::spawn_unresponsive_processor()].
-    pub async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                             + Send        + 'static,
-                                            ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                      + Send        + 'static,
-                                            ConnectionEventsCallback:        Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                            ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
+    pub async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                                                 + Send        + 'static,
+                                            ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                          + Send        + 'static,
+                                            ConnectionEventsCallback:        Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, NoStateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                            ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, NoStateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
 
                                            (&mut self,
                                             connection_events_callback:  ConnectionEventsCallback,
@@ -374,7 +377,7 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
         let connection = connection_manager.connect_retryable().await
             .map_err(|err| format!("Error making client connection: {err}"))?;
-        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel>::new();
+        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
         socket_communications_handler.client_for_responsive_text_protocol
             (connection,
              server_shutdown_receiver,

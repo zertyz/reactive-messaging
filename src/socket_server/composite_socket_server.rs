@@ -24,5 +24,4 @@ pub struct GenericCompositeSocketServer<const CONFIG: u64> {
 impl<const CONFIG: u64> GenericCompositeSocketServer<CONFIG> {
 
 }
-
 */

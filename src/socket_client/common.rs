@@ -20,13 +20,14 @@ use crate::ReactiveMessagingSerializer;
 pub fn upgrade_to_shutdown_and_connected_state_tracking<const CONFIG:                   u64,
                                                         LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                                         SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
-                                                        ConnectionEventsCallbackFuture: Future<Output=()> + Send>
+                                                        ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send,
+                                                        StateType:                                                                                                    Send + Sync                     + 'static>
 
                                                        (connected_state:                          &Arc<AtomicBool>,
                                                         shutdown_is_complete_signaler:            tokio::sync::oneshot::Sender<()>,
-                                                        user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                                        user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                                                       -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
+                                                       -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
 
     let connected_state = Arc::clone(connected_state);
     let shutdown_is_complete_signaler = Arc::new(Mutex::new(Option::Some(shutdown_is_complete_signaler)));

@@ -22,12 +22,13 @@ use log::{warn, error};
 pub(crate) fn upgrade_to_shutdown_tracking<const CONFIG:                   u64,
                                            LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                            SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
-                                           ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send>
+                                           ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send,
+                                           StateType:                                                                                                    Send + Sync                     + 'static>
 
                                           (shutdown_is_complete_signaler:            tokio::sync::oneshot::Sender<()>,
-                                           user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                           user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                                          -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) -> Pin<Box<dyn Future<Output=()> + Send>> {
+                                          -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> Pin<Box<dyn Future<Output=()> + Send>> {
 
     let shutdown_is_complete_signaler = Arc::new(Mutex::new(Option::Some(shutdown_is_complete_signaler)));
     let user_provided_connection_events_callback = Arc::new(user_provided_connection_events_callback);

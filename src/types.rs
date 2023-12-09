@@ -50,8 +50,9 @@ pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMess
 #[derive(Debug)]
 pub enum ConnectionEvent<const CONFIG:  u64,
                          LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-                         SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync> {
-    PeerConnected       {peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel>>},
-    PeerDisconnected    {peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send>},
+                         SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+                         StateType:                                                                                   Send + Sync                     + 'static = ()> {
+    PeerConnected       {peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>},
+    PeerDisconnected    {peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send>},
     ApplicationShutdown,
 }

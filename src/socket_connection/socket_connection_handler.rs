@@ -40,16 +40,18 @@ pub struct SocketConnectionHandler<const CONFIG:        u64,
                                    RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
                                    LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
                                    ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
-                                   SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static> {
-    _phantom:   PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel)>,
+                                   SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
+                                   StateType:                                                                                                 Send + Sync                     + 'static = ()> {
+    _phantom:   PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType)>,
 }
 
 impl<const CONFIG:        u64,
      RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
      LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
-     SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static>
- SocketConnectionHandler<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel> {
+     SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
+     StateType:                                                                                                 Send + Sync                     + 'static>
+ SocketConnectionHandler<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType> {
 
     pub fn new() -> Self {
         Self {
@@ -63,11 +65,11 @@ impl<const CONFIG:        u64,
     ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
     ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
     #[inline(always)]
-    pub async fn server_loop_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                          Send + Sync + Debug + 'static,
-                                                            OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                            + Send                + 'static,
-                                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                          + Send,
-                                                            ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                                            ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync         + 'static>
+    pub async fn server_loop_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
+                                                            OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
+                                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
+                                                            ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                                            ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync         + 'static>
 
                                                            (self,
                                                             listening_interface:         &str,
@@ -101,7 +103,7 @@ impl<const CONFIG:        u64,
 
                 // prepares for the dialog to come with the (just accepted) connection
                 let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
-                let peer = Arc::new(Peer::new(sender, addr));
+                let peer = Arc::new(Peer::new(sender, addr, None::<StateType>));
                 let peer_ref1 = Arc::clone(&peer);
                 let peer_ref2 = Arc::clone(&peer);
 
@@ -123,7 +125,7 @@ impl<const CONFIG:        u64,
                 let listening_interface_and_port = listening_interface_and_port.clone();
                 tokio::spawn(tokio::task::unconstrained(async move {
                     let mut connection = match cloned_self.dialog_loop_for_textual_protocol(connection, peer.clone(), processor_sender).await {
-                        Ok(connection) => connection,
+                        Ok((connection, last_state)) => connection,
                         Err(err) => {
                             error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while starting the dialog with client {client_ip}:{client_port}: {err}");
                             return
@@ -148,11 +150,11 @@ impl<const CONFIG:        u64,
     ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
     ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
     #[inline(always)]
-    pub async fn client_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                          Send + Sync + Debug + 'static,
-                                                       OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                            + Send                + 'static,
-                                                       ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                          + Send,
-                                                       ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                                       ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
+    pub async fn client_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
+                                                       OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
+                                                       ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
+                                                       ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                                       ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                       (self,
                                                        socket:                      TcpStream,
@@ -164,7 +166,7 @@ impl<const CONFIG:        u64,
 
         let addr = socket.peer_addr()?;
         let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
-        let peer = Arc::new(Peer::new(sender, addr));
+        let peer = Arc::new(Peer::new(sender, addr, None::<StateType>));
         let peer_ref1 = Arc::clone(&peer);
         let peer_ref2 = Arc::clone(&peer);
         let peer_ref3 = Arc::clone(&peer);
@@ -187,7 +189,7 @@ impl<const CONFIG:        u64,
         // spawn the processor
         let arc_self = Arc::new(self);
         tokio::spawn(tokio::task::unconstrained(async move {
-            let mut socket = arc_self.dialog_loop_for_textual_protocol(socket, peer.clone(), processor_sender).await?;
+            let (mut socket, last_state) = arc_self.dialog_loop_for_textual_protocol(socket, peer.clone(), processor_sender).await?;
             socket.shutdown().await
                 .map_err(|err| format!("error shutting down the client textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
             Ok::<(), Box<dyn std::error::Error + Sync + Send>>(())
@@ -224,10 +226,10 @@ impl<const CONFIG:        u64,
     #[inline(always)]
     async fn dialog_loop_for_textual_protocol(self: Arc<Self>,
                                               mut textual_socket: TcpStream,
-                                              peer:               Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>,
+                                              peer:               Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
                                               processor_sender:   ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>)
 
-                                              -> Result<TcpStream, Box<dyn std::error::Error + Sync + Send>> {
+                                              -> Result<(TcpStream, Option<StateType>), Box<dyn std::error::Error + Sync + Send>> {
 
         let config = ConstConfig::from(CONFIG);
         // socket
@@ -271,7 +273,7 @@ impl<const CONFIG:        u64,
                     }
                 },
 
-                // read?
+                // receive?
                 read = textual_socket.read_buf(&mut read_buffer) => {
                     match read {
                         Ok(n) if n > 0 => {
@@ -344,16 +346,16 @@ impl<const CONFIG:        u64,
         peer.cancel_and_close();
         textual_socket.flush().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
         //textual_socket.shutdown().await.map_err(|err| format!("error shutting down the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
-        Ok(textual_socket)
+        Ok((textual_socket, peer.take_state().await))
     }
 
     /// Similar to [UnresponsiveSocketConnectionHandle::server_loop_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
     /// answers of type `ServerMessages`, which will be automatically routed to the clients.
     #[inline(always)]
-    pub async fn server_loop_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                        + Send        + 'static,
-                                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                     + Send,
-                                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync + 'static>
+    pub async fn server_loop_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                                        + Send        + 'static,
+                                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
+                                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync + 'static>
 
                                                          (self,
                                                           listening_interface:         &str,
@@ -371,7 +373,7 @@ impl<const CONFIG:        u64,
            let dialog_processor_stream = dialog_processor_builder_fn(client_addr, connected_port, Arc::clone(&peer), client_messages_stream);
            self.to_responsive_stream(peer, dialog_processor_stream)
        };
-        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel>::new();
+        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType>::new();
         unresponsive_socket_connection_handler.server_loop_for_unresponsive_text_protocol(listening_interface, listening_port, connection_receiver, connection_events_callback, dialog_processor_builder_fn).await
             .map_err(|err| Box::from(format!("error when starting server @ {listening_interface}:{listening_port} with `server_loop_for_unresponsive_text_protocol()`: {err}")))
     }
@@ -379,10 +381,10 @@ impl<const CONFIG:        u64,
     /// Similar to [client_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
     /// answers of type `ClientMessages`, which will be automatically routed to the server.
     #[inline(always)]
-    pub async fn client_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                             + Send +        'static,
-                                                     ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                          + Send,
-                                                     ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                     ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
+    pub async fn client_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                                        + Send +        'static,
+                                                     ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
+                                                     ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                     ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                     (self,
                                                      socket:                      TcpStream,
@@ -400,7 +402,7 @@ impl<const CONFIG:        u64,
             let dialog_processor_stream = dialog_processor_builder_fn(server_addr, port, Arc::clone(&peer), server_messages_stream);
             self.to_responsive_stream(peer, dialog_processor_stream)
         };
-        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel>::new();
+        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType>::new();
         unresponsive_socket_connection_handler.client_for_unresponsive_text_protocol(socket, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
             .map_err(|err| Box::from(format!("error when starting client for server @ {addr} with `client_for_unresponsive_text_protocol()`: {err}")))
     }
@@ -408,7 +410,7 @@ impl<const CONFIG:        u64,
     /// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
     #[inline(always)]
     fn to_responsive_stream(&self,
-                            peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>,
+                            peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
                             request_processor_stream: impl Stream<Item=LocalMessagesType>)
 
                            -> impl Stream<Item = ()>
@@ -448,7 +450,7 @@ impl<const CONFIG:        u64,
     /// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
     #[inline(always)]
     fn _to_responsive_stream_of_fallibles(&self,
-                                          peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel>>,
+                                          peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
                                           request_processor_stream: impl Stream<Item = Result<LocalMessagesType, Box<dyn std::error::Error + Sync + Send>>>)
 
                                          -> impl Stream<Item = ()>
