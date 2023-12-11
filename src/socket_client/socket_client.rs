@@ -63,7 +63,7 @@ use reactive_mutiny::prelude::advanced::{
     FullDuplexUniChannel,
     GenericUni,
 };
-use log::warn;
+use log::{error, warn};
 use tokio::io::AsyncWriteExt;
 
 
@@ -318,13 +318,25 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
         let connection = connection_manager.connect_retryable().await
-            .map_err(|err| format!("Error making client connection: {err}"))?;
-        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
-        socket_communications_handler.client_for_unresponsive_text_protocol(connection,
-                                                                            client_shutdown_receiver,
-                                                                            connection_events_callback,
-                                                                            dialog_processor_builder_fn).await
-            .map_err(|err| format!("Error starting unresponsive GenericSocketClient @ {ip}:{port}: {:?}", err))?;
+            .map_err(|err| format!("Error making client connection to {}:{} -- {err}", self.ip, self.port))?;
+        tokio::spawn(async move {
+            let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
+            let result = socket_communications_handler.client_for_unresponsive_text_protocol(connection,
+                                                                                                             client_shutdown_receiver,
+                                                                                                             connection_events_callback,
+                                                                                                             dialog_processor_builder_fn).await
+                .map_err(|err| format!("Error while executing the dialog processor: {err}"));
+            match result {
+                Ok((mut socket, _)) => {
+                    if let Err(err) = socket.shutdown().await {
+                        error!("`reactive-messaging::SocketClient`: ERROR shutting down the socket (after the unresponsive & textual processor ended) @ {ip}:{port}: {err}");
+                    }
+                }
+                Err(err) => {
+                    error!("`reactive-messaging::SocketClient`: ERROR in client (unresponsive & textual) @ {ip}:{port}: {err}");
+                }
+            }
+        });
         Ok(())
     }
 
@@ -377,15 +389,25 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
         let connection = connection_manager.connect_retryable().await
-            .map_err(|err| format!("Error making client connection: {err}"))?;
-        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
-        let (mut socket, _) = socket_communications_handler.client_for_responsive_text_protocol(connection,
-                                                                                                          server_shutdown_receiver,
-                                                                                                          connection_events_callback,
-                                                                                                          dialog_processor_builder_fn).await
-            .map_err(|err| format!("Error starting responsive GenericSocketClient @ {ip}:{port}: {:?}", err))?;
-        socket.shutdown().await
-            .map_err(|err| format!("Error shutting down the client (responsive & textual) socket connected to {}:{}: {}", self.ip, self.port, err))?;
+            .map_err(|err| format!("Error making client connection to {}:{} -- {err}", self.ip, self.port))?;
+        tokio::spawn(async move {
+            let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
+            let result = socket_communications_handler.client_for_responsive_text_protocol(connection,
+                                                                                           server_shutdown_receiver,
+                                                                                           connection_events_callback,
+                                                                                           dialog_processor_builder_fn).await
+                .map_err(|err| format!("Error while executing the dialog processor: {err}"));
+            match result {
+                Ok((mut socket, _)) => {
+                    if let Err(err) = socket.shutdown().await {
+                        error!("`reactive-messaging::SocketClient`: ERROR shutting down the socket (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
+                    }
+                }
+                Err(err) => {
+                    error!("`reactive-messaging::SocketClient`: ERROR in client (responsive & textual) @ {ip}:{port}: {err}");
+                }
+            }
+        });
         Ok(())
     }
 
