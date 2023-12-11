@@ -64,6 +64,7 @@ use reactive_mutiny::prelude::advanced::{
     GenericUni,
 };
 use log::warn;
+use tokio::io::AsyncWriteExt;
 
 
 /// Instantiates & allocates resources for a [GenericSocketClient], ready to be later started by [spawn_unresponsive_client_processor!()] or [spawn_responsive_client_processor!()].\
@@ -378,12 +379,13 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         let connection = connection_manager.connect_retryable().await
             .map_err(|err| format!("Error making client connection: {err}"))?;
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
-        socket_communications_handler.client_for_responsive_text_protocol
-            (connection,
-             server_shutdown_receiver,
-             connection_events_callback,
-             dialog_processor_builder_fn).await
+        let (mut socket, _) = socket_communications_handler.client_for_responsive_text_protocol(connection,
+                                                                                                          server_shutdown_receiver,
+                                                                                                          connection_events_callback,
+                                                                                                          dialog_processor_builder_fn).await
             .map_err(|err| format!("Error starting responsive GenericSocketClient @ {ip}:{port}: {:?}", err))?;
+        socket.shutdown().await
+            .map_err(|err| format!("Error shutting down the client (responsive & textual) socket connected to {}:{}: {}", self.ip, self.port, err))?;
         Ok(())
     }
 

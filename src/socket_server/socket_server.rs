@@ -42,6 +42,7 @@ use std::{
     marker::PhantomData,
     sync::Arc,
 };
+use std::net::SocketAddr;
 use futures::{future::BoxFuture, Stream};
 use reactive_mutiny::prelude::advanced::{
     ChannelUniMoveAtomic,
@@ -53,7 +54,9 @@ use reactive_mutiny::prelude::advanced::{
     FullDuplexUniChannel,
     GenericUni,
 };
-use log::warn;
+use log::{error, warn};
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
 
 /// Instantiates & allocates resources for a [GenericSocketServer], ready to be later started by [spawn_unresponsive_server_processor!()] or [spawn_responsive_server_processor!()].\
@@ -301,15 +304,23 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
+        // the source of connections for new server instances
         let mut connection_provider = ServerConnectionHandler::new(&listening_interface, port).await
             .map_err(|err| format!("SocketServer: couldn't start the Connection Provider server event loop: {err}"))?;
-        let connection_receiver = connection_provider.connection_receiver()
+        let new_connections_source = connection_provider.connection_receiver()
             .ok_or_else(|| format!("SocketServer: couldn't move the Connection Receiver out of the Connection Provider"))?;
         _ = self.connection_provider.insert(connection_provider);
+
+        // the connections that return after they were served
+        let (returned_connections_sink, returned_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<NoStateType>)>(2);
+        self.spawn_disconnection_task(returned_connections_source);
+
+        // start the server
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(&listening_interface,
                                                                                  port,
-                                                                                 connection_receiver,
+                                                                                 new_connections_source,
+                                                                                 returned_connections_sink,
                                                                                  connection_events_callback,
                                                                                  dialog_processor_builder_fn).await
             .map_err(|err| format!("Error starting an unresponsive GenericSocketServer @ {listening_interface}:{port}: {:?}", err))?;
@@ -361,18 +372,25 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
         let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
 
+        // the source of connections for new server instances
         let mut connection_provider = ServerConnectionHandler::new(&listening_interface, port).await
             .map_err(|err| format!("SocketServer: couldn't start the Connection Provider server event loop: {err}"))?;
-        let connection_receiver = connection_provider.connection_receiver()
+        let new_connections_source = connection_provider.connection_receiver()
             .ok_or_else(|| format!("SocketServer: couldn't move the Connection Receiver out of the Connection Provider"))?;
         _ = self.connection_provider.insert(connection_provider);
+
+        // the connections that return after they were served
+        let (returned_connections_sink, returned_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<NoStateType>)>(2);
+        self.spawn_disconnection_task(returned_connections_source);
+
+        // start the server
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
-        socket_communications_handler.server_loop_for_responsive_text_protocol
-            (&listening_interface,
-             port,
-             connection_receiver,
-             connection_events_callback,
-             dialog_processor_builder_fn).await
+        socket_communications_handler.server_loop_for_responsive_text_protocol(&listening_interface,
+                                                                               port,
+                                                                               new_connections_source,
+                                                                               returned_connections_sink,
+                                                                               connection_events_callback,
+                                                                               dialog_processor_builder_fn).await
             .map_err(|err| format!("Error starting a responsive GenericSocketServer @ {listening_interface}:{port}: {:?}", err))?;
         Ok(())
     }
@@ -417,6 +435,25 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         }
     }
 
+    /// Spawns a listener for the connections no longer issued by the dialog processors -- on this implementation,
+    /// they will be simply closed (in opposition to the [CompositeSocketServer], where they may be reutilized)
+    fn spawn_disconnection_task(&self, mut returned_connection_source: tokio::sync::mpsc::Receiver<(TcpStream, Option<NoStateType>)>) {
+        let interface_ip = self.interface_ip.clone();
+        let port = self.port;
+        tokio::spawn(async move {
+            while let Some((mut connection, _)) = returned_connection_source.recv().await {
+                if let Err(err) = connection.shutdown().await {
+                    let (client_ip, client_port) = connection.peer_addr()
+                        .map(|peer_addr| match peer_addr {
+                            SocketAddr::V4(v4) => (v4.ip().to_string(), v4.port()),
+                            SocketAddr::V6(v6) => (v6.ip().to_string(), v6.port()),
+                        })
+                        .unwrap_or_else(|err| (format!("<unknown -- err:{err}>"), 0));
+                    error!("`reactive-messaging::SocketServer`: ERROR in server @ {interface_ip}:{port} while shutting down the socket with client {client_ip}:{client_port}: {err}");
+                }
+            }
+        });
+    }
 }
 
 

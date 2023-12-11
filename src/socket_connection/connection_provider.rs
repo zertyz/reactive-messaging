@@ -316,6 +316,7 @@ mod tests {
         let mut connection_channel = ConnectionChannel::new();
         let mut receiver = connection_channel.receiver().expect("The `receiver` should be available at this point");
         tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;   // proves that the sender will block if the consumer is slower
             while let Some(connection) = receiver.recv().await {
                 received_count_ref.fetch_add(1, Relaxed);
             }
