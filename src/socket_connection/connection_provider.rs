@@ -181,7 +181,7 @@ impl ServerConnectionHandler {
                     // incoming connection
                     acceptance_result = listener.accept() => {
                         if let Err(err) = acceptance_result {
-                            error!("`reactive-messaging::SocketServer`: ERROR while accepting a connection for the server @ {listening_interface_and_port}: {:?}", err);
+                            error!("`reactive-messaging::IncomingConnectionHandler`: ERROR while accepting a connection for the server @ {listening_interface_and_port}: {:?}", err);
                             None
                         } else {
                             Some(acceptance_result.unwrap())
@@ -190,8 +190,8 @@ impl ServerConnectionHandler {
                     // shutdown signal
                     result = &mut network_event_loop_signaler => {
                         match result {
-                            Ok(())             => trace!("`reactive-messaging::SocketServer`: SHUTDOWN requested for the server @ {listening_interface_and_port} -- releasing the interface bind and bailing out of the network event loop"),
-                            Err(err) => error!("`reactive-messaging::SocketServer`: ERROR in the `shutdown signaler` for the server @ {listening_interface_and_port} (a server shutdown will be commanded now due to this occurrence): {:?}", err),
+                            Ok(())             => trace!("`reactive-messaging::IncomingConnectionHandler`: SHUTDOWN requested for the server @ {listening_interface_and_port} -- releasing the interface bind and bailing out of the network event loop"),
+                            Err(err) => error!("`reactive-messaging::IncomingConnectionHandler`: ERROR in the `shutdown signaler` for the server @ {listening_interface_and_port} (a server shutdown will be commanded now due to this occurrence): {:?}", err),
                         };
                         break
                     }
@@ -204,7 +204,7 @@ impl ServerConnectionHandler {
 
                 if let Err(unconsumed_connection) = sender.send(connection).await {
                     let client_address = unconsumed_connection.0.peer_addr().map(|peer_addr| peer_addr.to_string()).unwrap_or(String::from("<<couldn't determine the client's address>>"));
-                    error!("`reactive-messaging::SocketServer` BUG! -- The server @ {listening_interface_and_port} faced an ERROR when feeding an incoming connection (from '{client_address}') to the 'connections consumer': it had dropped the consumption receiver prematurely. The server's network event loop will be ABORTED and you should expect undefined behavior, as the application thinks the server is still running.");
+                    error!("`reactive-messaging::IncomingConnectionHandler` BUG! -- The server @ {listening_interface_and_port} faced an ERROR when feeding an incoming connection (from '{client_address}') to the 'connections consumer': it had dropped the consumption receiver prematurely. The server's network event loop will be ABORTED and you should expect undefined behavior, as the application thinks the server is still running.");
                     break;
                 }
             }

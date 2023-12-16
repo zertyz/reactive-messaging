@@ -230,7 +230,7 @@ pub struct GenericSocketServer<const CONFIG:        u64,
     interface_ip: String,
     /// The port to listen to incoming connections
     port: u16,
-    /// The abstraction containing the network look that accepts connections for us + facilities to start processing already
+    /// The abstraction containing the network loop that accepts connections for us + facilities to start processing already
     /// opened connections (enabling the "Composite Protocol Stacking" design pattern)
     connection_provider: Option<ServerConnectionHandler>,
     /// Signaler to cause [wait_for_shutdown()] to return
