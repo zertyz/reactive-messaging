@@ -278,6 +278,15 @@ impl ConnectionChannel {
             .map_err(|unconsumed_connection| ReceiverDroppedErr(unconsumed_connection.0))
     }
 
+    /// Returns a cloned version of the sender.\
+    /// Notice this method should be considered "advanced", as keeping
+    /// a cloned sender will prevent the channel from shutting down,
+    /// rendering [Self::close()] useless -- currently there is no way
+    /// for `close()` to detect this situation.
+    pub fn clone_sender(&self) -> tokio::sync::mpsc::Sender<TcpStream> {
+        self.sender.clone()
+    }
+
     /// Closes the channel (by dropping the sender), causing the receiver
     /// produced by [receiver()] to return `None`, indicating the
     /// end-of-stream to the consumer.
