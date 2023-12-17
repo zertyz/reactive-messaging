@@ -57,7 +57,6 @@ use reactive_mutiny::prelude::advanced::{
 use log::{error, trace, warn};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::Sender;
 
 
 /// Instantiates & allocates resources for a [GenericCompositeSocketServer], ready to be later started by [spawn_unresponsive_server_processor!()] or [spawn_responsive_server_processor!()].\
@@ -160,21 +159,6 @@ macro_rules! spawn_responsive_composite_server_processor {
 pub use spawn_responsive_composite_server_processor;
 
 
-/// See [GenericCompositeSocketServer::start()]
-#[macro_export]
-macro_rules! start_composite_server {
-    ($socket_server:        expr,
-     $connection_router_fn: expr) => {{
-        match &mut $socket_server {
-            CompositeSocketServer::Atomic    (generic_composite_socket_server)  =>  generic_composite_socket_server.start($connection_router_fn).await,
-            CompositeSocketServer::FullSync  (generic_composite_socket_server)  =>  generic_composite_socket_server.start($connection_router_fn).await,
-            CompositeSocketServer::Crossbeam (generic_composite_socket_server)  =>  generic_composite_socket_server.start($connection_router_fn).await,
-        }
-    }}
-}
-pub use start_composite_server;
-
-
 /// Represents a server built out of `CONFIG` (a `u64` version of [ConstConfig], from which the other const generic parameters derive).\
 /// Don't instantiate this struct directly -- use [new_socket_server!()] instead.
 pub enum CompositeSocketServer<const CONFIG:                    u64,
@@ -215,17 +199,26 @@ pub enum CompositeSocketServer<const CONFIG:                    u64,
       const SENDER_BUFFER:             usize>
  CompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, StateType, PROCESSOR_BUFFER, PROCESSOR_UNI_INSTRUMENTS, SENDER_BUFFER> {
 
-     /// See [GenericCompositeSocketServer::start()]
-     pub async fn start(&mut self,
-                        protocol_stacking_closure: impl FnMut(/*connection: */& tokio::net::TcpStream, /*last_state: */Option<StateType>) -> Option<tokio::sync::mpsc::Sender<TcpStream>> + Send + 'static)
-                       -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+     /// See [GenericCompositeSocketServer::start_with_single_protocol()]
+     pub async fn start_with_single_protocol(&mut self, connection_channel: ConnectionChannel)
+                                            -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
          match self {
-             CompositeSocketServer::Atomic    (generic_socket_server) => generic_socket_server.start(protocol_stacking_closure).await,
-             CompositeSocketServer::FullSync  (generic_socket_server) => generic_socket_server.start(protocol_stacking_closure).await,
-             CompositeSocketServer::Crossbeam (generic_socket_server) => generic_socket_server.start(protocol_stacking_closure).await,
+             CompositeSocketServer::Atomic    (generic_socket_server) => generic_socket_server.start_with_single_protocol(connection_channel).await,
+             CompositeSocketServer::FullSync  (generic_socket_server) => generic_socket_server.start_with_single_protocol(connection_channel).await,
+             CompositeSocketServer::Crossbeam (generic_socket_server) => generic_socket_server.start_with_single_protocol(connection_channel).await,
          }
      }
 
+     /// See [GenericCompositeSocketServer::start_with_routing_closure()]
+     pub async fn start_with_routing_closure(&mut self,
+                                             protocol_stacking_closure: impl FnMut(/*connection: */& tokio::net::TcpStream, /*last_state: */Option<StateType>) -> Option<tokio::sync::mpsc::Sender<TcpStream>> + Send + 'static)
+                                             -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+         match self {
+             CompositeSocketServer::Atomic    (generic_socket_server) => generic_socket_server.start_with_routing_closure(protocol_stacking_closure).await,
+             CompositeSocketServer::FullSync  (generic_socket_server) => generic_socket_server.start_with_routing_closure(protocol_stacking_closure).await,
+             CompositeSocketServer::Crossbeam (generic_socket_server) => generic_socket_server.start_with_routing_closure(protocol_stacking_closure).await,
+         }
+     }
 
      /// See [GenericCompositeSocketServer::shutdown_waiter()]
      pub fn shutdown_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
@@ -237,7 +230,7 @@ pub enum CompositeSocketServer<const CONFIG:                    u64,
      }
 
      /// See [GenericCompositeSocketServer::shutdown()]
-     pub async fn shutdown(self) {
+     pub async fn shutdown(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
          match self {
              CompositeSocketServer::Atomic    (generic_socket_server) => generic_socket_server.shutdown().await,
              CompositeSocketServer::FullSync  (generic_socket_server) => generic_socket_server.shutdown().await,
@@ -306,7 +299,24 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
         }
     }
 
-    /// Start to listen to connections -- effectively starting the server -- using the provided `protocol_stacking_closure` to
+    /// Start the server with a single processor (after calling either [Self::add_unresponsive_processor]
+    /// or [Self::add_responsive_processor] once) -- A.K.A. "The single Protocol Mode".\
+    /// See [Self::start_with_routing_closure()] if you want a server that shares connections among
+    /// different protocol processors.
+    ///
+    /// Start to listen to connections -- effectively starting the server -- using the provided `connection_channel` to
+    /// distribute the incoming connections.
+    pub async fn start_with_single_protocol(&mut self, connection_channel: ConnectionChannel)
+                                           -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+        // this closure will cause new connections will be sent to `connection_channel` and returned connections will be dropped
+        let connection_routing_closure = move |_connection: &TcpStream, last_state: Option<StateType>|
+            last_state.map_or_else(|| Some(connection_channel.clone_sender()),
+                                   |_| None);
+        self.start_with_routing_closure(connection_routing_closure).await
+
+    }
+
+    /// Start to listen to connections -- effectively starting the server -- using the provided `connection_routing_closure` to
     /// distribute the connections among the configured processors -- previously fed in by [Self::add_responsive_processor()] &
     /// [Self::add_unresponsive_processor()].
     ///
@@ -322,9 +332,9 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     /// This method returns an error in the following cases:
     ///   1) if the binding process fails;
     ///   2) if no processors were configured.
-    pub async fn start(&mut self,
-                       mut protocol_stacking_closure: impl FnMut(/*connection: */& tokio::net::TcpStream, /*last_state: */Option<StateType>) -> Option<tokio::sync::mpsc::Sender<TcpStream>> + Send + 'static)
-                      -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+    pub async fn start_with_routing_closure(&mut self,
+                                            mut connection_routing_closure: impl FnMut(/*connection: */& tokio::net::TcpStream, /*last_state: */Option<StateType>) -> Option<tokio::sync::mpsc::Sender<TcpStream>> + Send + 'static)
+                                            -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         let mut connection_provider = ServerConnectionHandler::new(&self.interface_ip, self.port).await
             .map_err(|err| format!("couldn't start the Connection Provider server event loop: {err}"))?;
         let mut new_connections_source = connection_provider.connection_receiver()
@@ -350,14 +360,14 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
                     // process newly incoming connections
                     new_connection = new_connections_source.recv() => {
                         let Some(new_connection) = new_connection else { break };
-                        let sender = protocol_stacking_closure(&new_connection, None);
+                        let sender = connection_routing_closure(&new_connection, None);
                         (new_connection, sender)
                     },
 
                     // process connections returned by the processors (after they ended processing them)
                     returned_connection_and_state = returned_connections_source.recv() => {
                         let Some((returned_connection, last_state)) = returned_connection_and_state else { break };
-                        let sender = protocol_stacking_closure(&returned_connection, last_state);
+                        let sender = connection_routing_closure(&returned_connection, last_state);
                         (returned_connection, sender)
                     },
                 };
@@ -393,7 +403,6 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
             // loop ended
             trace!("`reactive-messaging::CompositeSocketServer`: The 'Connection Routing Task' for server @ {interface_ip}:{port} ended -- hopefully, due to a graceful server shutdown.");
         });
-
         Ok(())
     }
 
@@ -541,32 +550,17 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     /// A shutdown is considered graceful if it could be accomplished in less than `timeout_ms` milliseconds.\
     /// It is a good practice that the `connection_events_handler()` you provided when starting the server
     /// uses this time to inform all clients that a remote-initiated disconnection (due to a shutdown) is happening.
-    pub async fn shutdown(mut self) {
-        if !self.returned_connections_sink.is_closed() {
-            warn!("GenericCompositeSocketServer: Shutdown asked & initiated for server @ {}:{}", self.interface_ip, self.port);
-        } else {
-            warn!("GenericCompositeSocketServer: BUG!! Shutdown asked for server @ {}:{}, but it seems the server is not running", self.interface_ip, self.port);
-        }
-    }
-
-    /// Spawns a listener for the connections no longer issued by the dialog processors -- on this implementation,
-    /// they will be simply closed (in opposition to the [CompositeSocketServer], where they may be reutilized)
-    fn spawn_disconnection_task(&self, mut returned_connection_source: tokio::sync::mpsc::Receiver<(TcpStream, Option<StateType>)>) {
-        let interface_ip = self.interface_ip.clone();
-        let port = self.port;
-        tokio::spawn(async move {
-            while let Some((mut connection, _)) = returned_connection_source.recv().await {
-                if let Err(err) = connection.shutdown().await {
-                    let (client_ip, client_port) = connection.peer_addr()
-                        .map(|peer_addr| match peer_addr {
-                            SocketAddr::V4(v4) => (v4.ip().to_string(), v4.port()),
-                            SocketAddr::V6(v6) => (v6.ip().to_string(), v6.port()),
-                        })
-                        .unwrap_or_else(|err| (format!("<unknown -- err:{err}>"), 0));
-                    error!("`reactive-messaging::SocketServer`: ERROR in server @ {interface_ip}:{port} while shutting down the socket with client {client_ip}:{client_port}: {err}");
-                }
+    pub async fn shutdown(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        match self.connection_provider.take() {
+            Some(connection_provider) => {
+                warn!("GenericCompositeSocketServer: Shutdown asked & initiated for server @ {}:{}", self.interface_ip, self.port);
+                connection_provider.shutdown().await;
+                Ok(())
             }
-        });
+            None => {
+                Err(Box::from("GenericCompositeSocketServer: Shutdown requested, but the service was not started -- no `self.start_with_*()` was called. Ignoring..."))
+            }
+        }
     }
 }
 
@@ -631,13 +625,15 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test)]
     async fn doc_usage() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
+        const PORT: u16 = PORT_START+4;     // All the following servers are started on this same port, ensuring the `shutdown()` proceedings are working fine
+
         // demonstrates how to build an unresponsive server
         ///////////////////////////////////////////////////
         // using fully typed generic functions that will work with all possible configs
         let mut server = new_composite_socket_server!(
             ConstConfig::default(),
             "127.0.0.1",
-            PORT_START+4,
+            PORT,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             () );
@@ -661,9 +657,9 @@ mod tests {
                                  -> impl Stream<Item=()> {
             client_messages_stream.map(|_payload| ())
         }
-        server.start(move |_, last_state| last_state.map_or_else(|| Some(connection_channel.clone_sender()), |_| None)).await?;
+        server.start_with_single_protocol(connection_channel).await?;
         let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown().await;
+        server.shutdown().await?;
         shutdown_waiter().await?;
 
         // demonstrates how to build a responsive server
@@ -672,7 +668,7 @@ mod tests {
         let mut server = new_composite_socket_server!(
             ConstConfig::default(),
             "127.0.0.1",
-            PORT_START+4,
+            PORT,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             () );
@@ -690,9 +686,9 @@ mod tests {
                                -> impl Stream<Item=DummyClientAndServerMessages> {
             client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         }
-        server.start(move |_, last_state| last_state.map_or_else(|| Some(connection_channel.clone_sender()), |_| None)).await?;
+        server.start_with_single_protocol(connection_channel).await?;
         let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown().await;
+        server.shutdown().await?;
         shutdown_waiter().await?;
 
         // demonstrates how to use it with closures -- also allowing for any channel in the configs
@@ -700,7 +696,7 @@ mod tests {
         let mut server = new_composite_socket_server!(
             ConstConfig::default(),
             "127.0.0.1",
-            PORT_START+4,
+            PORT,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             () );
@@ -708,9 +704,9 @@ mod tests {
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         )?;
-        server.start(move |_, last_state| last_state.map_or_else(|| Some(connection_channel.clone_sender()), |_| None)).await?;
+        server.start_with_single_protocol(connection_channel).await?;
         let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown().await;
+        server.shutdown().await?;
         shutdown_waiter().await?;
 
         // demonstrates how to use the internal & generic implementation
@@ -732,14 +728,14 @@ mod tests {
                                                                      ProcessorUniType,
                                                                      SenderChannelType,
                                                                      ()>
-                                                                 :: new("127.0.0.1", PORT_START+5);
+                                                                 :: new("127.0.0.1", PORT);
         let connection_channel = server.spawn_unresponsive_processor(
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await?;
-        server.start(move |_, last_state| last_state.map_or_else(|| Some(connection_channel.clone_sender()), |_| None)).await?;
+        server.start_with_single_protocol(connection_channel).await?;
         let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown().await;
+        server.shutdown().await?;
         shutdown_waiter().await?;
 
         Ok(())
@@ -752,11 +748,11 @@ mod tests {
     ///   4) notify any waiter on the server (after all the above steps are done) within the given timeout
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     async fn shutdown_process() {
-        const PORT: u16 = PORT_START+6;
+        const PORT: u16 = PORT_START+5;
 
         // the shutdown timeout, in milliseconds
         let expected_max_shutdown_duration_ms = 543;
-        // the tollerance, in milliseconds -- a too small shutdown duration means the server didn't wait for the client's disconnection; too much (possibly eternal) means it didn't enforce the timeout
+        // the tolerance, in milliseconds -- a too small shutdown duration means the server didn't wait for the client's disconnection; too much (possibly eternal) means it didn't enforce the timeout
         let max_time_ms = 20;
 
         // sensors
@@ -807,13 +803,13 @@ mod tests {
             move |_, _, _, client_messages: MessagingMutinyStream<ProcessorUniType>| {
                 let server_received_messages_count = Arc::clone(&server_received_messages_count_ref1);
                 client_messages.map(move |client_message| {
-                    std::mem::forget(client_message);   // TODO 2023-07-15: investigate this reactive-mutiny related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
+                    std::mem::forget(client_message);   // TODO 2023-07-15: investigate this reactive-mutiny/rust related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
                     server_received_messages_count.fetch_add(1, Relaxed);
                     DummyClientAndServerMessages::FloodPing
                 })
             }
         ).await.expect("Spawning a server processor");
-        server.start(move |_, last_state| last_state.map_or_else(|| Some(connection_channel.clone_sender()), |_| None)).await.expect("Starting the server");
+        server.start_with_single_protocol(connection_channel).await.expect("Starting the server");
 
         // start a client that will engage in a flood ping with the server when provoked (never closing the connection)
         let mut client = new_socket_client!(
@@ -828,7 +824,7 @@ mod tests {
             move |_, _, _, server_messages| {
                 let client_received_messages_count = Arc::clone(&client_received_messages_count_ref1);
                 server_messages.map(move |server_message| {
-                    std::mem::forget(server_message);   // TODO 2023-07-15: investigate this reactive-mutiny related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
+                    std::mem::forget(server_message);   // TODO 2023-07-15: investigate this reactive-mutiny/rust related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
                     client_received_messages_count.fetch_add(1, Relaxed);
                     DummyClientAndServerMessages::FloodPing
                 })
@@ -841,7 +837,8 @@ mod tests {
         }
         // shutdown the server & wait until the shutdown process is complete
         let wait_for_server_shutdown = server.shutdown_waiter();
-        server.shutdown().await;
+        server.shutdown().await
+            .expect("ERROR Signaling the server of the shutdown intention");
         let start = std::time::SystemTime::now();
         _ = tokio::time::timeout(Duration::from_secs(5), wait_for_server_shutdown()).await
             .expect("ERROR Waiting for the server to live it's life and to complete the shutdown process");
