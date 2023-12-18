@@ -494,8 +494,8 @@ mod tests {
             AtomicU32,
             Ordering::Relaxed,
         },
+        net::ToSocketAddrs,
     };
-    use std::net::ToSocketAddrs;
     use reactive_mutiny::{prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic}, types::{ChannelCommon, ChannelUni, ChannelProducer}};
     use futures::stream;
     use tokio::sync::Mutex;

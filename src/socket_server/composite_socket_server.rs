@@ -584,9 +584,11 @@ mod tests {
         sync::atomic::{AtomicU32, Ordering::Relaxed},
         time::Duration,
     };
+    use std::sync::atomic::AtomicBool;
     use serde::{Deserialize, Serialize};
     use futures::StreamExt;
     use tokio::sync::Mutex;
+    use crate::spawn_unresponsive_client_processor;
 
 
     /// The start of the port range for the tests in this module -- so not to clash with other modules when tests are run in parallel
@@ -841,7 +843,7 @@ mod tests {
             .expect("ERROR Signaling the server of the shutdown intention");
         let start = std::time::SystemTime::now();
         _ = tokio::time::timeout(Duration::from_secs(5), wait_for_server_shutdown()).await
-            .expect("ERROR Waiting for the server to live it's life and to complete the shutdown process");
+            .expect("TIMED OUT (>5s) Waiting for the server to live it's life and to complete the shutdown process");
         let elapsed_ms = start.elapsed().unwrap().as_millis();
         assert!(client_received_messages_count_ref2.load(Relaxed) > 1, "The client didn't receive any messages (not even the 'server is shutting down' notification)");
         assert!(server_received_messages_count_ref2.load(Relaxed) > 1, "The server didn't receive any messages (not even 'gracefully disconnecting' after being notified that the server is shutting down)");
@@ -849,6 +851,191 @@ mod tests {
                 "The server shutdown (of a never complying client) didn't complete in a reasonable time, meaning the shutdown code is wrong. Maximum acceptable time: {}ms; Measured Time: {}ms",
                 max_time_ms, elapsed_ms);
     }
+
+    /// assures the "Composite Protocol Stacking" pattern is supported & correctly implemented:
+    ///   1) New connections are always handled by the first processor
+    ///   2) Connections can be routed freely among processors
+    ///   3) "Last States" are taken into account, viabilizing the "connection routing closure"
+    ///   4) Connections can be closed after the last processor are through with them
+    /// -- for these, all processors (but the first) will answer with a "welcome message" (this is the suggested behavior).
+    #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    async fn composite_protocol_stacking_pattern() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+
+        const PORT: u16 = PORT_START+6;
+
+        let mut server = new_composite_socket_server!(
+            ConstConfig::default(),
+            "127.0.0.1",
+            PORT,
+            String,
+            String,
+            Protocols );
+
+        enum Protocols {
+            IncomingClient,
+            WelcomeAuthenticatedFriend,
+            AccountSettings,
+            GoodbyeOptions,
+            Disconnect,
+        }
+        impl Default for Protocols {
+            fn default() -> Self {
+                Self::IncomingClient
+            }
+        }
+
+        // first level processors shouldn't do anything until the client says something meaningful -- newcomers must know, a priori, who they are talking to (a security measure)
+        let incoming_client_processor_greeted = Arc::new(AtomicBool::new(false));
+        let incoming_client_processor_greeted_ref = Arc::clone(&incoming_client_processor_greeted);
+        let incoming_client_processor = spawn_unresponsive_composite_server_processor!(server,
+            |_| future::ready(()),
+            move |_, _, peer, client_messages_stream| {
+                let incoming_client_processor_greeted_ref = Arc::clone(&incoming_client_processor_greeted_ref);
+                client_messages_stream.then(move |_payload| {
+                    let peer = Arc::clone(&peer);
+                    incoming_client_processor_greeted_ref.store(true, Relaxed);
+                    async move {
+                        peer.send_async(format!("`IncomingClient`: New peer {peer:?} ended up initial authentication proceedings. SAY SOMETHING and you will be routed to 'WelcomeAuthenticatedFriend'")).await
+                            .expect("Sending failed");
+                        peer.set_state(Some(Protocols::WelcomeAuthenticatedFriend)).await;
+                        peer.flush_and_close(Duration::from_secs(1)).await;
+                    }
+                })
+            }
+        )?;
+
+        // deeper processors should inform the client that they are now subjected to a new processor / protocol, so they may adjust accordingly
+        let welcome_authenticated_friend_processor_greeted = Arc::new(AtomicBool::new(false));
+        let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted);
+        let welcome_authenticated_friend_processor = spawn_unresponsive_composite_server_processor!(server,
+            |connection_event| async {
+                match connection_event {
+                    ConnectionEvent::PeerConnected { peer } =>
+                        peer.send_async(format!("`WelcomeAuthenticatedFriend`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'AccountSettings'")).await
+                            .expect("Sending failed"),
+                    _ => (),
+                }
+            },
+            move |_, _, peer, client_messages_stream| {
+                let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted_ref);
+                client_messages_stream.then(move |_payload| {
+                    let peer = Arc::clone(&peer);
+                    welcome_authenticated_friend_processor_greeted_ref.store(true, Relaxed);
+                    async move {
+                        peer.set_state(Some(Protocols::AccountSettings)).await;
+                        peer.flush_and_close(Duration::from_secs(1)).await;
+                    }
+                })
+            }
+        )?;
+
+        let account_settings_processor_greeted = Arc::new(AtomicBool::new(false));
+        let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted);
+        let account_settings_processor = spawn_unresponsive_composite_server_processor!(server,
+            |connection_event| async {
+                match connection_event {
+                    ConnectionEvent::PeerConnected { peer } =>
+                        peer.send_async(format!("`AccountSettings`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'GoodbyeOptions'")).await
+                            .expect("Sending failed"),
+                    _ => (),
+                }
+            },
+            move |_, _, peer, client_messages_stream| {
+                let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted_ref);
+                client_messages_stream.then(move |_payload| {
+                    let peer = Arc::clone(&peer);
+                    account_settings_processor_greeted_ref.store(true, Relaxed);
+                    async move {
+                        peer.set_state(Some(Protocols::GoodbyeOptions)).await;
+                        peer.flush_and_close(Duration::from_secs(1)).await;
+                    }
+                })
+            }
+        )?;
+
+        let goodbye_options_processor_greeted = Arc::new(AtomicBool::new(false));
+        let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted);
+        let goodbye_options_processor = spawn_unresponsive_composite_server_processor!(server,
+            |connection_event| async {
+                match connection_event {
+                    ConnectionEvent::PeerConnected { peer } =>
+                        peer.send_async(format!("`GoodbyeOptions`: Now dealing with client {peer:?}. SAY SOMETHING and you will be DISCONNECTED, as our talking is over. Thank you.")).await
+                            .expect("Sending failed"),
+                    _ => (),
+                }
+            },
+            move |_, _, peer, client_messages_stream| {
+                let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted_ref);
+                client_messages_stream.then(move |_payload| {
+                    let peer = Arc::clone(&peer);
+                    goodbye_options_processor_greeted_ref.store(true, Relaxed);
+                    async move {
+                        peer.set_state(Some(Protocols::Disconnect)).await;
+                        peer.flush_and_close(Duration::from_secs(1)).await;
+                    }
+                })
+            }
+        )?;
+
+        // this closure will...
+        let connection_routing_closure = move |_connection: &TcpStream, last_state: Option<Protocols>|
+            if let Some(last_state) = last_state {
+                match last_state {
+                    Protocols::IncomingClient             => Some(incoming_client_processor.clone_sender()),
+                    Protocols::WelcomeAuthenticatedFriend => Some(welcome_authenticated_friend_processor.clone_sender()),
+                    Protocols::AccountSettings            => Some(account_settings_processor.clone_sender()),
+                    Protocols::GoodbyeOptions             => Some(goodbye_options_processor.clone_sender()),
+                    Protocols::Disconnect                 => None,
+                }
+            } else {
+                Some(incoming_client_processor.clone_sender())
+            };
+        server.start_with_routing_closure(connection_routing_closure).await?;
+        let server_shutdown_waiter = server.shutdown_waiter();
+
+        // start the client that will only connect and listen to messages until it is disconnected
+        let mut client = new_socket_client!(
+            ConstConfig::default(),
+            "127.0.0.1",
+            PORT,
+            String,
+            String);
+        spawn_responsive_client_processor!(
+            client,
+            |connection_event| async {
+                match connection_event {
+                    ConnectionEvent::PeerConnected { peer }                        => peer.send_async(String::from("Hello! Am I in?")).await.expect("Sending failed"),
+                    ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => (),
+                    ConnectionEvent::ApplicationShutdown                           => (),
+                }
+            },
+            move |_, _, _, server_messages| server_messages.map(|msg| {
+                println!("RECEIVED: {msg} -- answering with 'OK'");
+                String::from("OK")
+            })
+        )?;
+
+        let client_waiter = client.shutdown_waiter();
+        // wait for the client to do its stuff
+        _ = tokio::time::timeout(Duration::from_secs(5), client_waiter()).await
+            .expect("TIMED OUT (>5s) Waiting for the client & server to do their stuff & disconnect the client");
+        // // // wait for the client to connect
+        // // while client_peer_ref2.lock().await.is_none() {
+        //     tokio::time::sleep(Duration::from_millis(10000)).await;
+        // // }
+
+        // shutdown the server & wait until the shutdown process is complete
+        server.shutdown().await?;
+        server_shutdown_waiter().await?;
+
+        assert!(incoming_client_processor_greeted.load(Relaxed),              "`IncomingClient` processor wasn't requested");
+        assert!(welcome_authenticated_friend_processor_greeted.load(Relaxed), "`WelcomeAuthenticatedFriend` processor wasn't requested");
+        assert!(account_settings_processor_greeted.load(Relaxed),             "`AccountSettings` processor wasn't requested");
+        assert!(goodbye_options_processor_greeted.load(Relaxed),              "`GoodbyeOptions` processor wasn't requested");
+
+        Ok(())
+    }
+
 
     #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
     enum DummyClientAndServerMessages {
