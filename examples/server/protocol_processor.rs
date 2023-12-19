@@ -57,7 +57,7 @@ impl ServerProtocolProcessor {
                 //let _ = processor_uni.try_send(|slot| *slot = ClientMessages::Quit);
                 self.sessions.remove(&peer.peer_id);
             }
-            ConnectionEvent::ApplicationShutdown => {
+            ConnectionEvent::LocalServiceTermination => {
                 info!("Ping-Pong server shutdown requested. Notifying all peers...");
             }
         }

@@ -33,7 +33,7 @@ use crate::{
         peer::Peer,
         socket_connection_handler::SocketConnectionHandler,
     },
-    socket_client::common::upgrade_to_shutdown_and_connected_state_tracking,
+    socket_client::common::upgrade_to_connection_event_tracking,
     types::{
         ConnectionEvent,
         MessagingMutinyStream,
@@ -199,21 +199,21 @@ pub enum SocketClient<const CONFIG:                    u64,
       const SENDER_BUFFER:             usize>
  SocketClient<CONFIG, RemoteMessages, LocalMessages, PROCESSOR_BUFFER, PROCESSOR_UNI_INSTRUMENTS, SENDER_BUFFER> {
 
-     /// See [GenericSocketClient::shutdown_waiter()]
-     pub fn shutdown_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
+     /// See [GenericSocketClient::termination_waiter()]
+     pub fn termination_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
          match self {
-             SocketClient::Atomic    (generic_socket_client) => Box::new(generic_socket_client.shutdown_waiter()),
-             SocketClient::FullSync  (generic_socket_client) => Box::new(generic_socket_client.shutdown_waiter()),
-             SocketClient::Crossbeam (generic_socket_client) => Box::new(generic_socket_client.shutdown_waiter()),
+             SocketClient::Atomic    (generic_socket_client) => Box::new(generic_socket_client.termination_waiter()),
+             SocketClient::FullSync  (generic_socket_client) => Box::new(generic_socket_client.termination_waiter()),
+             SocketClient::Crossbeam (generic_socket_client) => Box::new(generic_socket_client.termination_waiter()),
          }
      }
 
-     /// See [GenericSocketClient::shutdown()]
-     pub fn shutdown(self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     /// See [GenericSocketClient::terminate()]
+     pub fn terminate(self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
          match self {
-             SocketClient::Atomic    (generic_socket_client) => generic_socket_client.shutdown(timeout_ms),
-             SocketClient::FullSync  (generic_socket_client) => generic_socket_client.shutdown(timeout_ms),
-             SocketClient::Crossbeam (generic_socket_client) => generic_socket_client.shutdown(timeout_ms),
+             SocketClient::Atomic    (generic_socket_client) => generic_socket_client.terminate(timeout_ms),
+             SocketClient::FullSync  (generic_socket_client) => generic_socket_client.terminate(timeout_ms),
+             SocketClient::Crossbeam (generic_socket_client) => generic_socket_client.terminate(timeout_ms),
          }
      }
 }
@@ -241,9 +241,9 @@ pub struct GenericSocketClient<const CONFIG:        u64,
     /// The port to listen to incoming connections
     port: u16,
     /// Signaler to stop this client
-    client_shutdown_signaler: Option<tokio::sync::oneshot::Sender<u32>>,
-    /// Signaler to cause [wait_for_shutdown()] to return
-    local_shutdown_receiver: Option<tokio::sync::oneshot::Receiver<()>>,
+    client_termination_signaler: Option<tokio::sync::oneshot::Sender<u32>>,
+    /// Signaler to cause [Self::termination_waiter()]'s closure to return
+    local_termination_is_complete_receiver: Option<tokio::sync::oneshot::Receiver<()>>,
     _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,SenderChannel)>
 }
 impl<const CONFIG:        u64,
@@ -264,8 +264,8 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
             connected: Arc::new(AtomicBool::new(false)),
             ip: ip.into(),
             port,
-            client_shutdown_signaler: None,
-            local_shutdown_receiver:  None,
+            client_termination_signaler: None,
+            local_termination_is_complete_receiver:  None,
             _phantom:                 PhantomData,
         }
     }
@@ -273,7 +273,7 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
     /// Spawns a task to start the local client, returning immediately.\
     /// The given `dialog_processor_builder_fn` will be called when the connection is established and should return a `Stream`
     /// that will produce non-futures & non-fallible items that **won't be sent to the server**:
-    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and shutdown events. Sign it as:
+    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events. Sign it as:
     ///     ```nocompile
     ///     async fn connection_events_handler<const CONFIG:  u64,
     ///                                        LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
@@ -307,14 +307,14 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
                                              -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
-        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
-        self.client_shutdown_signaler = Some(client_shutdown_sender);
-        self.local_shutdown_receiver = Some(local_shutdown_receiver);
+        let (client_termination_sender, client_termination_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let (local_termination_is_complete_sender, local_termination_is_complete_receiver) = tokio::sync::oneshot::channel::<()>();
+        self.client_termination_signaler = Some(client_termination_sender);
+        self.local_termination_is_complete_receiver = Some(local_termination_is_complete_receiver);
         let ip = self.ip.clone();
         let port = self.port;
 
-        let connection_events_callback = upgrade_to_shutdown_and_connected_state_tracking(&self.connected, local_shutdown_sender, connection_events_callback);
+        let connection_events_callback = upgrade_to_connection_event_tracking(&self.connected, local_termination_is_complete_sender, connection_events_callback);
 
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
         let connection = connection_manager.connect_retryable().await
@@ -322,9 +322,9 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         tokio::spawn(async move {
             let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
             let result = socket_communications_handler.client_for_unresponsive_text_protocol(connection,
-                                                                                                             client_shutdown_receiver,
-                                                                                                             connection_events_callback,
-                                                                                                             dialog_processor_builder_fn).await
+                                                                                             client_termination_receiver,
+                                                                                             connection_events_callback,
+                                                                                             dialog_processor_builder_fn).await
                 .map_err(|err| format!("Error while executing the dialog processor: {err}"));
             match result {
                 Ok((mut socket, _)) => {
@@ -343,7 +343,7 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
     /// Spawns a task to start the local client, returning immediately,
     /// The given `dialog_processor_builder_fn` will be called when the connection is established and should return a `Stream`
     /// that will produce non-futures & non-fallible items that *will be sent to the server*:
-    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and shutdown events. Sign it as:
+    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events. Sign it as:
     ///     ```nocompile
     ///     async fn connection_events_handler<const CONFIG:  u64,
     ///                                        LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
@@ -378,14 +378,14 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
 
                                            where LocalMessages: ResponsiveMessages<LocalMessages> {
 
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
-        self.client_shutdown_signaler = Some(server_shutdown_sender);
-        self.local_shutdown_receiver = Some(local_shutdown_receiver);
+        let (server_termination_sender, server_termination_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let (local_termination_is_complete_sender, local_termination_is_complete_receiver) = tokio::sync::oneshot::channel::<()>();
+        self.client_termination_signaler = Some(server_termination_sender);
+        self.local_termination_is_complete_receiver = Some(local_termination_is_complete_receiver);
         let ip = self.ip.clone();
         let port = self.port;
 
-        let connection_events_callback = upgrade_to_shutdown_and_connected_state_tracking(&self.connected, local_shutdown_sender, connection_events_callback);
+        let connection_events_callback = upgrade_to_connection_event_tracking(&self.connected, local_termination_is_complete_sender, connection_events_callback);
 
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
         let connection = connection_manager.connect_retryable().await
@@ -393,7 +393,7 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         tokio::spawn(async move {
             let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
             let result = socket_communications_handler.client_for_responsive_text_protocol(connection,
-                                                                                           server_shutdown_receiver,
+                                                                                           server_termination_receiver,
                                                                                            connection_events_callback,
                                                                                            dialog_processor_builder_fn).await
                 .map_err(|err| format!("Error while executing the dialog processor: {err}"));
@@ -411,39 +411,39 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         Ok(())
     }
 
-    /// Returns an async closure that blocks until [Self::shutdown()] is called.
+    /// Returns an async closure that blocks until [Self::terminate()] is called.
     /// Example:
     /// ```no_compile
     ///     self.spawn_the_client(logic...);
-    ///     self.shutdown_waiter()().await;
-    pub fn shutdown_waiter(&mut self) -> impl FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> {
-        let mut local_shutdown_receiver = self.local_shutdown_receiver.take();
+    ///     self.termination_waiter()().await;
+    pub fn termination_waiter(&mut self) -> impl FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> {
+        let mut local_termination_receiver = self.local_termination_is_complete_receiver.take();
         move || Box::pin({
             async move {
-                if let Some(local_shutdown_receiver) = local_shutdown_receiver.take() {
-                    match local_shutdown_receiver.await {
+                if let Some(local_termination_receiver) = local_termination_receiver.take() {
+                    match local_termination_receiver.await {
                         Ok(()) => {
                             Ok(())
                         },
-                        Err(err) => Err(Box::from(format!("GenericSocketClient::wait_for_shutdown(): It is no longer possible to tell when the client will be shutdown: `one_shot` signal error: {err}")))
+                        Err(err) => Err(Box::from(format!("GenericSocketClient::termination_waiter(): It is no longer possible to tell when the client will be terminated: `one_shot` signal error: {err}")))
                     }
                 } else {
-                    Err(Box::from("GenericSocketClient: \"wait for shutdown\" requested, but the client was not started (or a previous shutdown was commanded) at the moment `shutdown_waiter()` was called"))
+                    Err(Box::from("GenericSocketClient: \"wait for termination\" requested, but the client was not started (or a previous service termination was commanded) at the moment `termination_waiter()` was called"))
                 }
             }
         })
     }
 
-    /// Notifies the client it is time to shutdown.\
-    /// A shutdown is considered graceful if it could be accomplished in less than `timeout_ms` milliseconds.\
+    /// Notifies the client it is time to terminate.\
     /// It is a good practice that the `connection_events_handler()` you provided when starting the client
-    /// uses this time to inform the server that a client-initiated disconnection (due to a local shutdown) is happening.
-    pub fn shutdown(mut self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        match self.client_shutdown_signaler.take() {
+    /// informs the server that a client-initiated disconnection (due to the call to this method) is happening
+    /// -- and the protocol is encouraged to support that.
+    pub fn terminate(mut self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        match self.client_termination_signaler.take() {
             Some(server_sender) => {
                 warn!("GenericSocketClient: Shutdown asked & initiated for client connected @ {}:{} -- timeout: {timeout_ms}ms", self.ip, self.port);
                 if let Err(_sent_value) = server_sender.send(timeout_ms) {
-                    Err(Box::from("GenericSocketServer BUG: couldn't send shutdown signal to the network loop. Program is, likely, hanged. Please, investigate and fix!"))
+                    Err(Box::from("GenericSocketServer BUG: couldn't send termination signal to the network loop. Program is, likely, hanged. Please, investigate and fix!"))
                 } else {
                     Ok(())
                 }
@@ -531,9 +531,9 @@ mod tests {
                                  -> impl Stream<Item=()> {
             client_messages_stream.map(|_payload| ())
         }
-        let shutdown_waiter = client.shutdown_waiter();
-        client.shutdown(200)?;
-        shutdown_waiter().await?;
+        let wait_for_termination = client.termination_waiter();
+        client.terminate(200)?;
+        wait_for_termination().await?;
 
         // demonstrates how to build a responsive server
         ////////////////////////////////////////////////
@@ -558,9 +558,9 @@ mod tests {
                                -> impl Stream<Item=DummyClientAndServerMessages> {
             client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         }
-        let shutdown_waiter = client.shutdown_waiter();
-        client.shutdown(200)?;
-        shutdown_waiter().await?;
+        let wait_for_termination = client.termination_waiter();
+        client.terminate(200)?;
+        wait_for_termination().await?;
 
         // demonstrates how to use it with closures -- also allowing for any channel in the configs
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -574,9 +574,9 @@ mod tests {
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         )?;
-        let shutdown_waiter = client.shutdown_waiter();
-        client.shutdown(200)?;
-        shutdown_waiter().await?;
+        let wait_for_termination = client.termination_waiter();
+        client.terminate(200)?;
+        wait_for_termination().await?;
 
         // demonstrates how to use the concrete type
         ////////////////////////////////////////////
@@ -602,9 +602,9 @@ mod tests {
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await?;
-        let shutdown_waiter = client.shutdown_waiter();
-        client.shutdown(200)?;
-        shutdown_waiter().await?;
+        let wait_for_termination = client.termination_waiter();
+        client.terminate(200)?;
+        wait_for_termination().await?;
 
         Ok(())
     }

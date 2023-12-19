@@ -26,7 +26,7 @@ use crate::{
         socket_connection_handler::SocketConnectionHandler,
         connection_provider::{ServerConnectionHandler,ConnectionChannel},
     },
-    socket_server::common::upgrade_to_shutdown_tracking,
+    socket_server::common::upgrade_to_termination_tracking,
     types::{
         ConnectionEvent,
         MessagingMutinyStream,
@@ -220,21 +220,21 @@ pub enum CompositeSocketServer<const CONFIG:                    u64,
          }
      }
 
-     /// See [GenericCompositeSocketServer::shutdown_waiter()]
-     pub fn shutdown_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
+     /// See [GenericCompositeSocketServer::termination_waiter()]
+     pub fn termination_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
          match self {
-             CompositeSocketServer::Atomic    (generic_socket_server) => Box::new(generic_socket_server.shutdown_waiter()),
-             CompositeSocketServer::FullSync  (generic_socket_server) => Box::new(generic_socket_server.shutdown_waiter()),
-             CompositeSocketServer::Crossbeam (generic_socket_server) => Box::new(generic_socket_server.shutdown_waiter()),
+             CompositeSocketServer::Atomic    (generic_socket_server) => Box::new(generic_socket_server.termination_waiter()),
+             CompositeSocketServer::FullSync  (generic_socket_server) => Box::new(generic_socket_server.termination_waiter()),
+             CompositeSocketServer::Crossbeam (generic_socket_server) => Box::new(generic_socket_server.termination_waiter()),
          }
      }
 
-     /// See [GenericCompositeSocketServer::shutdown()]
-     pub async fn shutdown(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     /// See [GenericCompositeSocketServer::terminate()]
+     pub async fn terminate(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
          match self {
-             CompositeSocketServer::Atomic    (generic_socket_server) => generic_socket_server.shutdown().await,
-             CompositeSocketServer::FullSync  (generic_socket_server) => generic_socket_server.shutdown().await,
-             CompositeSocketServer::Crossbeam (generic_socket_server) => generic_socket_server.shutdown().await,
+             CompositeSocketServer::Atomic    (generic_socket_server) => generic_socket_server.terminate().await,
+             CompositeSocketServer::FullSync  (generic_socket_server) => generic_socket_server.terminate().await,
+             CompositeSocketServer::Crossbeam (generic_socket_server) => generic_socket_server.terminate().await,
          }
      }
 
@@ -264,8 +264,8 @@ pub struct GenericCompositeSocketServer<const CONFIG:        u64,
     /// The abstraction containing the network loop that accepts connections for us + facilities to start processing already
     /// opened connections (enabling the "Composite Protocol Stacking" design pattern)
     connection_provider: Option<ServerConnectionHandler>,
-    /// Signaler to cause [wait_for_shutdown()] to return
-    processor_shutdown_complete_receivers:  Option<Vec<tokio::sync::oneshot::Receiver<()>>>,
+    /// Signalers to cause [Self::termination_waiter()]'s closure to return (once they all dispatch their signals)
+    processor_termination_complete_receivers:  Option<Vec<tokio::sync::oneshot::Receiver<()>>>,
     /// Connection returned by processors after they are done with them -- these connections
     /// may be route to another processor if "composite protocol stacking" is in play.
     returned_connections_source: Option<tokio::sync::mpsc::Receiver<(TcpStream, Option<StateType>)>>,
@@ -292,7 +292,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
             interface_ip:                           interface_ip.into(),
             port,
             connection_provider:                    None,
-            processor_shutdown_complete_receivers:  Some(vec![]),
+            processor_termination_complete_receivers:  Some(vec![]),
             returned_connections_source:            Some(returned_connections_source),
             returned_connections_sink,
             _phantom:                               PhantomData,
@@ -401,7 +401,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
                 }
             }
             // loop ended
-            trace!("`reactive-messaging::CompositeSocketServer`: The 'Connection Routing Task' for server @ {interface_ip}:{port} ended -- hopefully, due to a graceful server shutdown.");
+            trace!("`reactive-messaging::CompositeSocketServer`: The 'Connection Routing Task' for server @ {interface_ip}:{port} ended -- hopefully, due to a graceful server termination.");
         });
         Ok(())
     }
@@ -409,7 +409,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     /// Spawns a task to start the local server, returning immediately.\
     /// The given `dialog_processor_builder_fn` will be called for each new connection and should return a `Stream`
     /// that will produce non-futures & non-fallible items that **won't be sent to the client**:
-    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and shutdown events (possibly to manage sessions). Sign it as:
+    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events (possibly to manage sessions). Sign it as:
     ///     ```nocompile
     ///     async fn connection_events_handler<const CONFIG:  u64,
     ///                                        LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
@@ -442,10 +442,10 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
 
                                              -> Result<ConnectionChannel, Box<dyn std::error::Error + Sync + Send>> {
 
-        // configure this processor's "shutdown is complete" signaler
-        let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
-        self.processor_shutdown_complete_receivers.as_mut().expect("BUG!").push(local_shutdown_receiver);
-        let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
+        // configure this processor's "termination is complete" signaler
+        let (local_termination_sender, local_termination_receiver) = tokio::sync::oneshot::channel::<()>();
+        self.processor_termination_complete_receivers.as_mut().expect("BUG!").push(local_termination_receiver);
+        let connection_events_callback = upgrade_to_termination_tracking(local_termination_sender, connection_events_callback);
 
         // the source of connections for this processor to start working on
         let mut connection_provider = ConnectionChannel::new();
@@ -467,7 +467,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     /// Spawns a task to start the local server, returning immediately,
     /// The given `dialog_processor_builder_fn` will be called for each new connection and will return a `Stream`
     /// that will produce non-futures & non-fallible items that *will be sent to the client*:
-    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and shutdown events (possibly to manage sessions). Sign it as:
+    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events (possibly to manage sessions). Sign it as:
     ///     ```nocompile
     ///     async fn connection_events_handler<const CONFIG:  u64,
     ///                                        LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
@@ -502,10 +502,10 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
 
                                            where LocalMessages: ResponsiveMessages<LocalMessages> {
 
-        // configure this processor's "shutdown is complete" signaler
-        let (local_shutdown_sender, local_shutdown_receiver) = tokio::sync::oneshot::channel::<()>();
-        self.processor_shutdown_complete_receivers.as_mut().expect("BUG!").push(local_shutdown_receiver);
-        let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
+        // configure this processor's "termination is complete" signaler
+        let (local_termination_sender, local_termination_receiver) = tokio::sync::oneshot::channel::<()>();
+        self.processor_termination_complete_receivers.as_mut().expect("BUG!").push(local_termination_receiver);
+        let connection_events_callback = upgrade_to_termination_tracking(local_termination_sender, connection_events_callback);
 
         // the source of connections for this processor to start working on
         let mut connection_provider = ConnectionChannel::new();
@@ -524,41 +524,40 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
         Ok(connection_provider)
     }
 
-    /// Returns an async closure that blocks until [Self::shutdown()] is called.
+    /// Returns an async closure that blocks until [Self::terminate()] is called.
     /// Example:
     /// ```no_compile
     ///     self.spawn_the_server(logic...);
-    ///     self.shutdown_waiter()().await;
-    pub fn shutdown_waiter(&mut self) -> impl FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> {
-        let mut local_shutdown_receiver = self.processor_shutdown_complete_receivers.take();
+    ///     self.termination_waiter()().await;
+    pub fn termination_waiter(&mut self) -> impl FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> {
+        let mut local_termination_receiver = self.processor_termination_complete_receivers.take();
         let interface_ip = self.interface_ip.clone();
         let port = self.port;
         move || Box::pin(async move {
-            let Some(mut local_shutdown_receiver) = local_shutdown_receiver.take() else {
-                return Err(Box::from(format!("GenericCompositeSocketServer::wait_for_shutdown(): shutdown requested for server @ {interface_ip}:{port}, but the server was not started (or a previous shutdown was commanded) at the moment the `shutdown_waiter()`'s returned closure was called")))
+            let Some(mut local_termination_receiver) = local_termination_receiver.take() else {
+                return Err(Box::from(format!("GenericCompositeSocketServer::termination_waiter(): termination requested for server @ {interface_ip}:{port}, but the server was not started (or a previous termination was commanded) at the moment the `termination_waiter()`'s returned closure was called")))
             };
-            for (i, processor_shutdown_complete_receiver) in local_shutdown_receiver.into_iter().enumerate() {
-                if let Err(err) = processor_shutdown_complete_receiver.await {
-                    error!("GenericCompositeSocketServer::wait_for_shutdown(): It is no longer possible to tell when the processor {i} will be shutdown for server @ {interface_ip}:{port}: `one_shot` signal error: {err}")
+            for (i, processor_termination_complete_receiver) in local_termination_receiver.into_iter().enumerate() {
+                if let Err(err) = processor_termination_complete_receiver.await {
+                    error!("GenericCompositeSocketServer::termination_waiter(): It is no longer possible to tell when the processor {i} will be termination for server @ {interface_ip}:{port}: `one_shot` signal error: {err}")
                 }
             }
             Ok(())
         })
     }
 
-    /// Notifies the server it is time to shutdown.\
-    /// A shutdown is considered graceful if it could be accomplished in less than `timeout_ms` milliseconds.\
-    /// It is a good practice that the `connection_events_handler()` you provided when starting the server
-    /// uses this time to inform all clients that a remote-initiated disconnection (due to a shutdown) is happening.
-    pub async fn shutdown(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// Notifies the server it is time to stop / shutdown / terminate.\
+    /// It is a recommended practice that the `connection_events_handler()` you provided (when starting each dialog processor)
+    /// inform all clients that a remote-initiated disconnection (due to the call to this function) is happening -- the protocol must support that, 'though.
+    pub async fn terminate(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match self.connection_provider.take() {
             Some(connection_provider) => {
-                warn!("GenericCompositeSocketServer: Shutdown asked & initiated for server @ {}:{}", self.interface_ip, self.port);
+                warn!("GenericCompositeSocketServer: Termination asked & initiated for server @ {}:{}", self.interface_ip, self.port);
                 connection_provider.shutdown().await;
                 Ok(())
             }
             None => {
-                Err(Box::from("GenericCompositeSocketServer: Shutdown requested, but the service was not started -- no `self.start_with_*()` was called. Ignoring..."))
+                Err(Box::from("GenericCompositeSocketServer: Termination requested, but the service was not started -- no `self.start_with_*()` was called. Ignoring..."))
             }
         }
     }
@@ -627,7 +626,7 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test)]
     async fn doc_usage() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
-        const PORT: u16 = PORT_START+4;     // All the following servers are started on this same port, ensuring the `shutdown()` proceedings are working fine
+        const PORT: u16 = PORT_START+4;     // All the following servers are started on this same port, ensuring the `terminate()` proceedings are working fine
 
         // demonstrates how to build an unresponsive server
         ///////////////////////////////////////////////////
@@ -660,9 +659,9 @@ mod tests {
             client_messages_stream.map(|_payload| ())
         }
         server.start_with_single_protocol(connection_channel).await?;
-        let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown().await?;
-        shutdown_waiter().await?;
+        let termination_waiter = server.termination_waiter();
+        server.terminate().await?;
+        termination_waiter().await?;
 
         // demonstrates how to build a responsive server
         ////////////////////////////////////////////////
@@ -689,9 +688,9 @@ mod tests {
             client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         }
         server.start_with_single_protocol(connection_channel).await?;
-        let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown().await?;
-        shutdown_waiter().await?;
+        let termination_waiter = server.termination_waiter();
+        server.terminate().await?;
+        termination_waiter().await?;
 
         // demonstrates how to use it with closures -- also allowing for any channel in the configs
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -707,9 +706,9 @@ mod tests {
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         )?;
         server.start_with_single_protocol(connection_channel).await?;
-        let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown().await?;
-        shutdown_waiter().await?;
+        let termination_waiter = server.termination_waiter();
+        server.terminate().await?;
+        termination_waiter().await?;
 
         // demonstrates how to use the internal & generic implementation
         ////////////////////////////////////////////////////////////////
@@ -736,25 +735,25 @@ mod tests {
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await?;
         server.start_with_single_protocol(connection_channel).await?;
-        let shutdown_waiter = server.shutdown_waiter();
-        server.shutdown().await?;
-        shutdown_waiter().await?;
+        let termination_waiter = server.termination_waiter();
+        server.terminate().await?;
+        termination_waiter().await?;
 
         Ok(())
     }
 
-    /// assures the shutdown process is able to:
+    /// assures the termination process is able to:
     ///   1) communicate with all clients
     ///   2) wait for up to the given timeout for them to gracefully disconnect
     ///   3) forcibly disconnect, if needed
     ///   4) notify any waiter on the server (after all the above steps are done) within the given timeout
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
-    async fn shutdown_process() {
+    async fn termination_process() {
         const PORT: u16 = PORT_START+5;
 
-        // the shutdown timeout, in milliseconds
-        let expected_max_shutdown_duration_ms = 543;
-        // the tolerance, in milliseconds -- a too small shutdown duration means the server didn't wait for the client's disconnection; too much (possibly eternal) means it didn't enforce the timeout
+        // the termination timeout, in milliseconds
+        let expected_max_termination_duration_ms = 543;
+        // the tolerance, in milliseconds -- a too small termination duration means the server didn't wait for the client's disconnection; too much (possibly eternal) means it didn't enforce the timeout
         let max_time_ms = 20;
 
         // sensors
@@ -786,11 +785,11 @@ mod tests {
                 async move {
                     match connection_event {
                         ConnectionEvent::PeerConnected { peer } => {
-                            // register the client -- which will initiate the server shutdown further down in this test
+                            // register the client -- which will initiate the server termination further down in this test
                             client_peer.lock().await.replace(peer);
                         },
                         ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => (),
-                        ConnectionEvent::ApplicationShutdown => {
+                        ConnectionEvent::LocalServiceTermination => {
                             // send a message to the client (the first message, actually... that will initiate a flood of back-and-forth messages)
                             // then try to close the connection (which would only be gracefully done once all messages were sent... which may never happen).
                             let client_peer = client_peer.lock().await;
@@ -837,18 +836,18 @@ mod tests {
         while client_peer_ref2.lock().await.is_none() {
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
-        // shutdown the server & wait until the shutdown process is complete
-        let wait_for_server_shutdown = server.shutdown_waiter();
-        server.shutdown().await
-            .expect("ERROR Signaling the server of the shutdown intention");
+        // terminate the server & wait until the shutdown process is complete
+        let wait_for_server_termination = server.termination_waiter();
+        server.terminate().await
+            .expect("ERROR Signaling the server of the termination intention");
         let start = std::time::SystemTime::now();
-        _ = tokio::time::timeout(Duration::from_secs(5), wait_for_server_shutdown()).await
-            .expect("TIMED OUT (>5s) Waiting for the server to live it's life and to complete the shutdown process");
+        _ = tokio::time::timeout(Duration::from_secs(5), wait_for_server_termination()).await
+            .expect("TIMED OUT (>5s) Waiting for the server to live it's life and to complete the termination process");
         let elapsed_ms = start.elapsed().unwrap().as_millis();
         assert!(client_received_messages_count_ref2.load(Relaxed) > 1, "The client didn't receive any messages (not even the 'server is shutting down' notification)");
         assert!(server_received_messages_count_ref2.load(Relaxed) > 1, "The server didn't receive any messages (not even 'gracefully disconnecting' after being notified that the server is shutting down)");
         assert!(elapsed_ms <= max_time_ms as u128,
-                "The server shutdown (of a never complying client) didn't complete in a reasonable time, meaning the shutdown code is wrong. Maximum acceptable time: {}ms; Measured Time: {}ms",
+                "The server termination (of a never complying client) didn't complete in a reasonable time, meaning the termination code is wrong. Maximum acceptable time: {}ms; Measured Time: {}ms",
                 max_time_ms, elapsed_ms);
     }
 
@@ -991,7 +990,7 @@ mod tests {
                 Some(incoming_client_processor.clone_sender())
             };
         server.start_with_routing_closure(connection_routing_closure).await?;
-        let server_shutdown_waiter = server.shutdown_waiter();
+        let server_termination_waiter = server.termination_waiter();
 
         // start the client that will only connect and listen to messages until it is disconnected
         let mut client = new_socket_client!(
@@ -1006,7 +1005,7 @@ mod tests {
                 match connection_event {
                     ConnectionEvent::PeerConnected { peer }                        => peer.send_async(String::from("Hello! Am I in?")).await.expect("Sending failed"),
                     ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => (),
-                    ConnectionEvent::ApplicationShutdown                           => (),
+                    ConnectionEvent::LocalServiceTermination                           => (),
                 }
             },
             move |_, _, _, server_messages| server_messages.map(|msg| {
@@ -1015,7 +1014,7 @@ mod tests {
             })
         )?;
 
-        let client_waiter = client.shutdown_waiter();
+        let client_waiter = client.termination_waiter();
         // wait for the client to do its stuff
         _ = tokio::time::timeout(Duration::from_secs(5), client_waiter()).await
             .expect("TIMED OUT (>5s) Waiting for the client & server to do their stuff & disconnect the client");
@@ -1024,9 +1023,9 @@ mod tests {
         //     tokio::time::sleep(Duration::from_millis(10000)).await;
         // // }
 
-        // shutdown the server & wait until the shutdown process is complete
-        server.shutdown().await?;
-        server_shutdown_waiter().await?;
+        // terminate the server & wait until the shutdown process is complete
+        server.terminate().await?;
+        server_termination_waiter().await?;
 
         assert!(incoming_client_processor_greeted.load(Relaxed),              "`IncomingClient` processor wasn't requested");
         assert!(welcome_authenticated_friend_processor_greeted.load(Relaxed), "`WelcomeAuthenticatedFriend` processor wasn't requested");

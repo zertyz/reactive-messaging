@@ -63,7 +63,7 @@ impl ClientProtocolProcessor {
                       stream_stats,
                       in_messages_count, in_messages_count as f64 / self.start_instant.elapsed().as_secs_f64());
             }
-            ConnectionEvent::ApplicationShutdown => {
+            ConnectionEvent::LocalServiceTermination => {
                 info!("Ping-Pong client shutdown requested. Notifying the server...");
             }
         }

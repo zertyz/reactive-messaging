@@ -26,7 +26,7 @@ use crate::{
         socket_connection_handler::SocketConnectionHandler,
         connection_provider::ServerConnectionHandler,
     },
-    socket_server::common::upgrade_to_shutdown_tracking,
+    socket_server::common::upgrade_to_termination_tracking,
     types::{
         ConnectionEvent,
         MessagingMutinyStream,
@@ -302,7 +302,7 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         let listening_interface = self.interface_ip.clone();
         let port = self.port;
 
-        let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
+        let connection_events_callback = upgrade_to_termination_tracking(local_shutdown_sender, connection_events_callback);
 
         // the source of connections for new server instances
         let mut connection_provider = ServerConnectionHandler::new(&listening_interface, port).await
@@ -370,7 +370,7 @@ GenericSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         let listening_interface = self.interface_ip.clone();
         let port = self.port;
 
-        let connection_events_callback = upgrade_to_shutdown_tracking(local_shutdown_sender, connection_events_callback);
+        let connection_events_callback = upgrade_to_termination_tracking(local_shutdown_sender, connection_events_callback);
 
         // the source of connections for new server instances
         let mut connection_provider = ServerConnectionHandler::new(&listening_interface, port).await
@@ -665,7 +665,7 @@ mod tests {
                             client_peer.lock().await.replace(peer);
                         },
                         ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => (),
-                        ConnectionEvent::ApplicationShutdown => {
+                        ConnectionEvent::LocalServiceTermination => {
                             // send a message to the client (the first message, actually... that will initiate a flood of back-and-forth messages)
                             // then try to close the connection (which would only be gracefully done once all messages were sent... which may never happen).
                             let client_peer = client_peer.lock().await;

@@ -144,7 +144,7 @@ impl<const CONFIG:        u64,
             }
             debug!("`reactive-messaging::SocketServer`: bailing out of network loop -- we should be undergoing a shutdown...");
             // issue the shutdown event
-            connection_events_callback(ConnectionEvent::ApplicationShutdown).await;
+            connection_events_callback(ConnectionEvent::LocalServiceTermination).await;
         });
 
         Ok(())
@@ -206,7 +206,7 @@ impl<const CONFIG:        u64,
                 },
             };
             // issue the shutdown event
-            connection_events_callback_ref2(ConnectionEvent::ApplicationShutdown).await;
+            connection_events_callback_ref2(ConnectionEvent::LocalServiceTermination).await;
             // close the connection
             peer_ref3.flush_and_close(Duration::from_millis(timeout_ms as u64)).await;
         });
@@ -508,7 +508,7 @@ mod tests {
 
     const DEFAULT_TEST_CONFIG: ConstConfig         = ConstConfig {
         //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
-        retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(5),
+        retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(30),
         ..ConstConfig::default()
     };
     const DEFAULT_TEST_CONFIG_U64:  u64            = DEFAULT_TEST_CONFIG.into();
@@ -575,7 +575,7 @@ mod tests {
                 match connection_event {
                     ConnectionEvent::PeerConnected { .. }       => tokio::time::sleep(Duration::from_millis(100)).await,
                     ConnectionEvent::PeerDisconnected { .. }    => tokio::time::sleep(Duration::from_millis(100)).await,
-                    ConnectionEvent::ApplicationShutdown { .. } => tokio::time::sleep(Duration::from_millis(100)).await,
+                    ConnectionEvent::LocalServiceTermination { .. } => tokio::time::sleep(Duration::from_millis(100)).await,
                 }
             },
             move |_client_addr, _client_port, _peer, client_messages_stream|
@@ -614,7 +614,7 @@ mod tests {
                          assert!(peer.send(String::from("Welcome! State your business!")).is_ok(), "couldn't send");
                      },
                      ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => {},
-                     ConnectionEvent::ApplicationShutdown => {
+                     ConnectionEvent::LocalServiceTermination => {
                          println!("Test Server: shutdown was requested... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
                      }
                  }
@@ -653,7 +653,7 @@ mod tests {
                         ConnectionEvent::PeerDisconnected { peer, stream_stats: _ } => {
                             println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
                         },
-                        ConnectionEvent::ApplicationShutdown => {}
+                        ConnectionEvent::LocalServiceTermination => {}
                     }
                     future::ready(())
                 },
@@ -734,7 +734,7 @@ mod tests {
                             assert!(peer.send(String::from("Ping(0)")).is_ok(), "couldn't send");
                         },
                         ConnectionEvent::PeerDisconnected { .. } => {},
-                        ConnectionEvent::ApplicationShutdown { .. } => {},
+                        ConnectionEvent::LocalServiceTermination { .. } => {},
                     }
                     future::ready(())
                 },
@@ -850,7 +850,7 @@ mod tests {
                             });
                         },
                         ConnectionEvent::PeerDisconnected { .. } => {},
-                        ConnectionEvent::ApplicationShutdown { .. } => {},
+                        ConnectionEvent::LocalServiceTermination { .. } => {},
                     }
                     future::ready(())
                 },
@@ -967,7 +967,7 @@ mod tests {
 
     /// assures that shutting down the client causes the connection to be dropped, as perceived by the server
     #[cfg_attr(not(doc),tokio::test)]
-    async fn client_shutdown() {
+    async fn client_termination() {
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         const PORT               : u16  = 8574;
         let server_disconnected = Arc::new(AtomicBool::new(false));

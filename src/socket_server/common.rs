@@ -19,7 +19,7 @@ use log::{warn, error};
 /// Upgrades the user provided `connection_events_callback()` into a callback able to keep track of the shutdown event
 /// -- so the "shutdown is complete" signal may be sent
 #[inline(always)]
-pub(crate) fn upgrade_to_shutdown_tracking<const CONFIG:                   u64,
+pub(crate) fn upgrade_to_termination_tracking<const CONFIG:                   u64,
                                            LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                            SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send,
@@ -36,7 +36,7 @@ pub(crate) fn upgrade_to_shutdown_tracking<const CONFIG:                   u64,
         let shutdown_is_complete_signaler = Arc::clone(&shutdown_is_complete_signaler);
         let user_provided_connection_events_callback = Arc::clone(&user_provided_connection_events_callback);
         Box::pin(async move {
-            if let ConnectionEvent::ApplicationShutdown { } = connection_event {
+            if let ConnectionEvent::LocalServiceTermination { } = connection_event {
                 let Some(shutdown_is_complete_signaler) = shutdown_is_complete_signaler.lock().await.take()
                 else {
                     warn!("Socket Server: a shutdown was asked, but a previous shutdown seems to have already taken place. There is a bug in your shutdown logic. Ignoring the current shutdown request...");
