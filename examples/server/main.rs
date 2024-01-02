@@ -37,12 +37,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         move |client_addr, port, peer, client_messages_stream| server_processor_ref2.dialog_processor(client_addr, port, peer, client_messages_stream)
     )?;
 
-    let wait_for_shutdown = socket_server.shutdown_waiter();
+    let wait_for_termination = socket_server.termination_waiter();
 tokio::spawn( async move {
     tokio::time::sleep(Duration::from_secs(300)).await;
-    socket_server.shutdown().await.expect("FAILED TO SHUTDOWN");
+    socket_server.terminate().await.expect("Failed to Terminate the server");
 });
-    wait_for_shutdown().await?;
+    wait_for_termination().await?;
 
     Ok(())
     //let (processor_stream, stream_producer, stream_closer) = socket_server.set_processor()

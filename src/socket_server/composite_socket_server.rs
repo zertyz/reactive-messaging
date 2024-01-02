@@ -21,16 +21,16 @@
 
 
 use crate::{
-    socket_connection::{
-        peer::Peer,
-        socket_connection_handler::SocketConnectionHandler,
-        connection_provider::{ServerConnectionHandler,ConnectionChannel},
-    },
     socket_server::common::upgrade_to_termination_tracking,
     types::{
         ConnectionEvent,
         MessagingMutinyStream,
         ResponsiveMessages,
+    },
+    socket_connection::{
+        peer::Peer,
+        socket_connection_handler::SocketConnectionHandler,
+        connection_provider::{ServerConnectionHandler,ConnectionChannel},
     },
     ReactiveMessagingDeserializer,
     ReactiveMessagingSerializer,
@@ -80,47 +80,47 @@ macro_rules! new_composite_socket_server {
         const _SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
         match $const_config.channel {
             Channels::Atomic => CompositeSocketServer::<_CONFIG,
-                                               $remote_messages,
-                                               $local_messages,
-                                               $state_type,
-                                               _PROCESSOR_BUFFER,
-                                               _PROCESSOR_UNI_INSTRUMENTS,
-                                               _SENDER_BUFFER,>
-                                            ::Atomic(GenericCompositeSocketServer::<_CONFIG,
-                                                                           $remote_messages,
-                                                                           $local_messages,
-                                                                           UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                           ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>,
-                                                                           $state_type >
-                                                                        ::new($interface_ip, $port) ),
+                                                        $remote_messages,
+                                                        $local_messages,
+                                                        $state_type,
+                                                        _PROCESSOR_BUFFER,
+                                                        _PROCESSOR_UNI_INSTRUMENTS,
+                                                        _SENDER_BUFFER,>
+                                                     ::Atomic(GenericCompositeSocketServer::<_CONFIG,
+                                                                                             $remote_messages,
+                                                                                             $local_messages,
+                                                                                             UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                             ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                             $state_type >
+                                                                                          ::new($interface_ip, $port) ),
             Channels::FullSync => CompositeSocketServer::<_CONFIG,
-                                                 $remote_messages,
-                                                 $local_messages,
-                                                 $state_type,
-                                                 _PROCESSOR_BUFFER,
-                                                 _PROCESSOR_UNI_INSTRUMENTS,
-                                                 _SENDER_BUFFER>
-                                              ::FullSync(GenericCompositeSocketServer::<_CONFIG,
-                                                                               $remote_messages,
-                                                                               $local_messages,
-                                                                               UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                               ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>,
-                                                                               $state_type >
-                                                                            ::new($interface_ip, $port) ),
+                                                          $remote_messages,
+                                                          $local_messages,
+                                                          $state_type,
+                                                          _PROCESSOR_BUFFER,
+                                                          _PROCESSOR_UNI_INSTRUMENTS,
+                                                          _SENDER_BUFFER>
+                                                       ::FullSync(GenericCompositeSocketServer::<_CONFIG,
+                                                                                                 $remote_messages,
+                                                                                                 $local_messages,
+                                                                                                 UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                                 ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                                 $state_type >
+                                                                                              ::new($interface_ip, $port) ),
             Channels::Crossbeam => CompositeSocketServer::<_CONFIG,
-                                                  $remote_messages,
-                                                  $local_messages,
-                                                  $state_type,
-                                                  _PROCESSOR_BUFFER,
-                                                  _PROCESSOR_UNI_INSTRUMENTS,
-                                                  _SENDER_BUFFER>
-                                               ::Crossbeam(GenericCompositeSocketServer::<_CONFIG,
-                                                                                 $remote_messages,
-                                                                                 $local_messages,
-                                                                                 UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                                 ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>,
-                                                                                 $state_type >
-                                                                              ::new($interface_ip, $port) ),
+                                                           $remote_messages,
+                                                           $local_messages,
+                                                           $state_type,
+                                                           _PROCESSOR_BUFFER,
+                                                           _PROCESSOR_UNI_INSTRUMENTS,
+                                                           _SENDER_BUFFER>
+                                                        ::Crossbeam(GenericCompositeSocketServer::<_CONFIG,
+                                                                                                   $remote_messages,
+                                                                                                   $local_messages,
+                                                                                                   UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                                   ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                                   $state_type >
+                                                                                                ::new($interface_ip, $port) ),
         }
     }}
 }
