@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);
 
     let mut socket_server = new_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ClientMessages, ServerMessages);
-    spawn_responsive_server_processor!(socket_server,
+    start_responsive_server_processor!(socket_server,
         move |connection_event| {
             server_processor_ref1.server_events_callback(connection_event);
             future::ready(())
@@ -38,10 +38,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )?;
 
     let wait_for_termination = socket_server.termination_waiter();
-tokio::spawn( async move {
-    tokio::time::sleep(Duration::from_secs(300)).await;
-    socket_server.terminate().await.expect("Failed to Terminate the server");
-});
+    tokio::spawn( async move {
+        tokio::time::sleep(Duration::from_secs(300)).await;
+        socket_server.terminate().await.expect("Failed to Terminate the server");
+    });
     wait_for_termination().await?;
 
     Ok(())
