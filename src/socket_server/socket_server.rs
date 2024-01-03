@@ -227,7 +227,7 @@ pub use start_responsive_server_processor;
 pub enum CompositeSocketServer<const CONFIG:                    u64,
                       RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
                       LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + Default + 'static,
-                      StateType:                                                                       Send + Sync                               + 'static,
+                      StateType:                                                                       Send + Sync + Default                     + 'static,
                       const PROCESSOR_BUFFER:          usize,
                       const PROCESSOR_UNI_INSTRUMENTS: usize,
                       const SENDER_BUFFER:             usize> {
@@ -256,7 +256,7 @@ pub enum CompositeSocketServer<const CONFIG:                    u64,
  impl<const CONFIG:                    u64,
       RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
       LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + Default + 'static,
-      StateType:                                                                       Send + Sync                               + 'static,
+      StateType:                                                                       Send + Sync + Default                     + 'static,
       const PROCESSOR_BUFFER:          usize,
       const PROCESSOR_UNI_INSTRUMENTS: usize,
       const SENDER_BUFFER:             usize>
@@ -318,7 +318,7 @@ pub struct GenericCompositeSocketServer<const CONFIG:        u64,
                                LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                ProcessorUniType:    GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
                                SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-                               StateType:                                                                                         Send + Sync                     + 'static> {
+                               StateType:                                                                                         Send + Sync + Default           + 'static> {
 
     /// The interface to listen to incoming connections
     interface_ip: String,
@@ -340,7 +340,7 @@ impl<const CONFIG:        u64,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
      SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
-     StateType:                                                                                         Send + Sync                     + 'static>
+     StateType:                                                                                         Send + Sync + Default           + 'static>
 GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType> {
 
     /// Creates a new server instance listening on TCP/IP:
@@ -982,7 +982,7 @@ mod tests {
                     async move {
                         peer.send_async(format!("`IncomingClient`: New peer {peer:?} ended up initial authentication proceedings. SAY SOMETHING and you will be routed to 'WelcomeAuthenticatedFriend'")).await
                             .expect("Sending failed");
-                        peer.set_state(Some(Protocols::WelcomeAuthenticatedFriend)).await;
+                        peer.set_state(Protocols::WelcomeAuthenticatedFriend).await;
                         peer.flush_and_close(Duration::from_secs(1)).await;
                     }
                 })
@@ -1007,7 +1007,7 @@ mod tests {
                     let peer = Arc::clone(&peer);
                     welcome_authenticated_friend_processor_greeted_ref.store(true, Relaxed);
                     async move {
-                        peer.set_state(Some(Protocols::AccountSettings)).await;
+                        peer.set_state(Protocols::AccountSettings).await;
                         peer.flush_and_close(Duration::from_secs(1)).await;
                     }
                 })
@@ -1031,7 +1031,7 @@ mod tests {
                     let peer = Arc::clone(&peer);
                     account_settings_processor_greeted_ref.store(true, Relaxed);
                     async move {
-                        peer.set_state(Some(Protocols::GoodbyeOptions)).await;
+                        peer.set_state(Protocols::GoodbyeOptions).await;
                         peer.flush_and_close(Duration::from_secs(1)).await;
                     }
                 })
@@ -1055,7 +1055,7 @@ mod tests {
                     let peer = Arc::clone(&peer);
                     goodbye_options_processor_greeted_ref.store(true, Relaxed);
                     async move {
-                        peer.set_state(Some(Protocols::Disconnect)).await;
+                        peer.set_state(Protocols::Disconnect).await;
                         peer.flush_and_close(Duration::from_secs(1)).await;
                     }
                 })

@@ -41,7 +41,7 @@ pub struct SocketConnectionHandler<const CONFIG:        u64,
                                    LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
                                    ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
                                    SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
-                                   StateType:                                                                                                 Send + Sync                     + 'static = ()> {
+                                   StateType:                                                                                                 Send + Sync + Default           + 'static = ()> {
     _phantom:   PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType)>,
 }
 
@@ -50,7 +50,7 @@ impl<const CONFIG:        u64,
      LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
      SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
-     StateType:                                                                                                 Send + Sync                     + 'static>
+     StateType:                                                                                                 Send + Sync + Default           + 'static>
  SocketConnectionHandler<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType> {
 
     pub fn new() -> Self {
@@ -105,7 +105,7 @@ impl<const CONFIG:        u64,
 
                 // prepares for the dialog to come with the (just accepted) connection
                 let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
-                let peer = Arc::new(Peer::new(sender, addr, None::<StateType>));
+                let peer = Arc::new(Peer::new(sender, addr, StateType::default()));
                 let peer_ref1 = Arc::clone(&peer);
                 let peer_ref2 = Arc::clone(&peer);
 
@@ -172,7 +172,7 @@ impl<const CONFIG:        u64,
 
         let addr = socket.peer_addr()?;
         let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
-        let peer = Arc::new(Peer::new(sender, addr, None::<StateType>));
+        let peer = Arc::new(Peer::new(sender, addr, StateType::default()));
         let peer_ref1 = Arc::clone(&peer);
         let peer_ref2 = Arc::clone(&peer);
         let peer_ref3 = Arc::clone(&peer);
@@ -443,7 +443,7 @@ impl<const CONFIG:        u64,
                         }
                     }
                     // TODO 2023-08-25: there should be a proper method to call out of async context (in Peer) that will allow us not to forcibly sleep here.
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::sleep(Duration::from_millis(100));
                     peer.cancel_and_close();
                 }
             })

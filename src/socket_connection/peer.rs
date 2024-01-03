@@ -44,11 +44,11 @@ impl<const CONFIG:  u64,
      StateType:                                                                                   Send + Sync>
 Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
 
-    pub fn new(retryable_sender: ReactiveMessagingSender<CONFIG, LocalMessages, SenderChannel>, peer_address: SocketAddr, initial_state: Option<StateType>) -> Self {
+    pub fn new(retryable_sender: ReactiveMessagingSender<CONFIG, LocalMessages, SenderChannel>, peer_address: SocketAddr, initial_state: StateType) -> Self {
         Self {
             peer_id: PEER_COUNTER.fetch_add(1, Relaxed),
             peer_address,
-            state: Mutex::new(initial_state),
+            state: Mutex::new(Some(initial_state)),
             retryable_sender,
         }
     }
@@ -77,8 +77,8 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
     /// Sets this object to a user-provided state, to facilitate communications between producers and senders of messages
     /// (a requirement to allow the "Composite Protocol Stacking" pattern).\
     /// See also [Self::take_state()]
-    pub async fn set_state(&self, state: Option<StateType>) {
-        *self.state.lock().await = state;
+    pub async fn set_state(&self, state: StateType) {
+        *self.state.lock().await = Some(state);
     }
 
     /// "Takes" this object's user-provided state, previously set by [Self::set_state()] -- used to facilitate communications between producers and senders

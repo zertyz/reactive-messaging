@@ -182,7 +182,7 @@ impl ClientProtocolProcessor {
                 },
 
                 ServerMessages::GoodBye | ServerMessages::ServerShutdown => {
-                    vec![/*ClientMessages::NoAnswer*/]
+                    vec![ClientMessages::Quit]
                 },
             }
         })
