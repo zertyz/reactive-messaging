@@ -10,7 +10,6 @@ use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    time::Duration,
 };
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use tokio::sync::Mutex;

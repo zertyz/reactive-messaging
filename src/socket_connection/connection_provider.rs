@@ -14,7 +14,6 @@ use std::future;
 use std::future::Future;
 use std::iter::Peekable;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::ops::RangeInclusive;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};

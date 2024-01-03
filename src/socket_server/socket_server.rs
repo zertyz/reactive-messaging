@@ -44,8 +44,6 @@ use std::{
     marker::PhantomData,
     sync::Arc,
 };
-use std::net::SocketAddr;
-use futures::{future::BoxFuture, Stream};
 use reactive_mutiny::prelude::advanced::{
     ChannelUniMoveAtomic,
     ChannelUniMoveCrossbeam,
@@ -56,21 +54,48 @@ use reactive_mutiny::prelude::advanced::{
     FullDuplexUniChannel,
     GenericUni,
 };
+use std::net::SocketAddr;
+use futures::{future::BoxFuture, Stream};
+use tokio::{
+    io::AsyncWriteExt,
+    net::TcpStream,
+};
 use log::{error, trace, warn};
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
+
+
+/// Instantiates & allocates resources for a stateless [GenericCompositeSocketServer] (suitable for single protocol communications),
+/// ready to be later started by [start_unresponsive_server_processor!()] or [start_responsive_server_processor!()].\
+/// Params:
+///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const/compile time optimizations;
+///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
+///   - `port: u16` -- the port to listen to incoming connections;
+///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the clients;
+///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.
+/// See [new_composite_socket_server!()] if you want to use the "Composite Protocol Stacking" pattern.
+#[macro_export]
+macro_rules! new_socket_server {
+    ($const_config:    expr,
+     $interface_ip:    expr,
+     $port:            expr,
+     $remote_messages: ty,
+     $local_messages:  ty) => {
+        new_composite_socket_server!($const_config, $interface_ip, $port, $remote_messages, $local_messages, ())
+    }
+}
+pub use new_socket_server;
 
 
 /// Instantiates & allocates resources for a stateful [GenericCompositeSocketServer] (suitable for the "Composite Protocol Stacking" pattern),
 /// ready to have processors added by [spawn_unresponsive_server_processor!()] or [spawn_responsive_server_processor!()]
 /// and to be later started by [GenericCompositeSocketServer::start_with_routing_closure].\
 /// Params:
-///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const time optimizations;
+///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const/compile time optimizations;
 ///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
 ///   - `port: u16` -- the port to listen to incoming connections;
-///   - `RemoteMessages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the clients;
-///   - `LocalMessage`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.
-/// See [new_socket_server!()] if you want to use the "Composite Protocol Stack" pattern.
+///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the clients;
+///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.
+///   - `state_type: Default` -- The state type used by the "connection routing closure" (to be provided) to promote the "Composite Protocol Stacking" pattern
+/// See [new_socket_server!()] if you want to use the "Composite Protocol Stacking" pattern.
 #[macro_export]
 macro_rules! new_composite_socket_server {
     ($const_config:    expr,
@@ -132,47 +157,6 @@ macro_rules! new_composite_socket_server {
 pub use new_composite_socket_server;
 
 
-/// Instantiates & allocates resources for a stateless [GenericCompositeSocketServer] (suitable for single protocol communications),
-/// ready to be later started by [start_unresponsive_server_processor!()] or [start_responsive_server_processor!()].\
-/// Params:
-///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const time optimizations;
-///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
-///   - `port: u16` -- the port to listen to incoming connections;
-///   - `RemoteMessages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the clients;
-///   - `LocalMessage`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.\
-/// See [new_composite_socket_server!()] if you want to use the "Composite Protocol Stack" pattern.
-#[macro_export]
-macro_rules! new_socket_server {
-    ($const_config:    expr,
-     $interface_ip:    expr,
-     $port:            expr,
-     $remote_messages: ty,
-     $local_messages:  ty) => {
-        new_composite_socket_server!($const_config, $interface_ip, $port, $remote_messages, $local_messages, ())
-    }
-}
-pub use new_socket_server;
-
-
-/// To be used by a server following the "Composite Protocol Stack" pattern -- which should have been previously instantiated by [new_composite_socket_server!()] --
-/// adds & spawns another protocol processor given by the provided `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s,
-/// specified in [GenericCompositeSocketServer::spawn_unresponsive_processor()].\
-/// If you want to use a single protocol in your server, [spawn_unresponsive_server_processor!()] macro instead.
-#[macro_export]
-macro_rules! spawn_unresponsive_composite_server_processor {
-    ($socket_server:                expr,
-     $connection_events_handler_fn: expr,
-     $dialog_processor_builder_fn:  expr) => {{
-        match &mut $socket_server {
-            CompositeSocketServer::Atomic    (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            CompositeSocketServer::FullSync  (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            CompositeSocketServer::Crossbeam (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-        }
-    }}
-}
-pub use spawn_unresponsive_composite_server_processor;
-
-
 /// Starts a server (previously instantiated by [new_socket_server!()]) that will communicate with clients using a single protocol -- as defined by the given
 /// `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s as specified in [GenericCompositeSocketServer::spawn_unresponsive_processor()].\
 /// If you want to follow the "Composite Protocol Stacking" pattern, see the [spawn_unresponsive_composite_server_processor!()] macro instead.
@@ -188,23 +172,23 @@ macro_rules! start_unresponsive_server_processor {
 pub use start_unresponsive_server_processor;
 
 
-/// To be used by a server following the "Composite Protocol Stack" pattern -- which should have been previously instantiated by [new_composite_socket_server!()] --
-/// adds & spawns another protocol processor given by the provided `dialog_processor_builder_fn`, a builder of "responsive" `Stream`s,
-/// specified in [GenericCompositeSocketServer::spawn_responsive_processor()].\
-/// If you want to use a single protocol in your server, [spawn_responsive_server_processor!()] macro instead.
+/// To be used by a server following the "Composite Protocol Stacking" pattern -- which should have been previously instantiated by [new_composite_socket_server!()] --
+/// adds & spawns another protocol processor given by the provided `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s,
+/// specified in [GenericCompositeSocketServer::spawn_unresponsive_processor()].\
+/// If you want to use a single protocol in your server, use [spawn_unresponsive_server_processor!()] macro instead.
 #[macro_export]
-macro_rules! spawn_responsive_composite_server_processor {
+macro_rules! spawn_unresponsive_composite_server_processor {
     ($socket_server:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         match &mut $socket_server {
-            CompositeSocketServer::Atomic    (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            CompositeSocketServer::FullSync  (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            CompositeSocketServer::Crossbeam (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketServer::Atomic    (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketServer::FullSync  (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketServer::Crossbeam (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
         }
     }}
 }
-pub use spawn_responsive_composite_server_processor;
+pub use spawn_unresponsive_composite_server_processor;
 
 
 /// Starts a server (previously instantiated by [new_socket_server!()]) that will communicate with clients using a single protocol -- as defined by the given
@@ -222,8 +206,27 @@ macro_rules! start_responsive_server_processor {
 pub use start_responsive_server_processor;
 
 
+/// To be used by a server following the "Composite Protocol Stacking" pattern -- which should have been previously instantiated by [new_composite_socket_server!()] --
+/// adds & spawns another protocol processor given by the provided `dialog_processor_builder_fn`, a builder of "responsive" `Stream`s,
+/// specified in [GenericCompositeSocketServer::spawn_responsive_processor()].\
+/// If you want to use a single protocol in your server, use the [spawn_responsive_server_processor!()] macro instead.
+#[macro_export]
+macro_rules! spawn_responsive_composite_server_processor {
+    ($socket_server:                expr,
+     $connection_events_handler_fn: expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        match &mut $socket_server {
+            CompositeSocketServer::Atomic    (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketServer::FullSync  (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketServer::Crossbeam (generic_composite_socket_server)  =>  generic_composite_socket_server.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+        }
+    }}
+}
+pub use spawn_responsive_composite_server_processor;
+
+
 /// Represents a server built out of `CONFIG` (a `u64` version of [ConstConfig], from which the other const generic parameters derive).\
-/// You probably don't want to instantiate this struct directly -- use sugared [new_socket_server!()] or [new_composite_socket_server!()] macros instead.
+/// You probably don't want to instantiate this struct directly -- use the sugared [new_socket_server!()] or [new_composite_socket_server!()] macros instead.
 pub enum CompositeSocketServer<const CONFIG:                    u64,
                       RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
                       LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + Default + 'static,
@@ -312,7 +315,8 @@ pub enum CompositeSocketServer<const CONFIG:                    u64,
 ///   - `LocalMessages`:    the messages that are generated by the server (usually an `enum`);
 ///   - `ProcessorUniType`: an instance of a `reactive-mutiny`'s [Uni] type (using one of the zero-copy channels) --
 ///                         This [Uni] will execute the given server reactive logic for each incoming message (see how it is used in [new_socket_server!()] or [new_composite_socket_server!()]);
-///   - `SenderChannel`:    an instance of a `reactive-mutiny`'s Uni movable `Channel`, which will provide a `Stream` of messages to be sent to the client.
+///   - `SenderChannel`:    an instance of a `reactive-mutiny`'s Uni movable `Channel`, which will provide a `Stream` of messages to be sent to the client;
+///   - `StateType`:        The state type used by the "connection routing closure" (to be provided), enabling the "Composite Protocol Stacking" pattern.
 pub struct GenericCompositeSocketServer<const CONFIG:        u64,
                                RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
                                LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
@@ -329,11 +333,11 @@ pub struct GenericCompositeSocketServer<const CONFIG:        u64,
     connection_provider: Option<ServerConnectionHandler>,
     /// Signalers to cause [Self::termination_waiter()]'s closure to return (once they all dispatch their signals)
     processor_termination_complete_receivers:  Option<Vec<tokio::sync::oneshot::Receiver<()>>>,
-    /// Connection returned by processors after they are done with them -- these connections
-    /// may be route to another processor if "composite protocol stacking" is in play.
+    /// Connections returned by processors after they are done with them -- these connections
+    /// may be routed to another processor if the "Composite Protocol Stacking" pattern is in play.
     returned_connections_source: Option<tokio::sync::mpsc::Receiver<(TcpStream, Option<StateType>)>>,
     returned_connections_sink: tokio::sync::mpsc::Sender<(TcpStream, Option<StateType>)>,
-    _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,SenderChannel, StateType)>
+    _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,SenderChannel)>
 }
 impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
@@ -363,7 +367,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     }
 
     /// Start the server with a single processor (after calling either [Self::spawn_unresponsive_processor()]
-    /// or [Self::spawn_responsive_processor()] once) -- A.K.A. "The single Protocol Mode".\
+    /// or [Self::spawn_responsive_processor()] once) -- A.K.A. "The Single Protocol Mode".\
     /// See [Self::start_with_routing_closure()] if you want a server that shares connections among
     /// different protocol processors.
     ///
@@ -371,7 +375,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     /// distribute the incoming connections.
     pub async fn start_with_single_protocol(&mut self, connection_channel: ConnectionChannel)
                                            -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
-        // this closure will cause new connections will be sent to `connection_channel` and returned connections will be dropped
+        // this closure will cause new connections to be sent to `connection_channel` and returned connections to be dropped
         let connection_routing_closure = move |_connection: &TcpStream, last_state: Option<StateType>|
             last_state.map_or_else(|| Some(connection_channel.clone_sender()),
                                    |_| None);
@@ -386,8 +390,8 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     /// `protocol_stacking_closure := FnMut(connection: &tokio::net::TcpStream, last_state: Option<StateType>) -> connection_receiver: Option<tokio::sync::mpsc::Receiver<TcpStream>>`
     ///
     /// -- this closure "decides what to do" with available connections, routing them to the appropriate processors:
-    ///   - Newly received connections will have `last_state` set to None -- otherwise, this will be set by the processor
-    ///     before the [Peer] is closed -- see [Peer::set_state()].
+    ///   - Newly received connections will have `last_state` set to `None` -- otherwise, this will either be set by the processor
+    ///     before the [Peer] is closed -- see [Peer::set_state()] -- or will have the `Default` value.
     ///   - The returned value must be one of the "handles" returned by [Self::spawn_responsive_processor()] or
     ///     [Self::spawn_unresponsive_processor()].
     ///   - If `None` is returned, the connection will be closed.
@@ -418,7 +422,6 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
 
             loop {
                 let (mut connection, sender) = tokio::select! {
-                    // v = tokio => {},
 
                     // process newly incoming connections
                     new_connection = new_connections_source.recv() => {
@@ -446,7 +449,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
                             .unwrap_or_else(|err| (format!("<unknown -- err:{err}>"), 0));
                         trace!("`reactive-messaging::CompositeSocketServer`: ROUTING the client {client_ip}:{client_port} of the server @ {interface_ip}:{port} to another processor");
                         if let Err(err) = sender.send(connection).await {
-                            warn!("`reactive-messaging::CompositeSocketServer`: BUG(?) in server @ {interface_ip}:{port} while re-routing the client {client_ip}:{client_port}'s socket: THE NEW (ROUTED) PROCESSOR CAN NO LONGER RECEIVE CONNECTIONS -- THE CONNECTION WILL BE DROPPED");
+                            error!("`reactive-messaging::CompositeSocketServer`: BUG(?) in server @ {interface_ip}:{port} while re-routing the client {client_ip}:{client_port}'s socket: THE NEW (ROUTED) PROCESSOR CAN NO LONGER RECEIVE CONNECTIONS -- THE CONNECTION WILL BE DROPPED");
                             break
                         }
                     },
@@ -633,9 +636,10 @@ mod tests {
     use super::*;
     use crate::prelude::{
         ConstConfig,
-        SocketClient,
-        GenericSocketClient,
+        CompositeSocketClient,
+        CompositeGenericSocketClient,
         new_socket_client,
+        new_composite_socket_client,
         ron_deserializer,
         ron_serializer,
         spawn_responsive_client_processor,
@@ -650,7 +654,6 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use futures::StreamExt;
     use tokio::sync::Mutex;
-    use crate::spawn_unresponsive_client_processor;
 
 
     /// The start of the port range for the tests in this module -- so not to clash with other modules when tests are run in parallel

@@ -7,7 +7,6 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
 use futures::future::BoxFuture;
 use reactive_mutiny::types::FullDuplexUniChannel;
 use log::{error, warn};

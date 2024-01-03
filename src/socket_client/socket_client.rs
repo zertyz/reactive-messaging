@@ -9,17 +9,17 @@
 //!
 //! For every client variant, the `Stream` items may be a combination of fallible/non-fallible (using `Result<>` or not) & future/non-future.
 //!
-//! Instead of using the mentioned macros, you might want take a look at [GenericSocketClient] to access the inner implementation directly
+//! Instead of using the mentioned macros, you might want take a look at [CompositeGenericSocketClient] to access the inner implementation directly
 //! -- both ways have the same flexibility, but the macro version takes in all parameters in the conveniently packed and documented [ConstConfig]
 //! struct, instead of requiring several const generic parameters.
 //!
-//! IMPLEMENTATION NOTE: There would be a common trait (that is no longer present) binding [SocketClient] to [GenericSocketClient]
+//! IMPLEMENTATION NOTE: There would be a common trait (that is no longer present) binding [CompositeSocketClient] to [CompositeGenericSocketClient]
 //!                      -- the reason being Rust 1.71 still not supporting zero-cost async in traits.
 //!                      Other API designs had been attempted, but using async in traits (through the `async-trait` crate) and the
 //!                      necessary GATs to provide zero-cost-abstracts, revealed a compiler bug making writing processors very difficult to compile:
 //!                        - https://github.com/rust-lang/rust/issues/96865
 
-/// Instantiates & allocates resources for a [GenericSocketClient], ready to be later started by [spawn_unresponsive_client_processor!()] or [spawn_responsive_client_processor!()].\
+/// Instantiates & allocates resources for a [CompositeGenericSocketClient], ready to be later started by [spawn_unresponsive_client_processor!()] or [spawn_responsive_client_processor!()].\
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const time optimizations;
 ///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
@@ -29,15 +29,15 @@
 
 
 use crate::{
-    socket_connection::{
-        peer::Peer,
-        socket_connection_handler::SocketConnectionHandler,
-    },
     socket_client::common::upgrade_to_connection_event_tracking,
     types::{
         ConnectionEvent,
         MessagingMutinyStream,
         ResponsiveMessages,
+    },
+    socket_connection::{
+        peer::Peer,
+        socket_connection_handler::SocketConnectionHandler,
     },
     ReactiveMessagingDeserializer,
     ReactiveMessagingSerializer,
@@ -52,7 +52,6 @@ use std::{
         atomic::AtomicBool,
     },
 };
-use futures::{future::BoxFuture, Stream};
 use reactive_mutiny::prelude::advanced::{
     ChannelUniMoveAtomic,
     ChannelUniMoveCrossbeam,
@@ -63,176 +62,274 @@ use reactive_mutiny::prelude::advanced::{
     FullDuplexUniChannel,
     GenericUni,
 };
+use futures::{future::BoxFuture, Stream};
+use tokio::{
+    io::AsyncWriteExt,
+    net::TcpStream,
+};
 use log::{trace, warn, error};
-use tokio::io::AsyncWriteExt;
 
 
-/// Instantiates & allocates resources for a [GenericSocketClient], ready to be later started by [spawn_unresponsive_client_processor!()] or [spawn_responsive_client_processor!()].\
+/// Instantiates & allocates resources for a stateless [GenericCompositeSocketClient] (suitable for single protocol communications),
+/// ready to be later started by [start_unresponsive_client_processor!()] or [start_responsive_client_processor!()].\
 /// Params:
-///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const time optimizations;
-///   - `ip: IntoString` -- the tcp ip to connect to;
-///   - `port: u16` -- the tcp port to connect to;
-///   - `RemoteMessages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the server;
-///   - `LocalMessage`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this client -- should, additionally, implement the `Default` trait.
+///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
+///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
+///   - `port: u16` -- the port to listen to incoming connections;
+///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the server;
+///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this client -- should, additionally, implement the `Default` trait.
+/// See [new_composite_socket_client!()] if you want to use the "Composite Protocol Stacking" pattern.
 #[macro_export]
 macro_rules! new_socket_client {
     ($const_config:    expr,
      $ip:              expr,
      $port:            expr,
      $remote_messages: ty,
-     $local_messages:  ty) => {{
+     $local_messages:  ty) => {
+        new_composite_socket_client!($const_config, $ip, $port, $remote_messages, $local_messages, ())
+    }
+}
+pub use new_socket_client;
+
+
+/// Instantiates & allocates resources for a stateful [CompositeGenericSocketClient] (suitable for the "Composite Protocol Stacking" pattern),
+/// ready to have processors added by [spawn_unresponsive_client_processor!()] or [spawn_responsive_client_processor!()]
+/// and to be later started by [GenericCompositeSocketClient::start_with_routing_closure].\
+/// Params:
+///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
+///   - `ip: IntoString` -- the tcp ip to connect to;
+///   - `port: u16` -- the tcp port to connect to;
+///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the server;
+///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this client -- should, additionally, implement the `Default` trait.
+///   - `state_type: Default` -- The state type used by the "connection routing closure" (to be provided) to promote the "Composite Protocol Stacking" pattern
+/// See [new_socket_client!()] if you want to use the "Composite Protocol Stacking" pattern.
+#[macro_export]
+macro_rules! new_composite_socket_client {
+    ($const_config:    expr,
+     $ip:              expr,
+     $port:            expr,
+     $remote_messages: ty,
+     $local_messages:  ty,
+     $state_type:      ty) => {{
         const _CONFIG:                    u64   = $const_config.into();
         const _PROCESSOR_BUFFER:          usize = $const_config.receiver_buffer as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
         const _SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
         match $const_config.channel {
-            Channels::Atomic => SocketClient::<_CONFIG,
-                                               $remote_messages,
-                                               $local_messages,
-                                               _PROCESSOR_BUFFER,
-                                               _PROCESSOR_UNI_INSTRUMENTS,
-                                               _SENDER_BUFFER>
-                                            ::Atomic(GenericSocketClient::<_CONFIG,
-                                                                           $remote_messages,
-                                                                           $local_messages,
-                                                                           UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                           ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1> >
-                                                                        ::new($ip, $port) ),
-            Channels::FullSync => SocketClient::<_CONFIG,
-                                                 $remote_messages,
-                                                 $local_messages,
-                                                 _PROCESSOR_BUFFER,
-                                                 _PROCESSOR_UNI_INSTRUMENTS,
-                                                 _SENDER_BUFFER>
-                                              ::FullSync(GenericSocketClient::<_CONFIG,
-                                                                               $remote_messages,
-                                                                               $local_messages,
-                                                                               UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                               ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1> >
-                                                                            ::new($ip, $port) ),
-            Channels::Crossbeam => SocketClient::<_CONFIG,
-                                                  $remote_messages,
-                                                  $local_messages,
-                                                  _PROCESSOR_BUFFER,
-                                                  _PROCESSOR_UNI_INSTRUMENTS,
-                                                  _SENDER_BUFFER>
-                                               ::Crossbeam(GenericSocketClient::<_CONFIG,
-                                                                                 $remote_messages,
-                                                                                 $local_messages,
-                                                                                 UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                                 ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1> >
-                                                                              ::new($ip, $port) ),
+            Channels::Atomic => CompositeSocketClient::<_CONFIG,
+                                                        $remote_messages,
+                                                        $local_messages,
+                                                        $state_type,
+                                                        _PROCESSOR_BUFFER,
+                                                        _PROCESSOR_UNI_INSTRUMENTS,
+                                                        _SENDER_BUFFER>
+                                                     ::Atomic(CompositeGenericSocketClient::<_CONFIG,
+                                                                                             $remote_messages,
+                                                                                             $local_messages,
+                                                                                             UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                             ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                             $state_type >
+                                                                                          ::new($ip, $port) ),
+            Channels::FullSync => CompositeSocketClient::<_CONFIG,
+                                                          $remote_messages,
+                                                          $local_messages,
+                                                          $state_type,
+                                                          _PROCESSOR_BUFFER,
+                                                          _PROCESSOR_UNI_INSTRUMENTS,
+                                                          _SENDER_BUFFER>
+                                                       ::FullSync(CompositeGenericSocketClient::<_CONFIG,
+                                                                                                 $remote_messages,
+                                                                                                 $local_messages,
+                                                                                                 UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                                 ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                                 $state_type >
+                                                                                              ::new($ip, $port) ),
+            Channels::Crossbeam => CompositeSocketClient::<_CONFIG,
+                                                           $remote_messages,
+                                                           $local_messages,
+                                                           $state_type,
+                                                           _PROCESSOR_BUFFER,
+                                                           _PROCESSOR_UNI_INSTRUMENTS,
+                                                           _SENDER_BUFFER>
+                                                        ::Crossbeam(CompositeGenericSocketClient::<_CONFIG,
+                                                                                                   $remote_messages,
+                                                                                                   $local_messages,
+                                                                                                   UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                                   ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                                   $state_type >
+                                                                                                ::new($ip, $port) ),
         }
     }}
 }
-pub use new_socket_client;
+pub use new_composite_socket_client;
 
 
-/// See [GenericSocketClient::spawn_unresponsive_processor()]
+/// Starts a client (previously instantiated by [new_socket_client!()]) that will communicate with the server using a single protocol -- as defined by the given
+/// `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s as specified in [GenericCompositeSocketClient::spawn_unresponsive_processor()].\
+/// If you want to follow the "Composite Protocol Stacking" pattern, see the [spawn_unresponsive_composite_client_processor!()] macro instead.
+#[macro_export]
+macro_rules! start_unresponsive_client_processor {
+    ($socket_server:                expr,
+     $connection_events_handler_fn: expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        let connection_channel = spawn_unresponsive_composite_client_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn)?;
+        $socket_server.start_with_single_protocol(connection_channel).await
+    }}
+}
+pub use start_unresponsive_client_processor;
+
+
+/// To be used by a server following the "Composite Protocol Stacking" pattern -- which should have been previously instantiated by [new_composite_socket_client!()] --
+/// adds & spawns another protocol processor given by the provided `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s,
+/// specified in [GenericCompositeSocketClient::spawn_unresponsive_processor()].\
+/// If you want to use a single protocol in your client, use [spawn_unresponsive_client_processor!()] macro instead.
 #[macro_export]
 macro_rules! spawn_unresponsive_client_processor {
     ($socket_server:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         match &mut $socket_server {
-            SocketClient::Atomic    (generic_socket_client)       => generic_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            SocketClient::FullSync  (generic_socket_client)       => generic_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            SocketClient::Crossbeam (generic_socket_client)       => generic_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketClient::Atomic    (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketClient::FullSync  (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketClient::Crossbeam (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
         }
     }}
 }
 pub use spawn_unresponsive_client_processor;
 
 
-/// See [GenericSocketClient::spawn_responsive_processor()]
+/// Starts a client (previously instantiated by [new_socket_client!()]) that will communicate with the server using a single protocol -- as defined by the given
+/// `dialog_processor_builder_fn`, a builder of "responsive" `Stream`s as specified in [GenericCompositeSocketClient::spawn_responsive_processor()].\
+/// If you want to follow the "Composite Protocol Stacking" pattern, see the [spawn_responsive_composite_client_processor!()] macro instead.
+#[macro_export]
+macro_rules! start_responsive_client_processor {
+    ($socket_server:                expr,
+     $connection_events_handler_fn: expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        let connection_channel = spawn_responsive_composite_server_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn)?;
+        $socket_server.start_with_single_protocol(connection_channel).await
+    }}
+}
+pub use start_responsive_client_processor;
+
+
+/// To be used by a client following the "Composite Protocol Stacking" pattern -- which should have been previously instantiated by [new_composite_socket_client!()] --
+/// adds & spawns another protocol processor given by the provided `dialog_processor_builder_fn`, a builder of "responsive" `Stream`s,
+/// specified in [GenericCompositeSocketClient::spawn_responsive_processor()].\
+/// If you want to use a single protocol in your client, use the [spawn_responsive_client_processor!()] macro instead.
 #[macro_export]
 macro_rules! spawn_responsive_client_processor {
     ($socket_client:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         match &mut $socket_client {
-            SocketClient::Atomic    (generic_socket_client)       => generic_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            SocketClient::FullSync  (generic_socket_client)       => generic_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            SocketClient::Crossbeam (generic_socket_client)       => generic_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketClient::Atomic    (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketClient::FullSync  (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            CompositeSocketClient::Crossbeam (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
         }
     }}
 }
 pub use spawn_responsive_client_processor;
-use crate::socket_connection::connection_provider::ClientConnectionManager;
+use crate::socket_connection::connection_provider::{ClientConnectionManager, ConnectionChannel};
 
-
-/// This client implementation doesn't use StateTypes -- a feature of the [ComposableSocketClient].
-type NoStateType = ();
 
 /// Represents a client built out of `CONFIG` (a `u64` version of [ConstConfig], from which the other const generic parameters derive).\
-/// Don't instantiate this struct directly -- use [new_socket_client!()] instead.
-pub enum SocketClient<const CONFIG:                    u64,
-                      RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
-                      LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + Default + 'static,
-                      const PROCESSOR_BUFFER:          usize,
-                      const PROCESSOR_UNI_INSTRUMENTS: usize,
-                      const SENDER_BUFFER:             usize> {
+/// You probably don't want to instantiate this struct directly -- use the sugared [new_socket_client!()] or [new_composite_socket_client!()] macros instead.
+pub enum CompositeSocketClient<const CONFIG:                    u64,
+                               RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
+                               LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + Default + 'static,
+                               StateType:                                                                       Send + Sync + Default                     + 'static,
+                               const PROCESSOR_BUFFER:          usize,
+                               const PROCESSOR_UNI_INSTRUMENTS: usize,
+                               const SENDER_BUFFER:             usize> {
 
-    Atomic(GenericSocketClient::<CONFIG,
-                                 RemoteMessages,
-                                 LocalMessages,
-                                 UniZeroCopyAtomic<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                 ChannelUniMoveAtomic<LocalMessages, SENDER_BUFFER, 1> >),
+    Atomic(CompositeGenericSocketClient::<CONFIG,
+                                          RemoteMessages,
+                                          LocalMessages,
+                                          UniZeroCopyAtomic<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                          ChannelUniMoveAtomic<LocalMessages, SENDER_BUFFER, 1>,
+                                          StateType >),
 
-    FullSync(GenericSocketClient::<CONFIG,
-                                   RemoteMessages,
-                                   LocalMessages,
-                                   UniZeroCopyFullSync<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                   ChannelUniMoveFullSync<LocalMessages, SENDER_BUFFER, 1> >),
+    FullSync(CompositeGenericSocketClient::<CONFIG,
+                                            RemoteMessages,
+                                            LocalMessages,
+                                            UniZeroCopyFullSync<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                            ChannelUniMoveFullSync<LocalMessages, SENDER_BUFFER, 1>,
+                                            StateType >),
 
-    Crossbeam(GenericSocketClient::<CONFIG,
-                                    RemoteMessages,
-                                    LocalMessages,
-                                    UniMoveCrossbeam<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
-                                    ChannelUniMoveCrossbeam<LocalMessages, SENDER_BUFFER, 1> >),
+    Crossbeam(CompositeGenericSocketClient::<CONFIG,
+                                             RemoteMessages,
+                                             LocalMessages,
+                                             UniMoveCrossbeam<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                             ChannelUniMoveCrossbeam<LocalMessages, SENDER_BUFFER, 1>,
+                                             StateType >),
 }
  impl<const CONFIG:                    u64,
       RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
       LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>    + Send + Sync + PartialEq + Debug + Default + 'static,
+      StateType:                                                                       Send + Sync + Default                     + 'static,
       const PROCESSOR_BUFFER:          usize,
       const PROCESSOR_UNI_INSTRUMENTS: usize,
       const SENDER_BUFFER:             usize>
- SocketClient<CONFIG, RemoteMessages, LocalMessages, PROCESSOR_BUFFER, PROCESSOR_UNI_INSTRUMENTS, SENDER_BUFFER> {
+ CompositeSocketClient<CONFIG, RemoteMessages, LocalMessages, StateType, PROCESSOR_BUFFER, PROCESSOR_UNI_INSTRUMENTS, SENDER_BUFFER> {
 
-     /// See [GenericSocketClient::termination_waiter()]
-     pub fn termination_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
+     /// See [GenericCompositeSocketClient::start_with_single_protocol()]
+     pub async fn start_with_single_protocol(&mut self, connection_channel: ConnectionChannel)
+                                            -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
          match self {
-             SocketClient::Atomic    (generic_socket_client) => Box::new(generic_socket_client.termination_waiter()),
-             SocketClient::FullSync  (generic_socket_client) => Box::new(generic_socket_client.termination_waiter()),
-             SocketClient::Crossbeam (generic_socket_client) => Box::new(generic_socket_client.termination_waiter()),
+             CompositeSocketClient::Atomic    (composite_socket_client) => composite_socket_client.start_with_single_protocol(connection_channel).await,
+             CompositeSocketClient::FullSync  (composite_socket_client) => composite_socket_client.start_with_single_protocol(connection_channel).await,
+             CompositeSocketClient::Crossbeam (composite_socket_client) => composite_socket_client.start_with_single_protocol(connection_channel).await,
          }
      }
 
-     /// See [GenericSocketClient::terminate()]
+     /// See [GenericCompositeSocketClient::start_with_routing_closure()]
+     pub async fn start_with_routing_closure(&mut self,
+                                             protocol_stacking_closure: impl FnMut(/*connection: */& tokio::net::TcpStream, /*last_state: */Option<StateType>) -> Option<tokio::sync::mpsc::Sender<TcpStream>> + Send + 'static)
+                                             -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+         match self {
+             CompositeSocketClient::Atomic    (composite_socket_client) => composite_socket_client.start_with_routing_closure(protocol_stacking_closure).await,
+             CompositeSocketClient::FullSync  (composite_socket_client) => composite_socket_client.start_with_routing_closure(protocol_stacking_closure).await,
+             CompositeSocketClient::Crossbeam (composite_socket_client) => composite_socket_client.start_with_routing_closure(protocol_stacking_closure).await,
+         }
+     }
+
+     /// See [CompositeGenericSocketClient::termination_waiter()]
+     pub fn termination_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> > {
+         match self {
+             CompositeSocketClient::Atomic    (composite_socket_client) => Box::new(composite_socket_client.termination_waiter()),
+             CompositeSocketClient::FullSync  (composite_socket_client) => Box::new(composite_socket_client.termination_waiter()),
+             CompositeSocketClient::Crossbeam (composite_socket_client) => Box::new(composite_socket_client.termination_waiter()),
+         }
+     }
+
+     /// See [CompositeGenericSocketClient::terminate()]
      pub fn terminate(self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
          match self {
-             SocketClient::Atomic    (generic_socket_client) => generic_socket_client.terminate(timeout_ms),
-             SocketClient::FullSync  (generic_socket_client) => generic_socket_client.terminate(timeout_ms),
-             SocketClient::Crossbeam (generic_socket_client) => generic_socket_client.terminate(timeout_ms),
+             CompositeSocketClient::Atomic    (composite_socket_client) => composite_socket_client.terminate(timeout_ms),
+             CompositeSocketClient::FullSync  (composite_socket_client) => composite_socket_client.terminate(timeout_ms),
+             CompositeSocketClient::Crossbeam (composite_socket_client) => composite_socket_client.terminate(timeout_ms),
          }
      }
 }
 
 
 /// Real definition & implementation for our Socket Client, full of generic parameters.\
-/// Probably you want to instantiate this structure through the sugared macro [new_socket_client!()] instead.
+/// Probably you want to instantiate this structure through the sugared macros [new_socket_client!()] or [new_composite_socket_client!()] instead.
 /// Generic Parameters:
 ///   - `CONFIG`:           the `u64` version of the [ConstConfig] instance used to build this struct -- from which `ProcessorUniType` and `SenderChannel` derive;
 ///   - `RemoteMessages`:   the messages that are generated by the server (usually an `enum`);
 ///   - `LocalMessages`:    the messages that are generated by this client (usually an `enum`);
 ///   - `ProcessorUniType`: an instance of a `reactive-mutiny`'s [Uni] type (using one of the zero-copy channels) --
 ///                         This [Uni] will execute the given client reactive logic for each incoming message (see how it is used in [new_socket_client!()]);
-///   - `SenderChannel`:    an instance of a `reactive-mutiny`'s Uni movable `Channel`, which will provide a `Stream` of messages to be sent to the server.
-pub struct GenericSocketClient<const CONFIG:        u64,
-                               RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
-                               LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-                               ProcessorUniType:    GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
-                               SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync> {
+///   - `SenderChannel`:    an instance of a `reactive-mutiny`'s Uni movable `Channel`, which will provide a `Stream` of messages to be sent to the server;
+///   - `StateType`:        The state type used by the "connection routing closure" (to be provided), enabling the "Composite Protocol Stacking" pattern.
+pub struct CompositeGenericSocketClient<const CONFIG:        u64,
+                                        RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
+                                        LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                                        ProcessorUniType:    GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
+                                        SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+                                        StateType:                                                                                         Send + Sync + Default           + 'static> {
 
     /// false if a disconnection happened, as tracked by the socket logic
     connected: Arc<AtomicBool>,
@@ -244,14 +341,19 @@ pub struct GenericSocketClient<const CONFIG:        u64,
     client_termination_signaler: Option<tokio::sync::oneshot::Sender<u32>>,
     /// Signaler to cause [Self::termination_waiter()]'s closure to return
     local_termination_is_complete_receiver: Option<tokio::sync::oneshot::Receiver<()>>,
+    /// The client connection is returned by processors after they are done with it -- this connection
+    /// may be routed to another processor if the "Composite Protocol Stacking" pattern is in play.
+    returned_connection_source: Option<tokio::sync::mpsc::Receiver<(TcpStream, Option<StateType>)>>,
+    returned_connection_sink: tokio::sync::mpsc::Sender<(TcpStream, Option<StateType>)>,
     _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,SenderChannel)>
 }
 impl<const CONFIG:        u64,
      RemoteMessages:      ReactiveMessagingDeserializer<RemoteMessages>                               + Send + Sync + PartialEq + Debug + 'static,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
-     SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static>
-GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel> {
+     SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
+     StateType:                                                                                         Send + Sync + Default           + 'static>
+CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType> {
 
     /// Instantiates a client to connect to a TCP/IP Server:
     ///   `ip`:                   the server IP to connect to
@@ -260,14 +362,107 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
               (ip:   IntoString,
                port: u16)
               -> Self {
+        let (returned_connection_sink, returned_connection_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<StateType>)>(2);
         Self {
-            connected: Arc::new(AtomicBool::new(false)),
-            ip: ip.into(),
+            connected:                               Arc::new(AtomicBool::new(false)),
+            ip:                                      ip.into(),
             port,
-            client_termination_signaler: None,
+            client_termination_signaler:             None,
             local_termination_is_complete_receiver:  None,
-            _phantom:                 PhantomData,
+            returned_connection_source:              Some(returned_connection_source),
+            returned_connection_sink,
+            _phantom:                                PhantomData,
         }
+    }
+
+    /// Start the client with a single processor (after calling either [Self::spawn_unresponsive_processor()]
+    /// or [Self::spawn_responsive_processor()] once) -- A.K.A. "The Single Protocol Mode".\
+    /// See [Self::start_with_routing_closure()] if you want a client that shares the connection among
+    /// different protocol processors.
+    ///
+    /// Starts the client -- effectively connecting to the server -- using the provided `connection_channel` to
+    /// distribute the connection to the available processors.
+    pub async fn start_with_single_protocol(&mut self, connection_channel: ConnectionChannel)
+                                           -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+        // this closure will cause just-opened connections to be sent to `connection_channel` and returned connections to be dropped
+        let connection_routing_closure = move |_connection: &TcpStream, last_state: Option<StateType>|
+            last_state.map_or_else(|| Some(connection_channel.clone_sender()),
+                                   |_| None);
+        self.start_with_routing_closure(connection_routing_closure).await
+
+    }
+
+    /// Starts the client -- effectively connecting to the server -- using the provided `connection_routing_closure` to
+    /// distribute the connection among the configured processors -- previously fed in by [Self::spawn_responsive_processor()] &
+    /// [Self::spawn_unresponsive_processor()].
+    ///
+    /// `protocol_stacking_closure := FnMut(connection: &tokio::net::TcpStream, last_state: Option<StateType>) -> connection_receiver: Option<tokio::sync::mpsc::Receiver<TcpStream>>`
+    ///
+    /// -- this closure "decides what to do" with the connection, routing it to the appropriate processor:
+    ///   - The just-opened connection will have `last_state` set to `None` -- otherwise, it will either be set by the processor
+    ///     before the [Peer] is closed -- see [Peer::set_state()] -- or will have the `Default` value.
+    ///   - The returned value must be one of the "handles" returned by [Self::spawn_responsive_processor()] or
+    ///     [Self::spawn_unresponsive_processor()].
+    ///   - If `None` is returned, the connection will be closed and this client will cease its operations.
+    ///
+    /// This method returns an error if no processors were configured.
+    pub async fn start_with_routing_closure(&mut self,
+                                            mut connection_routing_closure: impl FnMut(/*connection: */& tokio::net::TcpStream, /*last_state: */Option<StateType>) -> Option<tokio::sync::mpsc::Sender<TcpStream>> + Send + 'static)
+                                            -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+
+        let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&self.ip, self.port);
+        let connection = connection_manager.connect_retryable().await
+            .map_err(|err| format!("Error making client connection to {}:{} -- {err}", self.ip, self.port))?;
+        let mut just_opened_connection = Some(connection);
+
+
+        let mut returned_connection_source = self.returned_connection_source.take()
+            .ok_or_else(|| String::from("couldn't move the 'Returned Connection Source' out of the Connection Channel"))?;
+
+        let ip = self.ip.clone();
+        let port = self.port;
+
+        // Spawns the "connection routing task" to:
+        //   - Listen to newly incoming connections as well as upgraded/downgraded ones shared between processors
+        //   - Gives them to the `protocol_stacking_closure`
+        //   - Routes them to the right processor or close the connection
+        tokio::spawn(async move {
+
+            loop {
+                let (mut connection, sender) = match just_opened_connection.take() {
+                    // process the just-opened connection (once)
+                    Some(just_opened_connection) => {
+                        let sender = connection_routing_closure(&just_opened_connection, None);
+                        (just_opened_connection, sender)
+                    },
+                    // process connections returned by the processors (after they ended processing them)
+                    None => {
+                        let Some((returned_connection, last_state)) = returned_connection_source.recv().await else { break };
+                        let sender = connection_routing_closure(&returned_connection, last_state);
+                        (returned_connection, sender)
+                    },
+                };
+
+                // route the connection to another processor or drop it
+                match sender {
+                    Some(sender) => {
+                        trace!("`reactive-messaging::CompositeSocketClient`: ROUTING the connection with the server @ {ip}:{port} to another processor");
+                        if let Err(err) = sender.send(connection).await {
+                            error!("`reactive-messaging::CompositeSocketClient`: BUG(?) in the client connected to the server @ {ip}:{port} while re-routing the connection: THE NEW (ROUTED) PROCESSOR CAN NO LONGER RECEIVE CONNECTIONS -- THE CONNECTION WILL BE DROPPED");
+                            break
+                        }
+                    },
+                    None => {
+                        if let Err(err) = connection.shutdown().await {
+                            error!("`reactive-messaging::CompositeSocketClient`: ERROR in the client connected to the server @ {ip}:{port} while shutting down the connection: {err}");
+                        }
+                    }
+                }
+            }
+            // loop ended
+            trace!("`reactive-messaging::CompositeSocketClient`: The 'Connection Routing Task' for the client connected to the server @ {ip}:{port} ended -- hopefully, due to a graceful client termination.");
+        });
+        Ok(())
     }
 
     /// Spawns a task to start the local client, returning immediately.\
@@ -298,8 +493,8 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
     pub async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                                                Send + Sync + Debug       + 'static,
                                               ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                  + Send                      + 'static,
                                               ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                   + Send                      + 'static,
-                                              ConnectionEventsCallback:       Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, NoStateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync               + 'static,
-                                              ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, NoStateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync               + 'static>
+                                              ConnectionEventsCallback:       Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync               + 'static,
+                                              ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync               + 'static>
 
                                              (&mut self,
                                               connection_events_callback:  ConnectionEventsCallback,
@@ -320,7 +515,7 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         let connection = connection_manager.connect_retryable().await
             .map_err(|err| format!("Error making client connection to {}:{} -- {err}", self.ip, self.port))?;
         tokio::spawn(async move {
-            let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
+            let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
             let result = socket_communications_handler.client_for_unresponsive_text_protocol(connection,
                                                                                              client_termination_receiver,
                                                                                              connection_events_callback,
@@ -367,8 +562,8 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
     /// -- if you don't want the processor to produce answer messages, see [Self::spawn_unresponsive_processor()].
     pub async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                                                 + Send        + 'static,
                                             ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                          + Send        + 'static,
-                                            ConnectionEventsCallback:        Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, NoStateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                            ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, NoStateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
+                                            ConnectionEventsCallback:        Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                            ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
 
                                            (&mut self,
                                             connection_events_callback:  ConnectionEventsCallback,
@@ -391,7 +586,7 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
         let connection = connection_manager.connect_retryable().await
             .map_err(|err| format!("Error making client connection to {}:{} -- {err}", self.ip, self.port))?;
         tokio::spawn(async move {
-            let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, NoStateType>::new();
+            let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
             let result = socket_communications_handler.client_for_responsive_text_protocol(connection,
                                                                                            server_termination_receiver,
                                                                                            connection_events_callback,
@@ -480,7 +675,7 @@ mod tests {
                 ..ConstConfig::default()
             },
             REMOTE_SERVER, 443, String, String);
-        assert!(matches!(atomic_client, SocketClient::Atomic(_)), "an Atomic Client couldn't be instantiated");
+        assert!(matches!(atomic_client, CompositeSocketClient::Atomic(_)), "an Atomic Client couldn't be instantiated");
 
         let fullsync_client = new_socket_client!(
             ConstConfig {
@@ -488,7 +683,7 @@ mod tests {
                 ..ConstConfig::default()
             },
             REMOTE_SERVER, 443, String, String);
-        assert!(matches!(fullsync_client, SocketClient::FullSync(_)), "a FullSync Client couldn't be instantiated");
+        assert!(matches!(fullsync_client, CompositeSocketClient::FullSync(_)), "a FullSync Client couldn't be instantiated");
 
         let crossbeam_client = new_socket_client!(
             ConstConfig {
@@ -496,7 +691,7 @@ mod tests {
                 ..ConstConfig::default()
             },
             REMOTE_SERVER, 443, String, String);
-        assert!(matches!(crossbeam_client, SocketClient::Crossbeam(_)), "a Crossbeam Client couldn't be instantiated");
+        assert!(matches!(crossbeam_client, CompositeSocketClient::Crossbeam(_)), "a Crossbeam Client couldn't be instantiated");
     }
 
     /// Test that our client types are ready for usage
@@ -593,12 +788,13 @@ mod tests {
         };
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CONFIG.receiver_buffer as usize}, 1, {CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CONFIG.sender_buffer as usize}, 1>;
-        let mut client = GenericSocketClient :: <{CONFIG.into()},
-                                                                     DummyClientAndServerMessages,
-                                                                     DummyClientAndServerMessages,
-                                                                     ProcessorUniType,
-                                                                     SenderChannelType>
-                                                                 :: new("66.45.249.218",443);
+        let mut client = CompositeGenericSocketClient :: <{CONFIG.into()},
+                                                                                     DummyClientAndServerMessages,
+                                                                                     DummyClientAndServerMessages,
+                                                                                     ProcessorUniType,
+                                                                                     SenderChannelType,
+                                                                                     () >
+                                                                                 :: new("66.45.249.218",443);
         client.spawn_unresponsive_processor(
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
