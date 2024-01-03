@@ -182,7 +182,8 @@ impl ClientProtocolProcessor {
                 },
 
                 ServerMessages::GoodBye | ServerMessages::ServerShutdown => {
-                    vec![ClientMessages::Quit]
+                    peer.cancel_and_close();
+                    vec![/*ClientMessages::NoAnswer*/]
                 },
             }
         })

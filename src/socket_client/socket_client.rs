@@ -63,7 +63,7 @@ use reactive_mutiny::prelude::advanced::{
     FullDuplexUniChannel,
     GenericUni,
 };
-use log::{error, warn};
+use log::{trace, warn, error};
 use tokio::io::AsyncWriteExt;
 
 
@@ -400,7 +400,8 @@ GenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, Sen
             match result {
                 Ok((mut socket, _)) => {
                     if let Err(err) = socket.shutdown().await {
-                        error!("`reactive-messaging::SocketClient`: ERROR shutting down the socket (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
+                        trace!("`reactive-messaging::SocketClient`: COULDN'T shutdown the socket (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
+                        // ... it may have already been done by the other end
                     }
                 }
                 Err(err) => {

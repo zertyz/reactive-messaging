@@ -263,12 +263,12 @@ impl<const CONFIG:        u64,
                             LocalMessagesType::serialize(&to_send, &mut serialization_buffer);
                             serialization_buffer.push(b'\n');
                             if let Err(err) = textual_socket.write_all(&serialization_buffer).await {
-                                warn!("reactive-messaging: PROBLEM in the connection with {:#?} while WRITING: '{:?}' -- dropping it", peer, err);
+                                warn!("reactive-messaging: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
                                 break 'connection
                             }
                         },
                         None => {
-                            debug!("reactive-messaging: Sender for {:#?} ended (most likely, .cancel_all_streams() was called on the `peer` by the processor.", peer);
+                            debug!("reactive-messaging: Sender for {peer:#?} ended (most likely, .cancel_all_streams() was called on the `peer` by the processor.");
                             break 'connection
                         }
                     }
@@ -329,8 +329,8 @@ impl<const CONFIG:        u64,
                                 }
                             }
                         },
-                        Ok(_) /* zero bytes received */ => {
-                            warn!("reactive-messaging: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                        Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
+                            trace!("reactive-messaging: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
                             break 'connection
                         },
                         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
