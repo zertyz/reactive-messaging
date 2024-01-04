@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         let client_processor_ref2 = Arc::clone(&client_processor_ref1);
 
         let mut socket_client = new_socket_client!(NETWORK_CONFIG, SERVER_IP, PORT, ServerMessages, ClientMessages);
-        spawn_responsive_client_processor!(socket_client,
+        start_responsive_client_processor!(socket_client,
             move |connection_event| {
                 client_processor_ref1.client_events_callback(connection_event);
                 future::ready(())
@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
     }
 
     tokio::time::sleep(Duration::from_secs(290)).await;
-    socket_clients.into_iter().for_each(|socket_client| socket_client.terminate(5000).expect("FAILED TO SHUTDOWN THE CLIENT"));
+    socket_clients.into_iter().for_each(|socket_client| socket_client.terminate().expect("FAILED TO SHUTDOWN THE CLIENT"));
 
     Ok(())
 }

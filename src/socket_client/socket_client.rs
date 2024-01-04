@@ -38,6 +38,7 @@ use crate::{
     socket_connection::{
         peer::Peer,
         socket_connection_handler::SocketConnectionHandler,
+        connection_provider::{ClientConnectionManager, ConnectionChannel},
     },
     ReactiveMessagingDeserializer,
     ReactiveMessagingSerializer,
@@ -86,7 +87,7 @@ macro_rules! new_socket_client {
      $port:            expr,
      $remote_messages: ty,
      $local_messages:  ty) => {
-        new_composite_socket_client!($const_config, $ip, $port, $remote_messages, $local_messages, ())
+        crate::new_composite_socket_client!($const_config, $ip, $port, $remote_messages, $local_messages, ())
     }
 }
 pub use new_socket_client;
@@ -172,8 +173,10 @@ macro_rules! start_unresponsive_client_processor {
     ($socket_server:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        let connection_channel = spawn_unresponsive_composite_client_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn)?;
-        $socket_server.start_with_single_protocol(connection_channel).await
+        match crate::spawn_unresponsive_composite_client_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+            Ok(connection_channel) => $socket_server.start_with_single_protocol(connection_channel).await,
+            Err(err) => Err(err),
+        }
     }}
 }
 pub use start_unresponsive_client_processor;
@@ -184,7 +187,7 @@ pub use start_unresponsive_client_processor;
 /// specified in [GenericCompositeSocketClient::spawn_unresponsive_processor()].\
 /// If you want to use a single protocol in your client, use [spawn_unresponsive_client_processor!()] macro instead.
 #[macro_export]
-macro_rules! spawn_unresponsive_client_processor {
+macro_rules! spawn_unresponsive_composite_client_processor {
     ($socket_server:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
@@ -195,7 +198,7 @@ macro_rules! spawn_unresponsive_client_processor {
         }
     }}
 }
-pub use spawn_unresponsive_client_processor;
+pub use spawn_unresponsive_composite_client_processor;
 
 
 /// Starts a client (previously instantiated by [new_socket_client!()]) that will communicate with the server using a single protocol -- as defined by the given
@@ -206,8 +209,11 @@ macro_rules! start_responsive_client_processor {
     ($socket_server:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        let connection_channel = spawn_responsive_composite_server_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn)?;
-        $socket_server.start_with_single_protocol(connection_channel).await
+        match crate::spawn_responsive_composite_client_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+            Ok(connection_channel) => $socket_server.start_with_single_protocol(connection_channel).await,
+            Err(err) => Err(err),
+        }
+
     }}
 }
 pub use start_responsive_client_processor;
@@ -218,7 +224,7 @@ pub use start_responsive_client_processor;
 /// specified in [GenericCompositeSocketClient::spawn_responsive_processor()].\
 /// If you want to use a single protocol in your client, use the [spawn_responsive_client_processor!()] macro instead.
 #[macro_export]
-macro_rules! spawn_responsive_client_processor {
+macro_rules! spawn_responsive_composite_client_processor {
     ($socket_client:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
@@ -229,8 +235,7 @@ macro_rules! spawn_responsive_client_processor {
         }
     }}
 }
-pub use spawn_responsive_client_processor;
-use crate::socket_connection::connection_provider::{ClientConnectionManager, ConnectionChannel};
+pub use spawn_responsive_composite_client_processor;
 
 
 /// Represents a client built out of `CONFIG` (a `u64` version of [ConstConfig], from which the other const generic parameters derive).\
@@ -304,11 +309,11 @@ pub enum CompositeSocketClient<const CONFIG:                    u64,
      }
 
      /// See [CompositeGenericSocketClient::terminate()]
-     pub fn terminate(self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     pub fn terminate(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
          match self {
-             CompositeSocketClient::Atomic    (composite_socket_client) => composite_socket_client.terminate(timeout_ms),
-             CompositeSocketClient::FullSync  (composite_socket_client) => composite_socket_client.terminate(timeout_ms),
-             CompositeSocketClient::Crossbeam (composite_socket_client) => composite_socket_client.terminate(timeout_ms),
+             CompositeSocketClient::Atomic    (composite_socket_client) => composite_socket_client.terminate(),
+             CompositeSocketClient::FullSync  (composite_socket_client) => composite_socket_client.terminate(),
+             CompositeSocketClient::Crossbeam (composite_socket_client) => composite_socket_client.terminate(),
          }
      }
 }
@@ -337,14 +342,17 @@ pub struct CompositeGenericSocketClient<const CONFIG:        u64,
     ip: String,
     /// The port to listen to incoming connections
     port: u16,
-    /// Signaler to stop this client
-    client_termination_signaler: Option<tokio::sync::oneshot::Sender<u32>>,
+    /// Signaler to stop this client -- allowing multiple subscribers
+    client_termination_signaler: Option<tokio::sync::broadcast::Sender<()>>,
     /// Signaler to cause [Self::termination_waiter()]'s closure to return
-    local_termination_is_complete_receiver: Option<tokio::sync::oneshot::Receiver<()>>,
+    local_termination_is_complete_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
+    local_termination_is_complete_sender: tokio::sync::mpsc::Sender<()>,
     /// The client connection is returned by processors after they are done with it -- this connection
     /// may be routed to another processor if the "Composite Protocol Stacking" pattern is in play.
     returned_connection_source: Option<tokio::sync::mpsc::Receiver<(TcpStream, Option<StateType>)>>,
     returned_connection_sink: tokio::sync::mpsc::Sender<(TcpStream, Option<StateType>)>,
+    /// The count of processors, for termination notification purposes
+    spawned_processors_count: u32,
     _phantom: PhantomData<(RemoteMessages,LocalMessages,ProcessorUniType,SenderChannel)>
 }
 impl<const CONFIG:        u64,
@@ -362,15 +370,19 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
               (ip:   IntoString,
                port: u16)
               -> Self {
-        let (returned_connection_sink, returned_connection_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<StateType>)>(2);
+        let (returned_connection_sink, returned_connection_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<StateType>)>(1);
+        let (client_termination_signaler, _) = tokio::sync::broadcast::channel(1);
+        let (local_termination_is_complete_sender, local_termination_is_complete_receiver) = tokio::sync::mpsc::channel(1);
         Self {
             connected:                               Arc::new(AtomicBool::new(false)),
             ip:                                      ip.into(),
             port,
-            client_termination_signaler:             None,
-            local_termination_is_complete_receiver:  None,
+            client_termination_signaler:             Some(client_termination_signaler),
+            local_termination_is_complete_receiver:  Some(local_termination_is_complete_receiver),
+            local_termination_is_complete_sender,
             returned_connection_source:              Some(returned_connection_source),
             returned_connection_sink,
+            spawned_processors_count:                0,
             _phantom:                                PhantomData,
         }
     }
@@ -454,7 +466,7 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
                     },
                     None => {
                         if let Err(err) = connection.shutdown().await {
-                            error!("`reactive-messaging::CompositeSocketClient`: ERROR in the client connected to the server @ {ip}:{port} while shutting down the connection: {err}");
+                            error!("`reactive-messaging::CompositeSocketClient`: ERROR in the client connected to the server @ {ip}:{port} while shutting down the connection (after the processors ended): {err}");
                         }
                     }
                 }
@@ -465,7 +477,7 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
         Ok(())
     }
 
-    /// Spawns a task to start the local client, returning immediately.\
+    /// Spawns a task dedicated to the given "unresponsive protocol processor", returning immediately.\
     /// The given `dialog_processor_builder_fn` will be called when the connection is established and should return a `Stream`
     /// that will produce non-futures & non-fallible items that **won't be sent to the server**:
     ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events. Sign it as:
@@ -489,6 +501,7 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     ///                              -> impl Stream<Item=()> {...}
     ///     ```
     /// -- if you want the processor to produce answer messages of type `LocalMessages` to be sent to the server, see [Self::spawn_responsive_processor()]:
+    // TODO 2024-01-03: make this able to process the same connection as many times as needed, for symmetry with the server -- practically, allowing connection reuse
     #[inline(always)]
     pub async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                                                Send + Sync + Debug       + 'static,
                                               ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                  + Send                      + 'static,
@@ -500,42 +513,49 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
                                               connection_events_callback:  ConnectionEventsCallback,
                                               dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                             -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+                                             -> Result<ConnectionChannel, Box<dyn std::error::Error + Sync + Send>> {
 
-        let (client_termination_sender, client_termination_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (local_termination_is_complete_sender, local_termination_is_complete_receiver) = tokio::sync::oneshot::channel::<()>();
-        self.client_termination_signaler = Some(client_termination_sender);
-        self.local_termination_is_complete_receiver = Some(local_termination_is_complete_receiver);
         let ip = self.ip.clone();
         let port = self.port;
 
+        let returned_connection_sink = self.returned_connection_sink.clone();
+        let local_termination_is_complete_sender = self.local_termination_is_complete_sender.clone();
+        let client_termination_signaler = self.client_termination_signaler.clone();
+
         let connection_events_callback = upgrade_to_connection_event_tracking(&self.connected, local_termination_is_complete_sender, connection_events_callback);
 
-        let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
-        let connection = connection_manager.connect_retryable().await
-            .map_err(|err| format!("Error making client connection to {}:{} -- {err}", self.ip, self.port))?;
+        // the source of connections for this processor to start working on
+        let mut connection_provider = ConnectionChannel::new();
+        let mut connection_source = connection_provider.receiver()
+            .ok_or_else(|| format!("couldn't move the Connection Receiver out of the Connection Provider"))?;
+
         tokio::spawn(async move {
-            let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
-            let result = socket_communications_handler.client_for_unresponsive_text_protocol(connection,
-                                                                                             client_termination_receiver,
-                                                                                             connection_events_callback,
-                                                                                             dialog_processor_builder_fn).await
-                .map_err(|err| format!("Error while executing the dialog processor: {err}"));
-            match result {
-                Ok((mut socket, _)) => {
-                    if let Err(err) = socket.shutdown().await {
-                        error!("`reactive-messaging::SocketClient`: ERROR shutting down the socket (after the unresponsive & textual processor ended) @ {ip}:{port}: {err}");
+            /*while*/ if let Some(connection) = connection_source.recv().await {
+                let client_termination_receiver = client_termination_signaler.expect("BUG! client_termination_signaler is NONE").subscribe();
+                let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
+                let result = socket_communications_handler.client_for_unresponsive_text_protocol(connection,
+                                                                                                                  client_termination_receiver,
+                                                                                                                  connection_events_callback,
+                                                                                                                  dialog_processor_builder_fn).await
+                    .map_err(|err| format!("Error while executing the dialog processor: {err}"));
+                match result {
+                    Ok(connection_and_state) => {
+                        if let Err(err) = returned_connection_sink.send(connection_and_state).await {
+                            trace!("`reactive-messaging::CompositeGenericSocketClient`: ERROR returning the connection (after the unresponsive & textual processor ended) @ {ip}:{port}: {err}");
+                            // ... it may have already been done by the other end
+                        }
                     }
-                }
-                Err(err) => {
-                    error!("`reactive-messaging::SocketClient`: ERROR in client (unresponsive & textual) @ {ip}:{port}: {err}");
+                    Err(err) => {
+                        error!("`reactive-messaging::CompositeGenericSocketClient`: ERROR in client (unresponsive & textual) @ {ip}:{port}: {err}");
+                    }
                 }
             }
         });
-        Ok(())
+        self.spawned_processors_count += 1;
+        Ok(connection_provider)
     }
 
-    /// Spawns a task to start the local client, returning immediately,
+    /// Spawns a task dedicated to the given "responsive protocol processor", returning immediately,
     /// The given `dialog_processor_builder_fn` will be called when the connection is established and should return a `Stream`
     /// that will produce non-futures & non-fallible items that *will be sent to the server*:
     ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events. Sign it as:
@@ -560,6 +580,7 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     ///     ```
     /// Notice that this method requires that `LocalMessages` implements, additionally, [ResponsiveMessages<>].\
     /// -- if you don't want the processor to produce answer messages, see [Self::spawn_unresponsive_processor()].
+    // TODO 2024-01-03: make this able to process the same connection as many times as needed, for symmetry with the server -- practically, allowing connection reuse
     pub async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                                                 + Send        + 'static,
                                             ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                          + Send        + 'static,
                                             ConnectionEventsCallback:        Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
@@ -569,42 +590,52 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
                                             connection_events_callback:  ConnectionEventsCallback,
                                             dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                           -> Result<(), Box<dyn std::error::Error + Sync + Send>>
+                                           -> Result<ConnectionChannel, Box<dyn std::error::Error + Sync + Send>>
 
                                            where LocalMessages: ResponsiveMessages<LocalMessages> {
 
-        let (server_termination_sender, server_termination_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (local_termination_is_complete_sender, local_termination_is_complete_receiver) = tokio::sync::oneshot::channel::<()>();
-        self.client_termination_signaler = Some(server_termination_sender);
-        self.local_termination_is_complete_receiver = Some(local_termination_is_complete_receiver);
         let ip = self.ip.clone();
         let port = self.port;
 
+        let returned_connection_sink = self.returned_connection_sink.clone();
+        let local_termination_is_complete_sender = self.local_termination_is_complete_sender.clone();
+        let client_termination_signaler = self.client_termination_signaler.clone();
+
         let connection_events_callback = upgrade_to_connection_event_tracking(&self.connected, local_termination_is_complete_sender, connection_events_callback);
 
-        let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&ip, port);
-        let connection = connection_manager.connect_retryable().await
-            .map_err(|err| format!("Error making client connection to {}:{} -- {err}", self.ip, self.port))?;
+        // the source of connections for this processor to start working on
+        let mut connection_provider = ConnectionChannel::new();
+        let mut connection_source = connection_provider.receiver()
+            .ok_or_else(|| format!("couldn't move the Connection Receiver out of the Connection Provider"))?;
+
+
+
+
         tokio::spawn(async move {
-            let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
-            let result = socket_communications_handler.client_for_responsive_text_protocol(connection,
-                                                                                           server_termination_receiver,
-                                                                                           connection_events_callback,
-                                                                                           dialog_processor_builder_fn).await
-                .map_err(|err| format!("Error while executing the dialog processor: {err}"));
-            match result {
-                Ok((mut socket, _)) => {
-                    if let Err(err) = socket.shutdown().await {
-                        trace!("`reactive-messaging::SocketClient`: COULDN'T shutdown the socket (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
-                        // ... it may have already been done by the other end
+            /*while*/ if let Some(connection) = connection_source.recv().await {
+                let client_termination_receiver = client_termination_signaler.expect("BUG! client_termination_signaler is NONE").subscribe();
+
+                let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
+                let result = socket_communications_handler.client_for_responsive_text_protocol(connection,
+                                                                                                               client_termination_receiver,
+                                                                                                               connection_events_callback,
+                                                                                                               dialog_processor_builder_fn).await
+                    .map_err(|err| format!("Error while executing the dialog processor: {err}"));
+                match result {
+                    Ok((mut socket, _)) => {
+                        if let Err(err) = socket.shutdown().await {
+                            trace!("`reactive-messaging::CompositeGenericSocketClient`: COULDN'T shutdown the socket (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
+                            // ... it may have already been done by the other end
+                        }
                     }
-                }
-                Err(err) => {
-                    error!("`reactive-messaging::SocketClient`: ERROR in client (responsive & textual) @ {ip}:{port}: {err}");
+                    Err(err) => {
+                        error!("`reactive-messaging::CompositeGenericSocketClient`: ERROR in client (responsive & textual) @ {ip}:{port}: {err}");
+                    }
                 }
             }
         });
-        Ok(())
+        self.spawned_processors_count = 1;
+        Ok(connection_provider)
     }
 
     /// Returns an async closure that blocks until [Self::terminate()] is called.
@@ -614,17 +645,19 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     ///     self.termination_waiter()().await;
     pub fn termination_waiter(&mut self) -> impl FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>> {
         let mut local_termination_receiver = self.local_termination_is_complete_receiver.take();
+        let mut latch = self.spawned_processors_count;
         move || Box::pin({
             async move {
-                if let Some(local_termination_receiver) = local_termination_receiver.take() {
-                    match local_termination_receiver.await {
-                        Ok(()) => {
-                            Ok(())
-                        },
-                        Err(err) => Err(Box::from(format!("GenericSocketClient::termination_waiter(): It is no longer possible to tell when the client will be terminated: `one_shot` signal error: {err}")))
+                if let Some(mut local_termination_receiver) = local_termination_receiver.take() {
+                    while latch > 0 {
+                        match local_termination_receiver.recv().await {
+                            Some(()) => latch -= 1,
+                            None     => return Err(Box::from(format!("CompositeGenericSocketClient::termination_waiter(): It is no longer possible to tell when the client will be terminated: the broadcast channel was closed")))
+                        }
                     }
+                    Ok(())
                 } else {
-                    Err(Box::from("GenericSocketClient: \"wait for termination\" requested, but the client was not started (or a previous service termination was commanded) at the moment `termination_waiter()` was called"))
+                    Err(Box::from("CompositeGenericSocketClient: \"wait for termination\" requested, but the client was not started (or a previous service termination was commanded) at the moment `termination_waiter()` was called"))
                 }
             }
         })
@@ -634,18 +667,15 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
     /// It is a good practice that the `connection_events_handler()` you provided when starting the client
     /// informs the server that a client-initiated disconnection (due to the call to this method) is happening
     /// -- and the protocol is encouraged to support that.
-    pub fn terminate(mut self, timeout_ms: u32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn terminate(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match self.client_termination_signaler.take() {
-            Some(server_sender) => {
-                warn!("GenericSocketClient: Shutdown asked & initiated for client connected @ {}:{} -- timeout: {timeout_ms}ms", self.ip, self.port);
-                if let Err(_sent_value) = server_sender.send(timeout_ms) {
-                    Err(Box::from("GenericSocketServer BUG: couldn't send termination signal to the network loop. Program is, likely, hanged. Please, investigate and fix!"))
-                } else {
-                    Ok(())
-                }
+            Some(client_sender) => {
+                warn!("`reactive-messaging::CompositeGenericSocketClient`: Shutdown asked & initiated for client connected @ {}:{}", self.ip, self.port);
+                _ = client_sender.send(());
+                Ok(())
             }
             None => {
-                Err(Box::from("GenericSocketServer: Shutdown requested, but the service was not started. Ignoring..."))
+                Err(Box::from("Shutdown requested, but the service was not started. Ignoring..."))
             }
         }
     }
@@ -695,8 +725,9 @@ mod tests {
     }
 
     /// Test that our client types are ready for usage
+    /// (showcases the "single protocol" case)
     #[cfg_attr(not(doc),tokio::test)]
-    async fn doc_usage() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+    async fn doc_usage() {
 
         // demonstrates how to build an unresponsive client
         ///////////////////////////////////////////////////
@@ -707,10 +738,10 @@ mod tests {
             443,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages);
-        spawn_unresponsive_client_processor!(client,
+        start_unresponsive_client_processor!(client,
             connection_events_handler,
             unresponsive_processor
-        )?;
+        ).expect("Error starting a single protocol client");
         async fn connection_events_handler<const CONFIG:  u64,
                                            LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
                                            SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
@@ -728,8 +759,8 @@ mod tests {
             client_messages_stream.map(|_payload| ())
         }
         let wait_for_termination = client.termination_waiter();
-        client.terminate(200)?;
-        wait_for_termination().await?;
+        client.terminate().expect("Error on client Termination command");
+        wait_for_termination().await.expect("Error waiting for client Termination");;
 
         // demonstrates how to build a responsive server
         ////////////////////////////////////////////////
@@ -740,10 +771,10 @@ mod tests {
             443,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages);
-        spawn_responsive_client_processor!(client,
+        start_responsive_client_processor!(client,
             connection_events_handler,
             responsive_processor
-        )?;
+        ).expect("Error starting a single protocol client");
         fn responsive_processor<const CONFIG:   u64,
                                 SenderChannel:  FullDuplexUniChannel<ItemType=DummyClientAndServerMessages, DerivedItemType=DummyClientAndServerMessages> + Send + Sync,
                                 StreamItemType: Deref<Target=DummyClientAndServerMessages>>
@@ -755,8 +786,8 @@ mod tests {
             client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         }
         let wait_for_termination = client.termination_waiter();
-        client.terminate(200)?;
-        wait_for_termination().await?;
+        client.terminate().expect("Error on client Termination command");
+        wait_for_termination().await.expect("Error waiting for client Termination");
 
         // demonstrates how to use it with closures -- also allowing for any channel in the configs
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -766,13 +797,13 @@ mod tests {
             443,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages);
-        spawn_unresponsive_client_processor!(client,
+        start_unresponsive_client_processor!(client,
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
-        )?;
+        ).expect("Error starting a single protocol client");
         let wait_for_termination = client.termination_waiter();
-        client.terminate(200)?;
-        wait_for_termination().await?;
+        client.terminate().expect("Error on client Termination command");
+        wait_for_termination().await.expect("Error waiting for client Termination");
 
         // demonstrates how to use the concrete type
         ////////////////////////////////////////////
@@ -794,16 +825,15 @@ mod tests {
                                                                                      ProcessorUniType,
                                                                                      SenderChannelType,
                                                                                      () >
-                                                                                 :: new("66.45.249.218",443);
-        client.spawn_unresponsive_processor(
+                                                                                 :: new(REMOTE_SERVER,443);
+        let connection_channel = client.spawn_unresponsive_processor(
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
-        ).await?;
+        ).await.expect("Error spawning a protocol processor");
+        client.start_with_single_protocol(connection_channel).await.expect("Error starting a single protocol client");
         let wait_for_termination = client.termination_waiter();
-        client.terminate(200)?;
-        wait_for_termination().await?;
-
-        Ok(())
+        client.terminate().expect("Error on client Termination command");
+        wait_for_termination().await.expect("Error waiting for client Termination");
     }
 
     #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]

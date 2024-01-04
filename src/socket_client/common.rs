@@ -23,7 +23,7 @@ pub fn upgrade_to_connection_event_tracking<const CONFIG:                   u64,
                                             StateType:                                                                                                    Send + Sync                     + 'static>
 
                                            (connected_state:                          &Arc<AtomicBool>,
-                                            termination_is_complete_signaler:         tokio::sync::oneshot::Sender<()>,
+                                            termination_is_complete_signaler:         tokio::sync::mpsc::Sender<()>,
                                             user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
                                            -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
@@ -41,7 +41,7 @@ pub fn upgrade_to_connection_event_tracking<const CONFIG:                   u64,
                     warn!("{}", cant_take_msg);
                     return
                 };
-            if let Err(_sent_value) = termination_is_complete_signaler.send(()) {
+            if let Err(_sent_value) = termination_is_complete_signaler.send(()).await {
                 error!("Socket Client BUG: couldn't send the 'Termination is Complete' signal to the local `one_shot` channel. A deadlock (waiting on a client that will never terminate) might occur. Please, investigate and fix!");
             }
         };

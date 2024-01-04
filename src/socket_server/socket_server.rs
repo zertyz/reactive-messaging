@@ -79,7 +79,7 @@ macro_rules! new_socket_server {
      $port:            expr,
      $remote_messages: ty,
      $local_messages:  ty) => {
-        new_composite_socket_server!($const_config, $interface_ip, $port, $remote_messages, $local_messages, ())
+        crate::new_composite_socket_server!($const_config, $interface_ip, $port, $remote_messages, $local_messages, ())
     }
 }
 pub use new_socket_server;
@@ -165,8 +165,10 @@ macro_rules! start_unresponsive_server_processor {
     ($socket_server:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        let connection_channel = spawn_unresponsive_composite_server_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn)?;
-        $socket_server.start_with_single_protocol(connection_channel).await
+        match crate::spawn_unresponsive_composite_server_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+            Ok(connection_channel) => $socket_server.start_with_single_protocol(connection_channel).await,
+            Err(err) => Err(err),
+        }
     }}
 }
 pub use start_unresponsive_server_processor;
@@ -199,8 +201,10 @@ macro_rules! start_responsive_server_processor {
     ($socket_server:                expr,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        let connection_channel = spawn_responsive_composite_server_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn)?;
-        $socket_server.start_with_single_protocol(connection_channel).await
+        match crate::spawn_responsive_composite_server_processor!($socket_server, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+            Ok(connection_channel) => $socket_server.start_with_single_protocol(connection_channel).await,
+            Err(err) => Err(err),
+        }
     }}
 }
 pub use start_responsive_server_processor;
@@ -472,7 +476,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
         Ok(())
     }
 
-    /// Spawns a task to start the local server, returning immediately.\
+    /// Spawns a task dedicated to the given "unresponsive protocol processor", returning immediately.\
     /// The given `dialog_processor_builder_fn` will be called for each new connection and should return a `Stream`
     /// that will produce non-futures & non-fallible items that **won't be sent to the client**:
     ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events (possibly to manage sessions). Sign it as:
@@ -530,7 +534,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
         Ok(connection_provider)
     }
 
-    /// Spawns a task to start the local server, returning immediately,
+    /// Spawns a task dedicated to the given "responsive protocol processor", returning immediately,
     /// The given `dialog_processor_builder_fn` will be called for each new connection and will return a `Stream`
     /// that will produce non-futures & non-fallible items that *will be sent to the client*:
     ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events (possibly to manage sessions). Sign it as:
@@ -642,7 +646,7 @@ mod tests {
         new_composite_socket_client,
         ron_deserializer,
         ron_serializer,
-        spawn_responsive_client_processor,
+        start_responsive_client_processor,
     };
     use std::{
         future,
@@ -908,7 +912,7 @@ mod tests {
             PORT,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages);
-        spawn_responsive_client_processor!(
+        start_responsive_client_processor!(
             client,
             |_| async {},
             move |_, _, _, server_messages| {
@@ -1088,7 +1092,7 @@ mod tests {
             PORT,
             String,
             String);
-        spawn_responsive_client_processor!(
+        start_responsive_client_processor!(
             client,
             |connection_event| async {
                 match connection_event {

@@ -153,6 +153,7 @@ impl<const CONFIG:        u64,
     ///   - sending messages back to the server will be done explicitly by `peer`;
     ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
     ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
+    // TODO 2024-01-03: make this able to process the same connection as many times as needed, for symmetry with the server -- practically, allowing connection reuse
     #[inline(always)]
     pub async fn client_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
                                                        OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
@@ -162,7 +163,7 @@ impl<const CONFIG:        u64,
 
                                                       (self,
                                                        socket:                      TcpStream,
-                                                       shutdown_signaler:           tokio::sync::oneshot::Receiver<u32>,
+                                                       mut shutdown_signaler:       tokio::sync::broadcast::Receiver<()>,
                                                        connection_events_callback:  ConnectionEventsCallback,
                                                        dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -193,20 +194,14 @@ impl<const CONFIG:        u64,
         // spawn the shutdown listener
         let addr = addr.to_string();
         tokio::spawn(async move {
-            let timeout_ms = match shutdown_signaler.await {
-                Ok(timeout_millis) => {
-                    trace!("reactive-messaging: SHUTDOWN requested for client connected to server @ {addr} -- with timeout {}ms: notifying & dropping the connection", timeout_millis);
-                    timeout_millis
-                },
-                Err(err) => {
-                    error!("reactive-messaging: PROBLEM in the `shutdown signaler` client connected to server @ {addr} (a client shutdown will be commanded now due to this occurrence): {:?}", err);
-                    5000    // consider this as the "problematic shutdown timeout (millis) constant"
-                },
+            match shutdown_signaler.recv().await {
+                Ok(())             => trace!("reactive-messaging: SHUTDOWN requested for client connected to server @ {addr} -- notifying & dropping the connection"),
+                Err(err) => error!("reactive-messaging: PROBLEM in the `shutdown signaler` client connected to server @ {addr} (a client shutdown will be commanded now due to this occurrence): {err:?}"),
             };
             // issue the shutdown event
             connection_events_callback_ref2(ConnectionEvent::LocalServiceTermination).await;
             // close the connection
-            peer_ref3.flush_and_close(Duration::from_millis(timeout_ms as u64)).await;
+            peer_ref3.flush_and_close(Duration::from_millis(100)).await;
         });
 
         // the processor
@@ -380,6 +375,7 @@ impl<const CONFIG:        u64,
 
     /// Similar to [Self::client_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
     /// answers of type `ClientMessages`, which will be automatically routed to the server.
+    // TODO 2024-01-03: make this able to process the same connection as many times as needed, for symmetry with the server -- practically, allowing connection reuse
     #[inline(always)]
     pub async fn client_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                                        + Send +        'static,
                                                      ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
@@ -388,7 +384,7 @@ impl<const CONFIG:        u64,
 
                                                     (self,
                                                      socket:                      TcpStream,
-                                                     shutdown_signaler:           tokio::sync::oneshot::Receiver<u32>,
+                                                     shutdown_signaler:           tokio::sync::broadcast::Receiver<()>,
                                                      connection_events_callback:  ConnectionEventsCallback,
                                                      dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -593,8 +589,7 @@ mod tests {
         let server_secret = String::from("now the 40 of you may enter");
         let observed_secret = Arc::new(Mutex::new(None));
 
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (_client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let (_client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(1);
 
         // server
         let client_secret_ref = client_secret.clone();
@@ -604,7 +599,7 @@ mod tests {
         let new_connections_source = connection_provider.connection_receiver()
             .expect("Sanity Check: couldn't move the Connection Receiver out of the Connection Provider");
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
             |connection_event| {
@@ -671,7 +666,7 @@ mod tests {
         println!("### Started a client -- which is running concurrently, in the background... it has 100ms to do its thing!");
 
         tokio::time::sleep(Duration::from_millis(100)).await;
-        server_shutdown_sender.send(500).expect("sending server shutdown signal");
+        server_connections_source.close();  // terminates the server
 
         println!("### Waiting a little for the shutdown signal to reach the server...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -691,15 +686,15 @@ mod tests {
         const TEST_DURATION_NS:    u64  = TEST_DURATION_MS * 1e6 as u64;
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         const PORT               : u16  = 8571;
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
+
+        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(1);
 
         // server
         let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT).await
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
@@ -756,8 +751,8 @@ mod tests {
 
         println!("### Measuring latency for {TEST_DURATION_MS} milliseconds...");
         tokio::time::sleep(Duration::from_millis(TEST_DURATION_MS)).await;
-        server_shutdown_sender.send(500).expect("sending server shutdown signal");
-        client_shutdown_sender.send(500).expect("sending client shutdown signal");
+        server_connections_source.close();  // terminates the server
+        client_shutdown_sender.send(()).expect("sending client termination signal");
 
         println!("### Waiting a little for the shutdown signal to reach the server...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -782,8 +777,7 @@ mod tests {
         const TEST_DURATION_MS:    u64  = 2000;
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         const PORT               : u16  = 8572;
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(1);
 
         // server -- do not answer to (flood) messages (just parses & counts them, making sure they are received in the right order)
         // message format is "DoNotAnswer(n)", where n should be sent by the client in natural order, starting from 0
@@ -795,7 +789,7 @@ mod tests {
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
@@ -861,8 +855,8 @@ mod tests {
         println!("### Measuring latency for 2 seconds...");
 
         tokio::time::sleep(Duration::from_millis((TEST_DURATION_MS as f64 * 1.01) as u64)).await;    // allow the test to take 1% more than the necessary to avoid silly errors
-        client_shutdown_sender.send(500).expect("sending client shutdown signal");
-        server_shutdown_sender.send(500).expect("sending server shutdown signal");
+        client_shutdown_sender.send(()).expect("sending client termination signal");
+        server_connections_source.close();  // terminates the server
 
         println!("### Waiting a little for the shutdown signal to reach the server...");
         tokio::time::sleep(Duration::from_millis(505)).await;
@@ -895,8 +889,7 @@ mod tests {
         let server_secret = String::from("now the 40 of you may enter");
         let observed_secret = Arc::new(Mutex::new(None));
 
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (_client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let (_client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(1);
 
         // server
         let client_secret_ref = client_secret.clone();
@@ -905,7 +898,7 @@ mod tests {
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_communications_handler.server_loop_for_responsive_text_protocol(LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
                                                                                |_connection_event| future::ready(()),
@@ -954,7 +947,7 @@ mod tests {
         println!("### Started a client -- which is running concurrently, in the background... it has 100ms to do its thing!");
 
         tokio::time::sleep(Duration::from_millis(100)).await;
-        server_shutdown_sender.send(500).expect("sending server shutdown signal");
+        server_connections_source.close();  // sends the server termination signal
 
         println!("### Waiting a little for the shutdown signal to reach the server...");
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -974,14 +967,13 @@ mod tests {
         let client_disconnected = Arc::new(AtomicBool::new(false));
         let client_disconnected_ref = Arc::clone(&client_disconnected);
 
-        let (server_shutdown_sender, server_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
-        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::oneshot::channel::<u32>();
+        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(1);
 
         let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT).await
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
@@ -1019,13 +1011,13 @@ mod tests {
 
         // wait a bit for the connection, shutdown the client, wait another bit
         tokio::time::sleep(Duration::from_millis(100)).await;
-        client_shutdown_sender.send(50).expect("sending client shutdown signal");
+        client_shutdown_sender.send(()).expect("sending client shutdown signal");
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         assert!(client_disconnected.load(Relaxed), "Client didn't drop the connection with the server");
         assert!(server_disconnected.load(Relaxed), "Server didn't notice the drop in the connection made by the client");
 
-        // unneeded, but avoids error logs on the oneshot channel being dropped
-        server_shutdown_sender.send(50).expect("sending server shutdown signal");
+        // unneeded, but placed here for symmetry
+        server_connections_source.close();  // sends the server termination command
     }
 }
