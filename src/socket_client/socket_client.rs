@@ -53,6 +53,7 @@ use std::{
         atomic::AtomicBool,
     },
 };
+use std::sync::atomic::Ordering::Relaxed;
 use reactive_mutiny::prelude::advanced::{
     ChannelUniMoveAtomic,
     ChannelUniMoveCrossbeam,
@@ -117,48 +118,48 @@ macro_rules! new_composite_socket_client {
         const _PROCESSOR_UNI_INSTRUMENTS: usize = $const_config.executor_instruments.into();
         const _SENDER_BUFFER:             usize = $const_config.sender_buffer   as usize;
         match $const_config.channel {
-            Channels::Atomic => CompositeSocketClient::<_CONFIG,
-                                                        $remote_messages,
-                                                        $local_messages,
-                                                        $state_type,
-                                                        _PROCESSOR_BUFFER,
-                                                        _PROCESSOR_UNI_INSTRUMENTS,
-                                                        _SENDER_BUFFER>
-                                                     ::Atomic(CompositeGenericSocketClient::<_CONFIG,
-                                                                                             $remote_messages,
-                                                                                             $local_messages,
-                                                                                             UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                                             ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>,
-                                                                                             $state_type >
-                                                                                          ::new($ip, $port) ),
-            Channels::FullSync => CompositeSocketClient::<_CONFIG,
-                                                          $remote_messages,
-                                                          $local_messages,
-                                                          $state_type,
-                                                          _PROCESSOR_BUFFER,
-                                                          _PROCESSOR_UNI_INSTRUMENTS,
-                                                          _SENDER_BUFFER>
-                                                       ::FullSync(CompositeGenericSocketClient::<_CONFIG,
-                                                                                                 $remote_messages,
-                                                                                                 $local_messages,
-                                                                                                 UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                                                 ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>,
-                                                                                                 $state_type >
-                                                                                              ::new($ip, $port) ),
-            Channels::Crossbeam => CompositeSocketClient::<_CONFIG,
-                                                           $remote_messages,
-                                                           $local_messages,
-                                                           $state_type,
-                                                           _PROCESSOR_BUFFER,
-                                                           _PROCESSOR_UNI_INSTRUMENTS,
-                                                           _SENDER_BUFFER>
-                                                        ::Crossbeam(CompositeGenericSocketClient::<_CONFIG,
-                                                                                                   $remote_messages,
-                                                                                                   $local_messages,
-                                                                                                   UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
-                                                                                                   ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>,
-                                                                                                   $state_type >
-                                                                                                ::new($ip, $port) ),
+            Channels::Atomic => crate::CompositeSocketClient::<_CONFIG,
+                                                               $remote_messages,
+                                                               $local_messages,
+                                                               $state_type,
+                                                               _PROCESSOR_BUFFER,
+                                                               _PROCESSOR_UNI_INSTRUMENTS,
+                                                               _SENDER_BUFFER>
+                                                            ::Atomic(crate::CompositeGenericSocketClient::<_CONFIG,
+                                                                                                           $remote_messages,
+                                                                                                           $local_messages,
+                                                                                                           UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                                           ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                                           $state_type >
+                                                                                                        ::new($ip, $port) ),
+            Channels::FullSync => crate::CompositeSocketClient::<_CONFIG,
+                                                                 $remote_messages,
+                                                                 $local_messages,
+                                                                 $state_type,
+                                                                 _PROCESSOR_BUFFER,
+                                                                 _PROCESSOR_UNI_INSTRUMENTS,
+                                                                 _SENDER_BUFFER>
+                                                              ::FullSync(crate::CompositeGenericSocketClient::<_CONFIG,
+                                                                                                               $remote_messages,
+                                                                                                               $local_messages,
+                                                                                                               UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                                               ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                                               $state_type >
+                                                                                                            ::new($ip, $port) ),
+            Channels::Crossbeam => crate::CompositeSocketClient::<_CONFIG,
+                                                                  $remote_messages,
+                                                                  $local_messages,
+                                                                  $state_type,
+                                                                  _PROCESSOR_BUFFER,
+                                                                  _PROCESSOR_UNI_INSTRUMENTS,
+                                                                  _SENDER_BUFFER>
+                                                               ::Crossbeam(crate::CompositeGenericSocketClient::<_CONFIG,
+                                                                                                                 $remote_messages,
+                                                                                                                 $local_messages,
+                                                                                                                 UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>,
+                                                                                                                 ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>,
+                                                                                                                 $state_type >
+                                                                                                              ::new($ip, $port) ),
         }
     }}
 }
@@ -192,9 +193,9 @@ macro_rules! spawn_unresponsive_composite_client_processor {
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         match &mut $socket_server {
-            CompositeSocketClient::Atomic    (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            CompositeSocketClient::FullSync  (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            CompositeSocketClient::Crossbeam (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            crate::CompositeSocketClient::Atomic    (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            crate::CompositeSocketClient::FullSync  (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            crate::CompositeSocketClient::Crossbeam (generic_composite_socket_client)  => generic_composite_socket_client.spawn_unresponsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
         }
     }}
 }
@@ -229,9 +230,9 @@ macro_rules! spawn_responsive_composite_client_processor {
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         match &mut $socket_client {
-            CompositeSocketClient::Atomic    (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            CompositeSocketClient::FullSync  (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
-            CompositeSocketClient::Crossbeam (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            crate::CompositeSocketClient::Atomic    (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            crate::CompositeSocketClient::FullSync  (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
+            crate::CompositeSocketClient::Crossbeam (generic_composite_socket_client)  => generic_composite_socket_client.spawn_responsive_processor($connection_events_handler_fn, $dialog_processor_builder_fn).await,
         }
     }}
 }
@@ -296,6 +297,15 @@ pub enum CompositeSocketClient<const CONFIG:                    u64,
              CompositeSocketClient::Atomic    (composite_socket_client) => composite_socket_client.start_with_routing_closure(protocol_stacking_closure).await,
              CompositeSocketClient::FullSync  (composite_socket_client) => composite_socket_client.start_with_routing_closure(protocol_stacking_closure).await,
              CompositeSocketClient::Crossbeam (composite_socket_client) => composite_socket_client.start_with_routing_closure(protocol_stacking_closure).await,
+         }
+     }
+
+     /// See [CompositeGenericSocketClient::is_connected()]
+     pub fn is_connected(&self) -> bool {
+         match self {
+             CompositeSocketClient::Atomic    (composite_socket_client) => composite_socket_client.is_connected(),
+             CompositeSocketClient::FullSync  (composite_socket_client) => composite_socket_client.is_connected(),
+             CompositeSocketClient::Crossbeam (composite_socket_client) => composite_socket_client.is_connected(),
          }
      }
 
@@ -638,6 +648,11 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
         Ok(connection_provider)
     }
 
+    /// Tells if the connection is active & valid
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(Relaxed)
+    }
+
     /// Returns an async closure that blocks until [Self::terminate()] is called.
     /// Example:
     /// ```no_compile
@@ -687,8 +702,11 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
 #[cfg(any(test,doc))]
 mod tests {
     use super::*;
-    use crate::{config::ConstConfig, ron_deserializer, ron_serializer};
+    use crate::{config::ConstConfig, new_socket_server, ron_deserializer, ron_serializer, start_unresponsive_server_processor};
     use std::{future, ops::Deref};
+    use std::sync::atomic::Ordering::Relaxed;
+    use std::sync::Mutex;
+    use std::time::Duration;
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
 
@@ -696,9 +714,9 @@ mod tests {
     const REMOTE_SERVER: &str = "66.45.249.218";
 
 
-    /// Test that our instantiation macro is able to produce servers backed by all possible channel types
+    /// Test that our instantiation macro is able to produce clients backed by all possible channel types
     #[cfg_attr(not(doc), test)]
-    fn instantiation() {
+    fn single_protocol_instantiation() {
         let atomic_client = new_socket_client!(
             ConstConfig {
                 channel: Channels::Atomic,
@@ -721,6 +739,34 @@ mod tests {
                 ..ConstConfig::default()
             },
             REMOTE_SERVER, 443, String, String);
+        assert!(matches!(crossbeam_client, CompositeSocketClient::Crossbeam(_)), "a Crossbeam Client couldn't be instantiated");
+    }
+
+    /// Test that our instantiation macro is able to produce clients backed by all possible channel types
+    #[cfg_attr(not(doc), test)]
+    fn composite_protocol_instantiation() {
+        let atomic_client = new_composite_socket_client!(
+            ConstConfig {
+                channel: Channels::Atomic,
+                ..ConstConfig::default()
+            },
+            REMOTE_SERVER, 443, String, String, () );
+        assert!(matches!(atomic_client, CompositeSocketClient::Atomic(_)), "an Atomic Client couldn't be instantiated");
+
+        let fullsync_client = new_composite_socket_client!(
+            ConstConfig {
+                channel: Channels::FullSync,
+                ..ConstConfig::default()
+            },
+            REMOTE_SERVER, 443, String, String, ());
+        assert!(matches!(fullsync_client, CompositeSocketClient::FullSync(_)), "a FullSync Client couldn't be instantiated");
+
+        let crossbeam_client = new_composite_socket_client!(
+            ConstConfig {
+                channel: Channels::Crossbeam,
+                ..ConstConfig::default()
+            },
+            REMOTE_SERVER, 443, String, String, ());
         assert!(matches!(crossbeam_client, CompositeSocketClient::Crossbeam(_)), "a Crossbeam Client couldn't be instantiated");
     }
 
@@ -835,6 +881,87 @@ mod tests {
         client.terminate().expect("Error on client Termination command");
         wait_for_termination().await.expect("Error waiting for client Termination");
     }
+
+    /// Ensures the termination of a client works according to the specification.\
+    /// The following clients and servers will only exchange a message when
+    /// they want the other party to disconnect.
+    #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    async fn termination_process() {
+        const IP: &str = "127.0.0.1";
+        const PORT: u16 = 8030;
+
+        // CASE 1: locally initiated termination -- client still being active
+        let connected_to_client = Arc::new(AtomicBool::new(false));
+        let connected_to_client_ref = Arc::clone(&connected_to_client);
+        let mut server = new_socket_server!(ConstConfig::default(), IP, PORT, String, String);
+        start_unresponsive_server_processor!(server,
+            move |event| {
+                let connected_to_client_ref = Arc::clone(&connected_to_client_ref);
+                async move {
+                    match event {
+                        ConnectionEvent::PeerConnected { .. } => {
+                            connected_to_client_ref.store(true, Relaxed);
+                        },
+                        ConnectionEvent::PeerDisconnected { .. } => {},
+                        ConnectionEvent::LocalServiceTermination => {},
+                    }
+                }
+            },
+            |_, _, _, stream| stream
+        );
+        let mut client = new_socket_client!(ConstConfig::default(), IP, PORT, String, String);
+        start_unresponsive_client_processor!(client,
+            |_| future::ready(()),
+            |_, _, peer, stream| stream
+        );
+        let termination_waiter = client.termination_waiter();
+        // sleep a little for the connection to be established.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(connected_to_client.load(Relaxed), "Client didn't connect to server");
+        assert!(client.is_connected(), "`client` didn't report any connection");
+        client.terminate().expect("Couldn not terminate the client");
+        _ = tokio::time::timeout(Duration::from_millis(100), termination_waiter()).await
+            .expect("Timed out (>100ms) waiting the the client's termination");
+        server.terminate().await.expect("Could not terminate the server");
+
+        // CASE 2: automatic termination after disconnection
+        let connected_to_client = Arc::new(AtomicBool::new(false));
+        let connected_to_client_ref = Arc::clone(&connected_to_client);
+        let mut server = new_socket_server!(ConstConfig::default(), IP, PORT, String, String);
+        start_unresponsive_server_processor!(server,
+            move |event| {
+                let connected_to_client_ref = Arc::clone(&connected_to_client_ref);
+                async move {
+                    match event {
+                        ConnectionEvent::PeerConnected { peer } => {
+                            connected_to_client_ref.store(true, Relaxed);
+                            peer.send(String::from("Goodbye")).expect("Couldn't send");
+                        },
+                        ConnectionEvent::PeerDisconnected { .. } => {},
+                        ConnectionEvent::LocalServiceTermination => {},
+                    }
+                }
+            },
+            |_, _, _, stream| stream
+        );
+        let mut client = new_socket_client!(ConstConfig::default(), IP, PORT, String, String);
+        start_unresponsive_client_processor!(client,
+            |_| future::ready(()),
+            |_, _, peer, stream| stream.map(move |_msg| peer.cancel_and_close())     // close the connection when any message arrives
+        );
+        let termination_waiter = client.termination_waiter();
+        // sleep a little for the communications to go on.
+        // After this, the server should have disconnected the client and calling `termination_waiter()` should return immediately
+        // (without the need to call `client.terminate()`)
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(connected_to_client.load(Relaxed), "Client didn't connect to server");
+        _ = tokio::time::timeout(Duration::from_millis(1), termination_waiter()).await
+            .expect("A disconnected client should signal its `termination_waiter()` for an immediate return -- what didn't happen");
+        assert!(!client.is_connected(), "`client` didn't report the disconnection");
+        server.terminate().await.expect("Could not terminate the server");
+
+    }
+
 
     #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
     enum DummyClientAndServerMessages {
