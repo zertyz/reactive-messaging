@@ -948,11 +948,11 @@ mod tests {
     }
 
     /// assures the "Composite Protocol Stacking" pattern is supported & correctly implemented:
-    ///   1) New connections are always handled by the first processor
+    ///   1) New server connections are always handled by the first processor
     ///   2) Connections can be routed freely among processors
-    ///   3) "Last States" are taken into account, viabilizing the "connection routing closure"
+    ///   3) "Last States" are taken into account, enabling the "connection routing closure"
     ///   4) Connections can be closed after the last processor are through with them
-    /// -- for these, all processors (but the first) will answer with a "welcome message" (this is the suggested behavior).
+    /// -- for these, all processors (but the first) will answer with a "welcome message" (this is the suggested behavior for servers).
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     async fn composite_protocol_stacking_pattern() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
@@ -1072,7 +1072,8 @@ mod tests {
             }
         )?;
 
-        // this closure will...
+        // this closure will route the connections based on the states the processors above had set
+        // (it will be called whenever a protocol processor ends -- "returning" the connection)
         let connection_routing_closure = move |_connection: &TcpStream, last_state: Option<Protocols>|
             if let Some(last_state) = last_state {
                 match last_state {
@@ -1091,7 +1092,7 @@ mod tests {
         // start the client that will only connect and listen to messages until it is disconnected
         let mut client = new_socket_client!(
             ConstConfig::default(),
-            "127.0.0.1",
+            LISTENING_INTERFACE,
             PORT,
             String,
             String);
@@ -1114,10 +1115,6 @@ mod tests {
         // wait for the client to do its stuff
         _ = tokio::time::timeout(Duration::from_secs(5), client_waiter()).await
             .expect("TIMED OUT (>5s) Waiting for the client & server to do their stuff & disconnect the client");
-        // // // wait for the client to connect
-        // // while client_peer_ref2.lock().await.is_none() {
-        //     tokio::time::sleep(Duration::from_millis(10000)).await;
-        // // }
 
         // terminate the server & wait until the shutdown process is complete
         server.terminate().await?;
