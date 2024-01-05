@@ -72,14 +72,14 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
                     .retry_with_async(retry_result_supplier)
                     .yielding_until_timeout(Duration::from_millis(millis as u64), || Box::from(format!("Timed out (>{millis}ms) while attempting to connect to {}:{}", self.host, self.port)))
                     .await,
-            RetryingStrategies::RetrySpinningForUpToMillis(millis) =>
+            RetryingStrategies::RetrySpinningForUpToMillis(_millis) =>
                 todo!("THIS OPTION SHOULD BE REMOVED, AS IT IS NOT SUPPORTED BY KEEN-RETRY")
         };
         resolved_result
             .inspect_recovered(|retrying_duration, _, errors|
                warn!("`reactive-messaging::SocketClient`: Connection to {}:{} SUCCEEDED Succeeded after retrying {} times in {:?}. Transient errors: {}",
                      self.host, self.port, errors.len(), retrying_duration, keen_retry::loggable_retry_errors(&errors)) )
-           .inspect_given_up(|retrying_duration, mut transient_errors, fatal_error|
+           .inspect_given_up(|retrying_duration, transient_errors, fatal_error|
                error!("`reactive-messaging::SocketClient`: Connection to {}:{} was GIVEN UP after retrying {} times in {:?}, with transient errors {}. The last error was {}",
                       self.host, self.port, transient_errors.len()+1, retrying_duration, keen_retry::loggable_retry_errors(&transient_errors), fatal_error) )
            .inspect_unrecoverable(|retrying_duration, transient_errors, fatal_error|
@@ -142,8 +142,6 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
 /// supplying them to an internal [ConnectionChannel] (while also allowing manually fed connections).
 pub struct ServerConnectionHandler {
     connection_channel:          ConnectionChannel,
-    listening_interface:         String,
-    listening_port:              u16,
     network_event_loop_signaler: tokio::sync::oneshot::Sender<()>,
 }
 
@@ -151,16 +149,13 @@ impl ServerConnectionHandler {
 
     /// Creates a new instance of a server, binding to the specified `listening_interface` and `listening_port`.\
     /// Incoming connections are [feed()] as they arrive -- but you can also do so manually, by calling the mentioned method.
-    pub async fn new<IntoString: Into<String>>(listening_interface: IntoString, listening_port: u16) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let listening_interface = listening_interface.into();
+    pub async fn new(listening_interface: &str, listening_port: u16) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         let connection_channel = ConnectionChannel::new();
         let connection_sender = connection_channel.sender.clone();
         let (network_event_loop_sender, network_event_loop_receiver) = tokio::sync::oneshot::channel::<()>();
         Self::spawn_connection_listener(&listening_interface, listening_port, connection_sender, network_event_loop_receiver).await?;
         Ok(Self {
             connection_channel,
-            listening_interface,
-            listening_port,
             network_event_loop_signaler: network_event_loop_sender,
         })
     }
@@ -176,7 +171,7 @@ impl ServerConnectionHandler {
         tokio::spawn( async move {
             loop {
                 // wait for a connection -- or for a shutdown signal
-                let (connection, addr) = if let Some(accepted_connection_and_addr) = tokio::select! {
+                let (connection, _addr) = if let Some(accepted_connection_and_addr) = tokio::select! {
                     // incoming connection
                     acceptance_result = listener.accept() => {
                         if let Err(err) = acceptance_result {
@@ -325,12 +320,12 @@ mod tests {
         let mut receiver = connection_channel.receiver().expect("The `receiver` should be available at this point");
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;   // proves that the sender will block if the consumer is slower
-            while let Some(connection) = receiver.recv().await {
+            while let Some(_connection) = receiver.recv().await {
                 received_count_ref.fetch_add(1, Relaxed);
             }
             stream_ended_ref.store(true, Relaxed);
         });
-        for i in 0..10 {
+        for _i in 0..10 {
             let value = TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str("66.45.249.218")?), 80)).await?;
             connection_channel.feed(value).await.unwrap_or_else(|_| panic!("Failed to send value"));
         }
@@ -351,10 +346,10 @@ mod tests {
         let received_count_ref = received_count.clone();
         let stream_ended = Arc::new(AtomicBool::new(false));
         let stream_ended_ref = stream_ended.clone();
-        let mut server_connection_handler = ServerConnectionHandler::new(interface.to_string(), port).await?;
+        let mut server_connection_handler = ServerConnectionHandler::new(interface, port).await?;
         let mut connection_receiver = server_connection_handler.connection_receiver().expect("The `receiver` should be available at this point");
         tokio::spawn(async move {
-            while let Some(connection) = connection_receiver.recv().await {
+            while let Some(_connection) = connection_receiver.recv().await {
                 received_count_ref.fetch_add(1, Relaxed);
             }
             stream_ended_ref.store(true, Relaxed);
@@ -385,7 +380,7 @@ mod tests {
         let stream_ended_ref = stream_ended.clone();
 
         // attempt to connect to a non-existing host
-        let mut connect_shareable = ClientConnectionManager::<{ConstConfig::default().into()}>::new("non-existing-host.com.br", port)
+        let connect_shareable = ClientConnectionManager::<{ConstConfig::default().into()}>::new("non-existing-host.com.br", port)
             .into_connect_continuation_closure();
         let mut connect = connect_shareable
             .lock().await;
@@ -410,15 +405,15 @@ mod tests {
         assert_eq!(error_message, "Couldn't connect to socket address '127.0.0.1:8357' resolved from '127.0.0.1:8357': Connection refused (os error 111)", "Wrong error message");
 
         // now with a server listening
-        let mut server_connection_handler = ServerConnectionHandler::new(interface.to_string(), port).await?;
+        let mut server_connection_handler = ServerConnectionHandler::new(interface, port).await?;
         let mut connection_receiver = server_connection_handler.connection_receiver().expect("The `receiver` should be available at this point");
         tokio::spawn(async move {
-            while let Some(connection) = connection_receiver.recv().await {
+            while let Some(_connection) = connection_receiver.recv().await {
                 received_count_ref.fetch_add(1, Relaxed);
             }
             stream_ended_ref.store(true, Relaxed);
         });
-        for i in 0..10 {
+        for _i in 0..10 {
             connect().await
                 .expect_ok(&format!("There is a server listening at {interface}:{port}, so the `connect()` closure should have worked"));
         }

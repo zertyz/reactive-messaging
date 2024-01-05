@@ -18,10 +18,8 @@ use std::{
     net::SocketAddr,
     sync::Arc,
     time::Duration,
-    str::FromStr,
     marker::PhantomData,
 };
-use std::error::Error;
 use reactive_mutiny::prelude::advanced::{GenericUni, FullDuplexUniChannel};
 use futures::{StreamExt, Stream};
 use tokio::{
@@ -31,9 +29,9 @@ use tokio::{
 use log::{trace, debug, warn, error};
 
 
-// Contains abstractions, useful for clients and servers, for dealing with socket connections handled by Stream Processors:\
-//   - handles all combinations of the Stream's output types returned by `dialog_processor_builder_fn()`: futures/non-future & fallible/non-fallible;
-//   - handles unresponsive / responsive output types (also issued by the Streams created by `dialog_processor_builder_fn()`).
+/// Contains abstractions, useful for clients and servers, for dealing with socket connections handled by Stream Processors:\
+///   - handles all combinations of the Stream's output types returned by `dialog_processor_builder_fn()`: futures/non-future & fallible/non-fallible;
+///   - handles unresponsive / responsive output types (also issued by the Streams created by `dialog_processor_builder_fn()`).
 pub struct SocketConnectionHandler<const CONFIG:        u64,
                                    RemoteMessagesType:  ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
                                    LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
@@ -206,7 +204,7 @@ impl<const CONFIG:        u64,
 
         // the processor
         let arc_self = Arc::new(self);
-        let (mut socket, last_state) = arc_self.dialog_loop_for_textual_protocol(socket, peer.clone(), processor_sender).await?;
+        let (socket, last_state) = arc_self.dialog_loop_for_textual_protocol(socket, peer.clone(), processor_sender).await?;
         Ok((socket, last_state))
     }
 
@@ -432,7 +430,7 @@ impl<const CONFIG:        u64,
                 } else if is_disconnect {
                     trace!("reactive-messaging: SocketServer: processor choose to drop connection with {} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
                     if !is_no_answer {
-                        if let Err((abort, error_msg)) = peer.send(outgoing) {
+                        if let Err((_abort, error_msg)) = peer.send(outgoing) {
                             warn!("reactive-messaging: Slow reader detected while sending the closing message to {:?}: {error_msg}", peer);
                         }
                     }

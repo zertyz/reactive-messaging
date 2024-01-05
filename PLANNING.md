@@ -30,7 +30,7 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Backlog
 
-**(n7)** 2024-01-04: Refactor the Connection & associated State -- move the state from Peer to a new, special `TcpStream` type.\
+**(r7)** 2024-01-04: Refactor the Connection & associated State -- move the state from Peer to a new, special `TcpStream` type.\
 Taking in consideration "Composite Protocol Stacking" introduced in *(f6)*, a few ties were left behind regarding the connection States:
 a) `StateType` had to implement `Default` -- this is used to distinguish if the connection is new (just opened) or reused. The former will
    have the state set to `None` and the later have it set to the `Default` -- a safeguard if the processor code doesn't set any state;
@@ -44,6 +44,13 @@ It happens this may be fixed by creating a dedicated "Connection" type, which wo
 4) Update the test socket_client::composite_protocol_stacking_pattern on every `PeerConnected` event to assert that the peer state
    (which is, actually, the connection state) matches the hard coded values
 5) Idem for the server version of this test
+6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous states, which is not currently possible today)
+
+**(n8)** 2024-01-04: Introduce binary messages:
+1) Use RKYV for serialization (the fastest & more flexible among current options, after a chat gpt & bard research)
+2) Formats will be textual (with \n separating messages) or binary (with a u16 payload size prefixing each message)
+3) Opting between binary or textual should be done easily via ConstConfig -- provided the protocol types implement the appropriate traits
+4) Build benchmarks comparing RON vs RKYV
 
 **(f5)** 2023-09-04: Introduce "reconnection" on the client. For this:
   - a new pub method `reconnect()` is to be built: the old connection will be shutdown (if not already) and another one will be created

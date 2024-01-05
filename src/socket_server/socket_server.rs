@@ -1,5 +1,5 @@
 //! Provides the [new_socket_server!()] & [new_composite_socket_server!()] macros for instantiating servers, which may then be started by
-//! [start_unresponsive_server_processor!()] & [start_responsive_server_processor!()] -- with each taking different variants of reactive processor logic --
+//! [start_unresponsive_server_processor!()] & [start_responsive_server_processor!()] -- with each taking different variants of the reactive processor logic --
 //! or have the composite processors spawned by [spawn_unresponsive_composite_server_processor!()] & [spawn_responsive_composite_server_processor!()].
 //!
 //! Both reactive processing logic variants will take in a `Stream` as parameter and should return another `Stream` as output:
@@ -227,7 +227,6 @@ macro_rules! spawn_responsive_composite_server_processor {
     }}
 }
 pub use spawn_responsive_composite_server_processor;
-use crate::config::ConstConfig;
 
 
 /// Represents a server built out of `CONFIG` (a `u64` version of [ConstConfig], from which the other const generic parameters derive).\
@@ -453,7 +452,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
                             })
                             .unwrap_or_else(|err| (format!("<unknown -- err:{err}>"), 0));
                         trace!("`reactive-messaging::CompositeSocketServer`: ROUTING the client {client_ip}:{client_port} of the server @ {interface_ip}:{port} to another processor");
-                        if let Err(err) = sender.send(connection).await {
+                        if let Err(_) = sender.send(connection).await {
                             error!("`reactive-messaging::CompositeSocketServer`: BUG(?) in server @ {interface_ip}:{port} while re-routing the client {client_ip}:{client_port}'s socket: THE NEW (ROUTED) PROCESSOR CAN NO LONGER RECEIVE CONNECTIONS -- THE CONNECTION WILL BE DROPPED");
                             break
                         }
@@ -605,7 +604,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
         let interface_ip = self.interface_ip.clone();
         let port = self.port;
         move || Box::pin(async move {
-            let Some(mut local_termination_receiver) = local_termination_receiver.take() else {
+            let Some(local_termination_receiver) = local_termination_receiver.take() else {
                 return Err(Box::from(format!("GenericCompositeSocketServer::termination_waiter(): termination requested for server @ {interface_ip}:{port}, but the server was not started (or a previous termination was commanded) at the moment the `termination_waiter()`'s returned closure was called")))
             };
             for (i, processor_termination_complete_receiver) in local_termination_receiver.into_iter().enumerate() {
@@ -641,10 +640,7 @@ mod tests {
     use super::*;
     use crate::prelude::{
         ConstConfig,
-        CompositeSocketClient,
-        CompositeGenericSocketClient,
         new_socket_client,
-        new_composite_socket_client,
         ron_deserializer,
         ron_serializer,
         start_responsive_client_processor,
@@ -847,8 +843,6 @@ mod tests {
     async fn termination_process() {
         const PORT: u16 = PORT_START+7;
 
-        // the termination timeout, in milliseconds
-        let expected_max_termination_duration_ms = 543;
         // the tolerance, in milliseconds -- a too small termination duration means the server didn't wait for the client's disconnection; too much (possibly eternal) means it didn't enforce the timeout
         let max_time_ms = 20;
 

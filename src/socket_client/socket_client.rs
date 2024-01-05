@@ -1,5 +1,7 @@
-//! Provides the [new_socket_client!()] macro for instantiating clients, which may then be started with [spawn_unresponsive_client_processor!()] or [spawn_responsive_processor!()],
-//! with each taking different variants of reactive processor logic.\
+//! Provides the [new_socket_client!()] & [new_composite_socket_client!()] macros for instantiating clients, which may then be started by
+//! [start_unresponsive_client_processor!()] & [start_responsive_client_processor!()] -- with each taking different variants of the reactive processor logic --
+//! or have the composite processors spawned by [spawn_unresponsive_composite_client_processor!()] & [spawn_responsive_composite_client_processor!()].
+//!
 //! Both reactive processing logic variants will take in a `Stream` as parameter and should return another `Stream` as output:
 //!   * Responsive: the reactive processor's output `Stream` yields items that are messages to be sent back to the server;
 //!   * Unresponsive the reactive processor's output `Stream` won't be sent to the server, allowing the `Stream`s to return items from any type.
@@ -18,14 +20,6 @@
 //!                      Other API designs had been attempted, but using async in traits (through the `async-trait` crate) and the
 //!                      necessary GATs to provide zero-cost-abstracts, revealed a compiler bug making writing processors very difficult to compile:
 //!                        - https://github.com/rust-lang/rust/issues/96865
-
-/// Instantiates & allocates resources for a [CompositeGenericSocketClient], ready to be later started by [spawn_unresponsive_client_processor!()] or [spawn_responsive_client_processor!()].\
-/// Params:
-///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const time optimizations;
-///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
-///   - `port: u16` -- the port to listen to incoming connections;
-///   - `RemoteMessages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the clients;
-///   - `LocalMessage`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.
 
 
 use crate::{
@@ -469,7 +463,7 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
                 match sender {
                     Some(sender) => {
                         trace!("`reactive-messaging::CompositeSocketClient`: ROUTING the connection with the server @ {ip}:{port} to another processor");
-                        if let Err(err) = sender.send(connection).await {
+                        if let Err(_) = sender.send(connection).await {
                             error!("`reactive-messaging::CompositeSocketClient`: BUG(?) in the client connected to the server @ {ip}:{port} while re-routing the connection: THE NEW (ROUTED) PROCESSOR CAN NO LONGER RECEIVE CONNECTIONS -- THE CONNECTION WILL BE DROPPED");
                             break
                         }
@@ -607,7 +601,7 @@ CompositeGenericSocketClient<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
         let ip = self.ip.clone();
         let port = self.port;
 
-        let returned_connection_sink = self.returned_connection_sink.clone();
+        //let returned_connection_sink = self.returned_connection_sink.clone();
         let local_termination_is_complete_sender = self.local_termination_is_complete_sender.clone();
         let client_termination_signaler = self.client_termination_signaler.clone();
 
@@ -705,7 +699,6 @@ mod tests {
     use crate::{config::ConstConfig, new_socket_server, ron_deserializer, ron_serializer, start_responsive_server_processor, start_unresponsive_server_processor};
     use std::{future, ops::Deref};
     use std::sync::atomic::Ordering::Relaxed;
-    use std::sync::Mutex;
     use std::time::Duration;
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
@@ -806,7 +799,7 @@ mod tests {
         }
         let wait_for_termination = client.termination_waiter();
         client.terminate().expect("Error on client Termination command");
-        wait_for_termination().await.expect("Error waiting for client Termination");;
+        wait_for_termination().await.expect("Error waiting for client Termination");
 
         // demonstrates how to build a responsive server
         ////////////////////////////////////////////////
@@ -908,12 +901,12 @@ mod tests {
                 }
             },
             |_, _, _, stream| stream
-        );
+        ).expect("Error starting the server");
         let mut client = new_socket_client!(ConstConfig::default(), IP, PORT, String, String);
         start_unresponsive_client_processor!(client,
             |_| future::ready(()),
-            |_, _, peer, stream| stream
-        );
+            |_, _, _, stream| stream
+        ).expect("Error starting the client");
         let termination_waiter = client.termination_waiter();
         // sleep a little for the connection to be established.
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -943,12 +936,12 @@ mod tests {
                 }
             },
             |_, _, _, stream| stream
-        );
+        ).expect("Error starting the server");
         let mut client = new_socket_client!(ConstConfig::default(), IP, PORT, String, String);
         start_unresponsive_client_processor!(client,
             |_| future::ready(()),
             |_, _, peer, stream| stream.map(move |_msg| peer.cancel_and_close())     // close the connection when any message arrives
-        );
+        ).expect("Error starting the client");
         let termination_waiter = client.termination_waiter();
         // sleep a little for the communications to go on.
         // After this, the server should have disconnected the client and calling `termination_waiter()` should return immediately
