@@ -244,21 +244,21 @@ pub enum CompositeSocketServer<const CONFIG:                    u64,
                                  LocalMessages,
                                  UniZeroCopyAtomic<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
                                  ChannelUniMoveAtomic<LocalMessages, SENDER_BUFFER, 1>,
-                                 StateType >),
+                                 StateType>),
 
     FullSync(GenericCompositeSocketServer::<CONFIG,
                                    RemoteMessages,
                                    LocalMessages,
                                    UniZeroCopyFullSync<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
                                    ChannelUniMoveFullSync<LocalMessages, SENDER_BUFFER, 1>,
-                                   StateType >),
+                                   StateType>),
 
     Crossbeam(GenericCompositeSocketServer::<CONFIG,
                                     RemoteMessages,
                                     LocalMessages,
                                     UniMoveCrossbeam<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
                                     ChannelUniMoveCrossbeam<LocalMessages, SENDER_BUFFER, 1>,
-                                    StateType >),
+                                    StateType>),
 }
  impl<const CONFIG:                    u64,
       RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages> + Send + Sync + PartialEq + Debug           + 'static,
@@ -268,6 +268,19 @@ pub enum CompositeSocketServer<const CONFIG:                    u64,
       const PROCESSOR_UNI_INSTRUMENTS: usize,
       const SENDER_BUFFER:             usize>
  CompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, StateType, PROCESSOR_BUFFER, PROCESSOR_UNI_INSTRUMENTS, SENDER_BUFFER> {
+
+     pub fn into_atomic(self) -> GenericCompositeSocketServer::<CONFIG,
+                                                                RemoteMessages,
+                                                                LocalMessages,
+                                                                UniZeroCopyAtomic<RemoteMessages, PROCESSOR_BUFFER, 1, PROCESSOR_UNI_INSTRUMENTS>,
+                                                                ChannelUniMoveAtomic<LocalMessages, SENDER_BUFFER, 1>,
+                                                                StateType> {
+         if let Self::Atomic(instance) = self {
+             instance
+         } else {
+             unreachable!("This `CompositeSocketServer` is not configured as Atomic")
+         }
+     }
 
      /// See [GenericCompositeSocketServer::start_with_single_protocol()]
      pub async fn start_with_single_protocol(&mut self, connection_channel: ConnectionChannel)
@@ -638,13 +651,7 @@ GenericCompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUni
 #[cfg(any(test,doc))]
 mod tests {
     use super::*;
-    use crate::prelude::{
-        ConstConfig,
-        new_socket_client,
-        ron_deserializer,
-        ron_serializer,
-        start_responsive_client_processor,
-    };
+    use crate::prelude::*;
     use std::{
         future,
         ops::Deref,
@@ -782,6 +789,7 @@ mod tests {
                                -> impl Stream<Item=DummyClientAndServerMessages> {
             client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         }
+
         let termination_waiter = server.termination_waiter();
         server.terminate().await?;
         termination_waiter().await?;

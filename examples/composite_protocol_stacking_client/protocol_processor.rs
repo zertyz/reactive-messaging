@@ -1,6 +1,6 @@
 //! Resting place of [ClientProtocolProcessor]
 
-use crate::common::{
+use crate::composite_protocol_stacking_common::{
     protocol_model::{ClientMessages, PROTOCOL_VERSION, ServerMessages},
     logic::{
         ping_pong_logic::{act, Umpire},

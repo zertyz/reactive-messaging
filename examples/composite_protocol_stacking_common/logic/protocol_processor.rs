@@ -1,7 +1,7 @@
 //! Defines the functions to be used as the dialogue processors of server & clients
 
-use crate::common::logic::ping_pong_logic::{act, Umpire};
-use crate::common::logic::ping_pong_models::{GameStates, Players, PingPongEvent, GameOverStates, PlayerAction, FaultEvents};
+use crate::composite_protocol_stacking_common::logic::ping_pong_logic::{act, Umpire};
+use crate::composite_protocol_stacking_common::logic::ping_pong_models::{GameStates, Players, PingPongEvent, GameOverStates, PlayerAction, FaultEvents};
 
 
 

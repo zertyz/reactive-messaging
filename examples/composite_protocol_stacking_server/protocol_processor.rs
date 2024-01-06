@@ -1,6 +1,6 @@
 //! Resting place for [ServerProtocolProcessor]
 
-use crate::common::{
+use crate::composite_protocol_stacking_common::{
     logic::{ping_pong_logic::Umpire,
     ping_pong_models::{GameStates, Players, TurnFlipEvents, PingPongEvent, GameOverStates},
     protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault}},

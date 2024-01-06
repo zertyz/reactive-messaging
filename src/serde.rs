@@ -15,7 +15,7 @@ pub trait ReactiveMessagingSerializer<LocalPeerMessages> {
     /// Local messages serializer: transforms a strong typed `message` into a sequence of bytes, put in `buffer`\
     /// -- not appending any '\n'.
     /// IMPLEMENTORS: #[inline(always)]
-    fn serialize(remote_message: &LocalPeerMessages, buffer: &mut Vec<u8>);
+    fn serialize(local_message: &LocalPeerMessages, buffer: &mut Vec<u8>);
 
     /// Called whenever the local processor found an error -- the returned message should be as descriptive as possible.\
     /// IMPLEMENTORS: #[inline(always)]

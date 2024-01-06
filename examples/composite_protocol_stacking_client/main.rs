@@ -1,8 +1,8 @@
-#[path = "../common/mod.rs"] mod common;
+#[path = "../composite_protocol_stacking_common/mod.rs"] mod composite_protocol_stacking_common;
 
 mod protocol_processor;
 
-use common::protocol_model::{ServerMessages,ClientMessages};
+use composite_protocol_stacking_common::protocol_model::{ServerMessages,ClientMessages};
 use crate::protocol_processor::ClientProtocolProcessor;
 use std::{
     future,
