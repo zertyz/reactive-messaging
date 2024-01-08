@@ -69,7 +69,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn std
     let mut server = None;
     if (start_server) {
         println!("==> starting the server");
-        let server = server.insert(new_socket_server!(CONFIG, LISTENING_INTERFACE, PORT, ClientMessages, ServerMessages).into_atomic());
+        let server = server.insert(new_socket_server!(CONFIG, LISTENING_INTERFACE, PORT, ClientMessages, ServerMessages));
         let server_processor_handler = server.spawn_responsive_processor(
             |_| future::ready(()),
             |_, _, _, client_stream| client_stream

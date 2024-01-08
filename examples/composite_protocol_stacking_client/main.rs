@@ -74,7 +74,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
     }
 
     tokio::time::sleep(Duration::from_secs(290)).await;
-    socket_clients.into_iter().for_each(|socket_client| socket_client.terminate().expect("FAILED TO SHUTDOWN THE CLIENT"));
+    for socket_client in socket_clients.into_iter() {
+        socket_client.terminate().await.expect("FAILED TO SHUTDOWN THE CLIENT")
+    }
 
     Ok(())
 }
