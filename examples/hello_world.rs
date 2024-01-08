@@ -7,11 +7,10 @@
 //! and the client disconnects after printing it loud.
 
 use reactive_messaging::prelude::*;
-use futures::{Stream, stream::StreamExt};
+use futures::stream::StreamExt;
 use std::ops::Deref;
 use std::error::Error;
 use std::{env, future};
-use std::collections::HashSet;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
@@ -44,7 +43,6 @@ enum ServerMessages {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-
     println!("Welcome to the `reactive-messaging` Hello World example");
     let possible_options = vec!["server-only", "client-only"];
     println!("Usage: hello_world [{}]", possible_options.iter().fold(String::new(), |mut acc, item| { if acc.len() > 0 {acc.push('|')}; acc.push_str(item); acc } ));
@@ -131,7 +129,6 @@ impl ReactiveMessagingSerializer<ClientMessages> for ClientMessages {
         ron_serializer(local_message, buffer)
             .expect("BUG in `ReactiveMessagingSerializer<ClientMessages>`. Is the buffer too small?");
     }
-
     fn processor_error_message(err: String) -> ClientMessages {
         ClientMessages::Error(err)
     }
@@ -150,7 +147,6 @@ impl ReactiveMessagingSerializer<ServerMessages> for ServerMessages {
         ron_serializer(local_message, buffer)
             .expect("BUG in `ReactiveMessagingSerializer<ServerMessages>`. Is the buffer too small?");
     }
-
     fn processor_error_message(err: String) -> ServerMessages {
         ServerMessages::Error(err)
     }

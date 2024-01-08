@@ -46,21 +46,22 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
 
     pub async fn connect_retryable(&mut self) -> Result<TcpStream, Box<dyn std::error::Error + Send + Sync>> {
         let config = ConstConfig::from(CONFIG_U64);
-        let retry_result_supplier = |retrying_start_time| {
-            let mut connect_continuation_closure = self.connect_continuation_closure.try_lock().expect("BUG!!! ERROR LoCkInG!!!!");
+        let retry_result_supplier = |retrying_start_time: SystemTime| {
+            let mut connect_continuation_closure = self.connect_continuation_closure.try_lock().expect("BUG (locking)");
             async move {
                 connect_continuation_closure().await
-                    .map_ok(|_, connection| (Duration::ZERO, connection) )
+                    .map_ok(|_, connection| (retrying_start_time.elapsed(), connection) )
                     .map_input(|_| retrying_start_time)
             }
         };
+        let retryable = retry_result_supplier(SystemTime::now()).await
+            .retry_with_async(retry_result_supplier);
         let resolved_result = match config.retrying_strategy {
             RetryingStrategies::DoNotRetry |
             RetryingStrategies::EndCommunications =>
-                ResolvedResult::from_retry_result(retry_result_supplier(SystemTime::now()).await),
+                ResolvedResult::from_retry_result(retryable.into()),
             RetryingStrategies::RetryWithBackoffUpTo(attempts) =>
-                retry_result_supplier(SystemTime::now()).await
-                    .retry_with_async(retry_result_supplier)
+                retryable
                     .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
                         backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
                         re_attempts: attempts,
@@ -68,8 +69,7 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
                     })
                     .await,
             RetryingStrategies::RetryYieldingForUpToMillis(millis) =>
-                retry_result_supplier(SystemTime::now()).await
-                    .retry_with_async(retry_result_supplier)
+                retryable
                     .yielding_until_timeout(Duration::from_millis(millis as u64), || Box::from(format!("Timed out (>{millis}ms) while attempting to connect to {}:{}", self.host, self.port)))
                     .await,
             RetryingStrategies::RetrySpinningForUpToMillis(_millis) =>
@@ -96,7 +96,7 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
     /// Advanced connection procedure suitable for retrying: returns an async closure that does the connection with advanced and special features:
     ///   * If the `server` is a name and it resolves to several IPs, calling the returned closure again will attempt to connect to the next IP
     ///   * If the IPs list is over, a new host resolution will be done and the process above repeats
-    ///   * The continuation closure may be indefinitely stored by the client, so an easy reconnection might be attempted at any time, in case it drops.
+    ///   * The continuation closure may be indefinitely stored by the client, so an easy reconnection might be attempted at any time -- in case it drops.
     /// IMPLEMENTATION NOTE: this method implements the "Partial Completion with Continuation Closure", as described in the `keen-retry` crate's book.
     fn build_connect_continuation_closure(host: &str, port: u16) -> impl FnMut() -> ConnectionFuture {
         let address = format!("{}:{}", host, port);
