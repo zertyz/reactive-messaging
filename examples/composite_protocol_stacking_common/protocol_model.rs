@@ -62,70 +62,109 @@ use reactive_messaging::{ron_deserializer, ron_serializer, ReactiveMessagingDese
 use reactive_messaging::prelude::ResponsiveMessages;
 
 
-pub const PROTOCOL_VERSION: &str = "2023-06-21";
+pub const PROTOCOL_VERSION: &str = "2024-01-08";
 
 
-/// Messages coming from the clients, suitable to be deserialized by the server
+/// The states the dialog between client and server may be into
+/// (used for the "Composite Protocol Stacking" pattern)
+#[derive(Debug)]
+pub enum ProtocolStates {
+    /// Both client and server are in the "pre-game", awaiting for a negotiated configuration to actually start the game
+    PreGame,
+    /// PreGame arrangements were not mutually agreed between client and server and a disconnection is about to happen
+    Disconnect,
+    /// PreGame went fine and the game is going on -- the ball is either in service or in rally
+    Game,
+}
+
+/// Client messages to setup the game in the server
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
-pub enum ClientMessages {
+pub enum PreGameClientMessages {
 
     /// First message that the client must send, upon establishing a connection
+    /// -- tells what the game parameters will be.\
+    /// The response should be [PreGameServerMessages::Version] and, if both agree, the state progresses [ProtocolStates::Game]
     Config(MatchConfig),
 
-    /// The rally -- to be started after receiving [ServerMessages::GameStarted]
-    PingPongEvent(PingPongEvent),
+    // standard messages
+    ////////////////////
 
-    /// Tells the server we agree with the score given by [ServerMessages::PingPongEvent] -> [PingPongEvent::GameOver] -> [GameOverStates::GracefullyEnded].\
-    /// Upon receiving this message, the server must close the connection.
-    EndorsedScore,
-    /// Tells the server we computed a different score than the one given by [ServerMessages::PingPongEvent] -> [PingPongEvent::GameOver] -> [GameOverStates::GracefullyEnded].\
-    /// Upon receiving this message, the server must close the connection.
-    ContestedScore(MatchScore),
-
-    /// The client may inquire the server about the math's config in place -- once the game has started.
-    /// The server returns with [ServerMessages::MatchConfig]
-    DumpConfig,
-
-    // `SocketServer` common messages
-    /////////////////////////////////
-
-    /// Asks the server version, which should cause the server to respond with [ServerMessages::Version]
-    #[default]
-    Version,
     /// States that the last command wasn't correctly processed or was not recognized as valid
     Error(/*explanation: */String),
     /// Issued by the client's local processor when no answer should be sent back to the server\
     /// -- we don't use this, as our processor is no longer a 1->1 map, but a 1->* flat_map
+    #[default]
     NoAnswer,
+}
+
+/// Messages coming from the clients after [PreGameClientMessages] protocol was performed, suitable to be deserialized by the server
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+pub enum GameClientMessages {
+
+    /// The rally -- to be started after receiving [GameServerMessages::GameStarted]
+    PingPongEvent(PingPongEvent),
+
+    /// Tells the server we agree with the score given by [GameServerMessages::PingPongEvent] -> [PingPongEvent::GameOver] -> [GameOverStates::GracefullyEnded].\
+    /// Upon receiving this message, the server must close the connection.
+    EndorsedScore,
+    /// Tells the server we computed a different score than the one given by [GameServerMessages::PingPongEvent] -> [PingPongEvent::GameOver] -> [GameOverStates::GracefullyEnded].\
+    /// Upon receiving this message, the server must close the connection.
+    ContestedScore(MatchScore),
+
+    /// The client may inquire the server about the math's config in place -- once the game has started.
+    /// The server returns with [GameServerMessages::MatchConfig]
+    DumpConfig,
+
+    // standard messages
+    ////////////////////
+
+    /// States that the last command wasn't correctly processed or was not recognized as valid
+    Error(/*explanation: */String),
     /// Sent at any time, when the client request an immediate termination of the communications.\
     /// It is elegant to send it before abruptly closing the connection, even if we are in the middle of a transaction
     /// -- anyway, if the connection is dropped or faces an error, the "connection events callback" may be instructed to
     /// send this message, so the server processor knows it is time to release the resources associated with this client.
+    #[default]
     Quit,
 }
 
 /// Messages coming from the server, suitable to be deserialized by the clients
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
-pub enum ServerMessages {
+pub enum PreGameServerMessages {
 
-    /// Issued after a [ClientMessages::Config] has been received, indicating the client should service the first ball of the game
+    /// After being asked by [PreGameClientMessages::Version], tells the client which version of the server we're running
+    Version(String),
+
+    // standard messages
+    ////////////////////
+
+    /// States that the last command wasn't correctly processed or was not recognized as valid
+    Error(/*explanation: */String),
+    /// Issued by the server's local processor when no answer should be sent back to the client
     #[default]
+    NoAnswer,
+}
+
+/// Messages coming from the server, suitable to be deserialized by the clients
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+pub enum GameServerMessages {
+
+    /// Issued after a [PreGameClientMessages::Config] has been received, indicating both the client and server should start the game
     GameStarted,
 
-    /// When asked, at any time, through [ClientMessages::DumpConfig], informs the match config in place
+    /// When asked, at any time, through [GameClientMessages::DumpConfig], informs the match config in place
     MatchConfig(MatchConfig),
 
     /// The rally
     PingPongEvent(PingPongEvent),
 
-    // `SocketServer` common messages
-    /////////////////////////////////
+    // standard messages
+    ////////////////////
 
-    /// After being asked by [ClientMessages::Version], tells the client which version of the server we're running
-    Version(String),
     /// States that the last command wasn't correctly processed or was not recognized as valid
-    Error(/*reason: */String),
+    Error(/*explanation: */String),
     /// Issued by the server's local processor when no answer should be sent back to the client
+    #[default]
     NoAnswer,
     /// Issued when the server is ending the connection due to gracefully completing the communications
     GoodBye,
@@ -137,86 +176,137 @@ pub enum ServerMessages {
 // implementation of the RON SerDe & Responsive traits
 //////////////////////////////////////////////////////
 
-impl AsRef<ClientMessages> for ClientMessages {
+impl AsRef<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn as_ref(&self) -> &ClientMessages {
+    fn as_ref(&self) -> &GameClientMessages {
+        self
+    }
+}
+impl AsRef<PreGameClientMessages> for PreGameClientMessages {
+    #[inline(always)]
+    fn as_ref(&self) -> &PreGameClientMessages {
         self
     }
 }
 
-
-impl ReactiveMessagingSerializer<ClientMessages> for ClientMessages {
-
+impl ReactiveMessagingSerializer<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn serialize(remote_message: &ClientMessages, buffer: &mut Vec<u8>) {
+    fn serialize(remote_message: &GameClientMessages, buffer: &mut Vec<u8>) {
         ron_serializer(remote_message, buffer)
-            .expect("`ron_serializer()` for `ClientMessages`");
+            .expect("BUG in `ReactiveMessagingSerializer<GameClientMessages>`. Is the buffer too small?");
     }
-
     #[inline(always)]
-    fn processor_error_message(err: String) -> ClientMessages {
-        ClientMessages::Error(err)
+    fn processor_error_message(err: String) -> GameClientMessages {
+        GameClientMessages::Error(err)
+    }
+}
+impl ReactiveMessagingSerializer<PreGameClientMessages> for PreGameClientMessages {
+    #[inline(always)]
+    fn serialize(remote_message: &PreGameClientMessages, buffer: &mut Vec<u8>) {
+        ron_serializer(remote_message, buffer)
+            .expect("BUG in `ReactiveMessagingSerializer<PreGameClientMessages>`. Is the buffer too small?");
+    }
+    #[inline(always)]
+    fn processor_error_message(err: String) -> PreGameClientMessages {
+        PreGameClientMessages::Error(err)
     }
 }
 
-impl ReactiveMessagingDeserializer<ClientMessages> for ClientMessages {
-
+impl ReactiveMessagingDeserializer<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn deserialize(local_message: &[u8]) -> Result<ClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+    fn deserialize(local_message: &[u8]) -> Result<GameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+        ron_deserializer(local_message)
+    }
+}
+impl ReactiveMessagingDeserializer<PreGameClientMessages> for PreGameClientMessages {
+    #[inline(always)]
+    fn deserialize(local_message: &[u8]) -> Result<PreGameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
         ron_deserializer(local_message)
     }
 }
 
-impl ResponsiveMessages<ClientMessages> for ClientMessages {
-
+impl ResponsiveMessages<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn is_disconnect_message(processor_answer: &ClientMessages) -> bool {
-        matches!(processor_answer, ClientMessages::Quit)
+    fn is_disconnect_message(processor_answer: &GameClientMessages) -> bool {
+        matches!(processor_answer, GameClientMessages::Quit)
     }
-
     #[inline(always)]
-    fn is_no_answer_message(processor_answer: &ClientMessages) -> bool {
-        matches!(processor_answer, ClientMessages::NoAnswer)
+    fn is_no_answer_message(processor_answer: &GameClientMessages) -> bool {
+        false
+    }
+}
+impl ResponsiveMessages<PreGameClientMessages> for PreGameClientMessages {
+    #[inline(always)]
+    fn is_disconnect_message(processor_answer: &PreGameClientMessages) -> bool {
+        false
+    }
+    #[inline(always)]
+    fn is_no_answer_message(processor_answer: &PreGameClientMessages) -> bool {
+        matches!(processor_answer, PreGameClientMessages::NoAnswer)
     }
 }
 
-impl AsRef<ServerMessages> for ServerMessages {
+impl AsRef<GameServerMessages> for GameServerMessages {
     #[inline(always)]
-    fn as_ref(&self) -> &ServerMessages {
+    fn as_ref(&self) -> &GameServerMessages {
+        self
+    }
+}
+impl AsRef<PreGameServerMessages> for PreGameServerMessages {
+    #[inline(always)]
+    fn as_ref(&self) -> &PreGameServerMessages {
         self
     }
 }
 
-impl ReactiveMessagingSerializer<ServerMessages> for ServerMessages {
-
+impl ReactiveMessagingSerializer<GameServerMessages> for GameServerMessages {
     #[inline(always)]
-    fn serialize(remote_message: &ServerMessages, buffer: &mut Vec<u8>) {
-        ron_serializer(remote_message, buffer)
-            .expect("`ron_serializer()` for `ServerMessages`");
+    fn serialize(local_message: &GameServerMessages, buffer: &mut Vec<u8>) {
+        ron_serializer(local_message, buffer)
+            .expect("BUG in `ReactiveMessagingSerializer<ServerMessages>`. Is the buffer too small?");
     }
-
     #[inline(always)]
-    fn processor_error_message(err: String) -> ServerMessages {
-        ServerMessages::Error(err)
+    fn processor_error_message(err: String) -> GameServerMessages {
+        GameServerMessages::Error(err)
+    }
+}
+impl ReactiveMessagingSerializer<PreGameServerMessages> for PreGameServerMessages {
+    #[inline(always)]
+    fn serialize(local_message: &PreGameServerMessages, buffer: &mut Vec<u8>) {
+        ron_serializer(local_message, buffer)
+            .expect("BUG in `ReactiveMessagingSerializer<PreServerMessages>`. Is the buffer too small?");
+    }
+    #[inline(always)]
+    fn processor_error_message(err: String) -> PreGameServerMessages {
+        PreGameServerMessages::Error(err)
     }
 }
 
-impl ResponsiveMessages<ServerMessages> for ServerMessages {
-
+impl ResponsiveMessages<PreGameServerMessages> for PreGameServerMessages {
     /// Disconnects when our processor issues either of "GoodBye" or "GameCancelled"
     #[inline(always)]
-    fn is_disconnect_message(processor_answer: &ServerMessages) -> bool {
-        matches!(processor_answer, ServerMessages::GoodBye | ServerMessages::PingPongEvent(PingPongEvent::GameOver(GameOverStates::GameCancelled { .. })))
+    fn is_disconnect_message(processor_answer: &PreGameServerMessages) -> bool {
+        matches!(processor_answer, PreGameServerMessages::Version(_))
     }
-
     #[inline(always)]
-    fn is_no_answer_message(processor_answer: &ServerMessages) -> bool {
-        matches!(processor_answer, ServerMessages::NoAnswer)
+    fn is_no_answer_message(processor_answer: &PreGameServerMessages) -> bool {
+        matches!(processor_answer, PreGameServerMessages::NoAnswer)
+    }
+}
+impl ResponsiveMessages<GameServerMessages> for GameServerMessages {
+    /// Disconnects when our processor issues either of "GoodBye" or "GameCancelled"
+    #[inline(always)]
+    fn is_disconnect_message(processor_answer: &GameServerMessages) -> bool {
+        matches!(processor_answer, GameServerMessages::GoodBye | GameServerMessages::PingPongEvent(PingPongEvent::GameOver(GameOverStates::GameCancelled { .. })))
+    }
+    #[inline(always)]
+    fn is_no_answer_message(processor_answer: &GameServerMessages) -> bool {
+        matches!(processor_answer, GameServerMessages::NoAnswer)
     }
 }
 
-impl ReactiveMessagingDeserializer<ServerMessages> for ServerMessages {
-    fn deserialize(local_message: &[u8]) -> Result<ServerMessages, Box<dyn Error + Sync + Send>> {
+impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
+    fn deserialize(local_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
         ron_deserializer(local_message)
     }
 }

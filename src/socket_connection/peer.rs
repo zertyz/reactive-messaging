@@ -31,7 +31,7 @@ pub type PeerId = u32;
 pub struct Peer<const CONFIG:     u64,
                 LocalMessages:    ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                 SenderChannel:    FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-                StateType:                                                                                      Send + Sync                     + 'static = ()> {
+                StateType:                                                                                      Send + Sync             + Debug + 'static = ()> {
     pub peer_id:          PeerId,
     pub peer_address:     SocketAddr,
     pub state:            Mutex<Option<StateType>>,
@@ -41,7 +41,7 @@ pub struct Peer<const CONFIG:     u64,
 impl<const CONFIG:  u64,
      LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
      SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-     StateType:                                                                                   Send + Sync>
+     StateType:                                                                                   Send + Sync             + Debug>
 Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
 
     pub fn new(retryable_sender: ReactiveMessagingSender<CONFIG, LocalMessages, SenderChannel>, peer_address: SocketAddr, initial_state: StateType) -> Self {
@@ -81,6 +81,15 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
         *self.state.lock().await = Some(state);
     }
 
+    /// Use [set_state()] (async) if possible
+    pub fn set_state_sync(&self, state: StateType) {
+        if let Ok(mut locked_state) = self.state.try_lock() {
+            *locked_state = Some(state);
+        } else {
+            panic!("BUG in peer::set_state_sync({state:?}) -- couldn't lock the state")
+        }
+    }
+
     /// "Takes" this object's user-provided state, previously set by [Self::set_state()] -- used to facilitate communications between producers and senders
     /// (a requirement to allow the "Composite Protocol Stacking" pattern)
     pub async fn take_state(&self) -> Option<StateType> {
@@ -110,11 +119,11 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
 impl<const CONFIG:  u64,
      LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
      SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-     StateType:                                                                                   Send + Sync>
+     StateType:                                                                                   Send + Sync             + Debug>
 Debug for
 Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Peer {{peer_id: {}, peer_address: '{}', sender: {}/{} pending messages}}",
-               self.peer_id, self.peer_address, self.retryable_sender.pending_items_count(), self.retryable_sender.buffer_size())
+        write!(f, "Peer {{peer_id: {}, peer_address: '{}', state: '{:?}', sender: {}/{} pending messages}}",
+               self.peer_id, self.peer_address, self.state.try_lock(), self.retryable_sender.pending_items_count(), self.retryable_sender.buffer_size())
     }
 }

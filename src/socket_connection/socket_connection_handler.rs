@@ -37,7 +37,7 @@ pub struct SocketConnectionHandler<const CONFIG:        u64,
                                    LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
                                    ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
                                    SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
-                                   StateType:                                                                                                 Send + Sync + Default           + 'static = ()> {
+                                   StateType:                                                                                                 Send + Sync + Default   + Debug + 'static = ()> {
     _phantom:   PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType)>,
 }
 
@@ -46,7 +46,7 @@ impl<const CONFIG:        u64,
      LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
      SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
-     StateType:                                                                                                 Send + Sync + Default           + 'static>
+     StateType:                                                                                                 Send + Sync + Default   + Debug + 'static>
  SocketConnectionHandler<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType> {
 
     pub fn new() -> Self {

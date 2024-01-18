@@ -1,7 +1,7 @@
 //! Resting place of [ClientProtocolProcessor]
 
 use crate::composite_protocol_stacking_common::{
-    protocol_model::{ClientMessages, PROTOCOL_VERSION, ServerMessages},
+    protocol_model::{GameClientMessages, PROTOCOL_VERSION, GameServerMessages},
     logic::{
         ping_pong_logic::{act, Umpire},
         ping_pong_models::{GameOverStates, GameStates, MatchConfig, PingPongEvent, Players, TurnFlipEvents},
@@ -19,6 +19,7 @@ use std::{
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use futures::{Stream, stream, StreamExt};
 use log::{debug,info,error};
+use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
 
 
 const MATCH_CONFIG: MatchConfig = MatchConfig {
@@ -47,15 +48,64 @@ impl ClientProtocolProcessor {
         })
     }
 
-    pub fn client_events_callback<const NETWORK_CONFIG: u64,
-                                  SenderChannel:        FullDuplexUniChannel<ItemType=ClientMessages, DerivedItemType=ClientMessages> + Send + Sync>
-                                 (self: &Arc<Self>,
-                                  connection_event: ConnectionEvent<NETWORK_CONFIG, ClientMessages, SenderChannel>) {
+    pub fn pre_game_connection_events_handler<const NETWORK_CONFIG: u64,
+                                              SenderChannel:        FullDuplexUniChannel<ItemType=PreGameClientMessages, DerivedItemType=PreGameClientMessages> + Send + Sync>
+                                             (self: &Arc<Self>,
+                                              connection_event: ConnectionEvent<NETWORK_CONFIG, PreGameClientMessages, SenderChannel>) {
+        if let ConnectionEvent::PeerConnected { peer } = connection_event {
+            debug!("Connected: {:?}", peer);
+            _ = peer.send(PreGameClientMessages::Config(MATCH_CONFIG));
+        }
+    }
+
+    pub fn pre_game_dialog_processor<const NETWORK_CONFIG: u64,
+                                     SenderChannel:        FullDuplexUniChannel<ItemType=PreGameClientMessages, DerivedItemType=PreGameClientMessages> + Send + Sync,
+                                     StreamItemType:       AsRef<PreGameServerMessages>>
+
+                                    (self:                   &Arc<Self>,
+                                     server_addr:            String,
+                                     port:                   u16,
+                                     peer:                   Arc<Peer<NETWORK_CONFIG, PreGameClientMessages, SenderChannel, ProtocolStates>>,
+                                     server_messages_stream: impl Stream<Item=StreamItemType>)
+
+                                    -> impl Stream<Item=PreGameClientMessages> {
+                            
+        let cloned_self = Arc::clone(self);
+        server_messages_stream.map(move |server_message| {
+            cloned_self.in_messages_count.fetch_add(1, Relaxed);
+            match server_message.as_ref() {
+
+                PreGameServerMessages::Version(server_protocol_version) => {
+                    if server_protocol_version == PROTOCOL_VERSION {
+                        // Upgrade to the next protocol
+                        peer.set_state_sync(ProtocolStates::Game);
+                        peer.cancel_and_close();
+                        PreGameClientMessages::NoAnswer
+                    } else {
+                        let msg = format!("Client protocol version is '{PROTOCOL_VERSION}' while server is '{server_protocol_version}'");
+                        error!("{}", msg);
+                        PreGameClientMessages::Error(msg)
+                    }
+                }
+
+                PreGameServerMessages::Error(err) => {
+                    error!("Server (pre game) answered with error '{err}' -- closing the connection");
+                    peer.set_state_sync(ProtocolStates::Disconnect);
+                    peer.cancel_and_close();
+                    PreGameClientMessages::NoAnswer
+                },
+
+                PreGameServerMessages::NoAnswer => PreGameClientMessages::NoAnswer,
+            }
+        })
+    }
+
+    pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
+                                          SenderChannel:        FullDuplexUniChannel<ItemType=PreGameClientMessages, DerivedItemType=PreGameClientMessages> + Send + Sync>
+                                         (self: &Arc<Self>,
+                                          connection_event: ConnectionEvent<NETWORK_CONFIG, PreGameClientMessages, SenderChannel>) {
         match connection_event {
-            ConnectionEvent::PeerConnected { peer } => {
-                debug!("Connected: {:?}", peer);
-                _ = peer.send(ClientMessages::Config(MATCH_CONFIG));
-            },
+            ConnectionEvent::PeerConnected { peer: _ } => {},
             ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
                 let in_messages_count = self.in_messages_count.load(Relaxed);
                 info!("Disconnected: {:?}; stats: {:?} -- with {} messages IN & OUT: {:.2}/s",
@@ -69,79 +119,81 @@ impl ClientProtocolProcessor {
         }
     }
 
-    pub fn dialog_processor<const NETWORK_CONFIG: u64,
-                            SenderChannel:        FullDuplexUniChannel<ItemType=ClientMessages, DerivedItemType=ClientMessages> + Send + Sync,
-                            StreamItemType:       AsRef<ServerMessages>>
+    pub fn game_dialog_processor<const NETWORK_CONFIG: u64,
+                                 SenderChannel:        FullDuplexUniChannel<ItemType=GameClientMessages, DerivedItemType=GameClientMessages> + Send + Sync,
+                                 StreamItemType:       AsRef<GameServerMessages>>
 
-                           (self:                   &Arc<Self>,
-                            server_addr:            String,
-                            port:                   u16,
-                            peer:                   Arc<Peer<NETWORK_CONFIG, ClientMessages, SenderChannel>>,
-                            server_messages_stream: impl Stream<Item=StreamItemType>)
+                                (self:                   &Arc<Self>,
+                                 server_addr:            String,
+                                 port:                   u16,
+                                 peer:                   Arc<Peer<NETWORK_CONFIG, GameClientMessages, SenderChannel, ProtocolStates>>,
+                                 server_messages_stream: impl Stream<Item=StreamItemType>)
 
-                           -> impl Stream<Item=ClientMessages> {
-                            
+                                -> impl Stream<Item=GameClientMessages> {
+
         let cloned_self = Arc::clone(self);
         let mut umpire = Umpire::new(&MATCH_CONFIG, Players::Ourself);
         server_messages_stream.map(move |server_message| {
             cloned_self.in_messages_count.fetch_add(1, Relaxed);
             match server_message.as_ref() {
 
-                ServerMessages::GameStarted => {
-                    vec![ClientMessages::Version]
+                GameServerMessages::GameStarted => {
+                    // Start the game: service the ball
+                    let our_action = act();
+                    let our_event = umpire.process_turn(Players::Ourself, &our_action);
+                    vec![GameClientMessages::PingPongEvent(our_event)]
                 },
 
-                ServerMessages::MatchConfig(match_config) => {
+                GameServerMessages::MatchConfig(match_config) => {
                     info!("Server told us it is using {:?}", match_config);
-                    vec![/*ClientMessages::NoAnswer*/]
+                    vec![/* no answer */]
                 }
 
-                ServerMessages::PingPongEvent(reported_ping_pong_event) => {
-                    // ClientMessages::PingPongEvent(PingPongEvent::TurnFlip { player_action: PlayerAction { lucky_number: 0.11025572 }, resulting_event: TurnFlipEvents::SuccessfulRebate })
+                GameServerMessages::PingPongEvent(reported_ping_pong_event) => {
                     match reported_ping_pong_event {
                         PingPongEvent::TurnFlip { player_action: opponent_action, resulting_event } => {
                             match resulting_event {
                                 TurnFlipEvents::SuccessfulService => vec![
-                                    ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
-                                                                                       "WaitingForService",
-                                                                                       |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
-                                                                                       opponent_action,
-                                                                                       /*reported_ping_pong_event*/PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulService }))
+                                    GameClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
+                                                                                           "WaitingForService",
+                                                                                           |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
+                                                                                           opponent_action,
+                                                                                           /*reported_ping_pong_event*/PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulService }))
                                 ],
                                 TurnFlipEvents::SoftFaultService => vec![
-                                    ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
-                                                                                       "WaitingForService` or `Rally",
-                                                                                       |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
-                                                                                       opponent_action,
-                                                                                       /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SoftFaultService }))
+                                    GameClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
+                                                                                           "WaitingForService` or `Rally",
+                                                                                           |rs| matches!(rs, GameStates::WaitingForService { attempt: _ }),
+                                                                                           opponent_action,
+                                                                                           /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SoftFaultService }))
                                 ],
                                 TurnFlipEvents::SuccessfulRebate => vec![
-                                    ClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
-                                                                                       "Rally",
-                                                                                       |rs| matches!(rs, GameStates::Rally),
-                                                                                       opponent_action,
-                                                                                       /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulRebate }))
+                                    GameClientMessages::PingPongEvent(react_to_rally_event(&mut umpire,
+                                                                                           "Rally",
+                                                                                           |rs| matches!(rs, GameStates::Rally),
+                                                                                           opponent_action,
+                                                                                           /*reported_ping_pong_event*/ PingPongEvent::TurnFlip { player_action: *opponent_action, resulting_event: TurnFlipEvents::SuccessfulRebate }))
                                 ],
                             }
                         },
                         PingPongEvent::HardFault { player_action: opponent_action, resulting_fault_event } => {
                             react_to_hard_fault(&mut umpire, opponent_action, resulting_fault_event).into_iter()
-                                .map(ClientMessages::PingPongEvent)
+                                .map(GameClientMessages::PingPongEvent)
                                 .collect()
                         },
                         PingPongEvent::SoftFault { player_action: opponent_action, resulting_fault_event } => {
                             react_to_service_soft_fault(&mut umpire, opponent_action, resulting_fault_event).into_iter()
-                                .map(ClientMessages::PingPongEvent)
+                                .map(GameClientMessages::PingPongEvent)
                                 .collect()
                         },
                         PingPongEvent::Score { point_winning_player, last_player_action, last_fault } => {
                             if *point_winning_player != Players::Opponent {
                                 error!("TO-BE-REMOVED Unrepresentable state IN THE CLIENT: It is not up to any client ({:?}) to tell the server that a score was made", *peer);
-                                vec![ClientMessages::Quit]
+                                vec![GameClientMessages::Quit]
                             } else {
                                 // our score: opponent's hard fault
                                 react_to_score(&mut umpire, last_player_action, last_fault).into_iter()
-                                    .map(ClientMessages::PingPongEvent)
+                                    .map(GameClientMessages::PingPongEvent)
                                     .collect()
                             }
                         },
@@ -149,46 +201,34 @@ impl ClientProtocolProcessor {
                             match game_over_state {
                                 GameOverStates::GracefullyEnded { final_score, last_player_action: _, last_fault: _ } => {
                                     info!("Game ended: {} Client; {} Server @ {}:{}", final_score.opponent, final_score.oneself, server_addr, port);
-                                    vec![ClientMessages::EndorsedScore]
+                                    vec![GameClientMessages::EndorsedScore]
                                 }
                                 GameOverStates::GameCancelled { partial_score: _, broken_rule_description: _ } => {
-                                    vec![/*ClientMessages::NoAnswer*/]
+                                    vec![/* no answer */]
                                 }
                             }
                         },
                     }
                 },
 
-                ServerMessages::Version(server_protocol_version) => {
-                    if server_protocol_version == PROTOCOL_VERSION {
-                        // Start the game: service the ball
-                        let our_action = act();
-                        let our_event = umpire.process_turn(Players::Ourself, &our_action);
-                        vec![ClientMessages::PingPongEvent(our_event)]
-                    } else {
-                        let msg = format!("Client protocol version is '{PROTOCOL_VERSION}' while server is '{server_protocol_version}'");
-                        error!("{}", msg);
-                        vec![ClientMessages::Error(msg)]
-                    }
-                }
-
-                ServerMessages::Error(err) => {
+                GameServerMessages::Error(err) => {
                     error!("Server answered with error '{err}'");
-                    vec![ClientMessages::Quit]
+                    peer.set_state_sync(ProtocolStates::Disconnect);
+                    vec![GameClientMessages::Quit]
                 },
 
-                ServerMessages::NoAnswer => {
-                    panic!("NoAnswer message was received");
+                GameServerMessages::NoAnswer => {
+                    vec![/* no answer */]
                 },
 
-                ServerMessages::GoodBye | ServerMessages::ServerShutdown => {
+                GameServerMessages::GoodBye | GameServerMessages::ServerShutdown => {
+                    peer.set_state_sync(ProtocolStates::Disconnect);
                     peer.cancel_and_close();
-                    vec![/*ClientMessages::NoAnswer*/]
+                    vec![/* no answer */]
                 },
             }
         })
         .flat_map(stream::iter)
     }
-
 }
 

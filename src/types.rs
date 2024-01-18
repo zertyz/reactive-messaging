@@ -52,7 +52,7 @@ pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMess
 pub enum ConnectionEvent<const CONFIG:  u64,
                          LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                          SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-                         StateType:                                                                                   Send + Sync                     + 'static = ()> {
+                         StateType:                                                                                   Send + Sync             + Debug + 'static = ()> {
     /// Happens when the remote party acknowledges that a connection has been established
     PeerConnected            { peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>> },
     /// Happens when the remote party disconnects
@@ -68,7 +68,7 @@ pub trait MessagingService<const CONFIG: u64> {
     type LocalMessages:       ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug + 'static;
     type ProcessorUniType:    GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync                     + 'static;
     type SenderChannel:       FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Send + Sync;
-    type StateType:                                                                                                     Send + Sync + Default           + 'static;
+    type StateType:                                                                                                     Send + Sync + Default   + Debug + 'static;
 
     /// Spawns a task dedicated to the given "unresponsive protocol processor", returning immediately.\
     /// The given `dialog_processor_builder_fn` will be called for each new connection and should return a `Stream`

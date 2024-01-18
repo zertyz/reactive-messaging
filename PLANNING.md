@@ -52,6 +52,22 @@ It happens this may be fixed by creating a dedicated "Connection" type, which wo
 3) Opting between binary or textual should be done easily via ConstConfig -- provided the protocol types implement the appropriate traits
 4) Build benchmarks comparing RON vs RKYV
 
+**(f9)** 2024-01-17: Security -- support SSL/TSL + Client & Server fingerprinting for text & binary transmissions (depends on **(n8)**),
+where fingerprinting is not an alleged number, but one determined by investigating the TCP/IP layers and the security metadata.
+This is to be exposed on the connection event via a non-hashed, stable string containing the following:
+1) TLS Client Hello Message: During the SSL/TLS handshake, the client sends a "Client Hello" message that contains several pieces of information
+   which can be unique or characteristic to different clients, such as:
+     - The list of supported SSL/TLS versions.
+     - Supported cipher suites.
+     - Extensions supported by the client.
+     - Client random value.
+     - Session ID.
+2) TLS Certificate Details: If client-side TLS certificates are used, details from the client's certificate can be unique identifiers.
+3) TCP/IP Layer Information: While limited, certain attributes from the TCP/IP layers can be observed, such as:
+   - Source IP address.
+   - TCP Timestamps.
+   - Window size.
+
 **(f5)** 2023-09-04: Introduce "reconnection" on the client. For this:
   - a new pub method `reconnect()` is to be built: the old connection will be shutdown (if not already) and another one will be created
     -- the connection events callback will be called for the right events
@@ -68,6 +84,7 @@ It happens this may be fixed by creating a dedicated "Connection" type, which wo
 3) remove the deprecated retrying logic & consider others
 4release this as version 1.0.0
 
+**BENCHMARKS** -- MessageIO, Tower
 
 
 # Done

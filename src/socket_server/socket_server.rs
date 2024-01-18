@@ -275,7 +275,7 @@ pub struct CompositeSocketServer<const CONFIG:        u64,
                                LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                ProcessorUniType:    GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
                                SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-                               StateType:                                                                                         Send + Sync + Default           + 'static> {
+                               StateType:                                                                                         Send + Sync + Default   + Debug + 'static> {
 
     /// The interface to listen to incoming connections
     interface_ip: String,
@@ -297,7 +297,7 @@ impl<const CONFIG:        u64,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
      SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
-     StateType:                                                                                         Send + Sync + Default           + 'static>
+     StateType:                                                                                         Send + Sync + Default   + Debug + 'static>
 CompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType> {
 
     /// Creates a new server instance listening on TCP/IP:
@@ -325,7 +325,7 @@ impl<const CONFIG:        u64,
      LocalMessages:       ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessages>                                         + Send + Sync                     + 'static,
      SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
-     StateType:                                                                                         Send + Sync + Default           + 'static>
+     StateType:                                                                                         Send + Sync + Default   + Debug + 'static>
 MessagingService<CONFIG> for CompositeSocketServer<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType> {
     type RemoteMessages = RemoteMessages;
     type LocalMessages = LocalMessages;
@@ -814,6 +814,7 @@ mod tests {
             String,
             Protocols );
 
+        #[derive(Debug)]
         enum Protocols {
             IncomingClient,
             WelcomeAuthenticatedFriend,

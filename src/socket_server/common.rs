@@ -22,7 +22,7 @@ pub(crate) fn upgrade_to_termination_tracking<const CONFIG:                   u6
                                            LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                            SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send,
-                                           StateType:                                                                                                    Send + Sync                     + 'static>
+                                           StateType:                                                                                                    Send + Sync             + Debug + 'static>
 
                                           (shutdown_is_complete_signaler:            tokio::sync::oneshot::Sender<()>,
                                            user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)

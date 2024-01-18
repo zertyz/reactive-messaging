@@ -20,7 +20,7 @@ pub fn upgrade_to_connection_event_tracking<const CONFIG:                   u64,
                                             LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                             SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
                                             ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send,
-                                            StateType:                                                                                                    Send + Sync                     + 'static>
+                                            StateType:                                                                                                    Send + Sync             + Debug + 'static>
 
                                            (connected_state:                          &Arc<AtomicBool>,
                                             termination_is_complete_signaler:         tokio::sync::mpsc::Sender<()>,

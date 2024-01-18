@@ -2,7 +2,7 @@
 
 pub mod protocol_processor;
 
-use composite_protocol_stacking_common::protocol_model::{ClientMessages, ServerMessages};
+use composite_protocol_stacking_common::protocol_model::{GameClientMessages, GameServerMessages};
 use protocol_processor::ServerProtocolProcessor;
 use std::{
     future,
@@ -28,13 +28,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);
 
-    let mut socket_server = new_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ClientMessages, ServerMessages);
+    let mut socket_server = new_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, GameClientMessages, GameServerMessages);
     start_responsive_server_processor!(socket_server,
         move |connection_event| {
             server_processor_ref1.server_events_callback(connection_event);
             future::ready(())
         },
-        move |client_addr, port, peer, client_messages_stream| server_processor_ref2.dialog_processor(client_addr, port, peer, client_messages_stream)
+        move |client_addr, port, peer, client_messages_stream| server_processor_ref2.game_dialog_processor(client_addr, port, peer, client_messages_stream)
     )?;
 
     let wait_for_termination = socket_server.termination_waiter();

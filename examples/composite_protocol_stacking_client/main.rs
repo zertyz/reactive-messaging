@@ -2,7 +2,7 @@
 
 mod protocol_processor;
 
-use composite_protocol_stacking_common::protocol_model::{ServerMessages,ClientMessages};
+use composite_protocol_stacking_common::protocol_model::{GameServerMessages, GameClientMessages};
 use crate::protocol_processor::ClientProtocolProcessor;
 use std::{
     future,
@@ -12,6 +12,8 @@ use std::{
 use reactive_messaging::prelude::*;
 use futures::StreamExt;
 use log::warn;
+use tokio::net::TcpStream;
+use crate::composite_protocol_stacking_common::protocol_model::ProtocolStates;
 
 
 const SERVER_IP:      &str        = "127.0.0.1";
@@ -41,10 +43,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         let client_processor_ref1 = Arc::new(ClientProtocolProcessor::new());
         let client_processor_ref2 = Arc::clone(&client_processor_ref1);
 
-        let mut socket_client = new_socket_client!(NETWORK_CONFIG, SERVER_IP, PORT, ServerMessages, ClientMessages);
-        start_responsive_client_processor!(socket_client,
+        let mut socket_client = new_composite_socket_client!(NETWORK_CONFIG, SERVER_IP, PORT, GameServerMessages, GameClientMessages);
+        // pre-game protocol processor
+        let pre_game_processor = socket_client.spawn_responsive_processor(
             move |connection_event| {
-                client_processor_ref1.client_events_callback(connection_event);
+                client_processor_ref1.pre_game_connection_events_handler(connection_event);
                 future::ready(())
             },
             move |client_addr, port, peer, server_messages_stream| {
@@ -59,7 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                     });
                 let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
                 // processor stream
-                client_processor_ref2.dialog_processor(client_addr, port, peer, server_messages_stream)
+                client_processor_ref2.pre_game_dialog_processor(client_addr, port, peer, server_messages_stream)
                     .inspect(move |client_message| {
                         if DEBUG {
                             ron_serializer(client_message, &mut debug_serializer_buffer)
@@ -69,6 +72,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                     })
             }
         )?;
+        // game protocol processor
+        let game_processor = socket_client.spawn_responsive_processor(
+            move |connection_event| {
+                client_processor_ref1.game_connection_events_handler(connection_event);
+                future::ready(())
+            },
+            move |client_addr, port, peer, server_messages_stream| {
+                let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
+                let server_messages_stream = server_messages_stream
+                    .inspect(move |server_message| {
+                        if DEBUG {
+                            ron_serializer(server_message.as_ref(), &mut debug_serializer_buffer)
+                                .expect("`ron_serializer()` of our `ServerMessages`");
+                            println!("<<<< {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                        }
+                    });
+                let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
+                // processor stream
+                client_processor_ref2.game_dialog_processor(client_addr, port, peer, server_messages_stream)
+                    .inspect(move |client_message| {
+                        if DEBUG {
+                            ron_serializer(client_message, &mut debug_serializer_buffer)
+                                .expect("`ron_serializer()` of the received `ClientMessages`");
+                            println!(">>>> {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                        }
+                    })
+            }
+        )?;
+        socket_client.start_with_routing_closure(move |_connection: &TcpStream, last_state: Option<ProtocolStates>|
+            last_state.map(|last_state|
+                match last_state {
+                    ProtocolStates::PreGame    => Some(pre_game_processor.clone_sender()),
+                    ProtocolStates::Game       => Some(game_processor.clone_sender()),
+                    ProtocolStates::Disconnect => None,
+                })
+            .unwrap_or_else(|| Some(pre_game_processor.clone_sender()))
+        ).await?;
 
         socket_clients.push(socket_client);
     }
