@@ -51,7 +51,7 @@ impl ClientProtocolProcessor {
     pub fn pre_game_connection_events_handler<const NETWORK_CONFIG: u64,
                                               SenderChannel:        FullDuplexUniChannel<ItemType=PreGameClientMessages, DerivedItemType=PreGameClientMessages> + Send + Sync>
                                              (self: &Arc<Self>,
-                                              connection_event: ConnectionEvent<NETWORK_CONFIG, PreGameClientMessages, SenderChannel>) {
+                                              connection_event: ConnectionEvent<NETWORK_CONFIG, PreGameClientMessages, SenderChannel, ProtocolStates>) {
         if let ConnectionEvent::PeerConnected { peer } = connection_event {
             debug!("Connected: {:?}", peer);
             _ = peer.send(PreGameClientMessages::Config(MATCH_CONFIG));
@@ -101,9 +101,9 @@ impl ClientProtocolProcessor {
     }
 
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
-                                          SenderChannel:        FullDuplexUniChannel<ItemType=PreGameClientMessages, DerivedItemType=PreGameClientMessages> + Send + Sync>
+                                          SenderChannel:        FullDuplexUniChannel<ItemType=GameClientMessages, DerivedItemType=GameClientMessages> + Send + Sync>
                                          (self: &Arc<Self>,
-                                          connection_event: ConnectionEvent<NETWORK_CONFIG, PreGameClientMessages, SenderChannel>) {
+                                          connection_event: ConnectionEvent<NETWORK_CONFIG, GameClientMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer: _ } => {},
             ConnectionEvent::PeerDisconnected { peer, stream_stats } => {

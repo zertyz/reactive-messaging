@@ -3,6 +3,7 @@
 use std::{ops::RangeInclusive, num::NonZeroU8};
 use std::time::Duration;
 use reactive_mutiny::prelude::Instruments;
+use strum_macros::FromRepr;
 
 
 // /// Specifies the channels (queues) from `reactive-mutiny` thay may be used to send/receive data.\
@@ -171,7 +172,7 @@ impl ConstConfig {
     const RETRYING_STRATEGY: RangeInclusive<usize> = 19..=29;
     /// One of [SocketOptions], converted by [SocketOptions::as_repr()]
     const SOCKET_OPTIONS: RangeInclusive<usize> = 30..=45;
-    // /// This might be impossible to implement... candidate for removal
+    // /// The channel types the syntatic-sugar macros should instantiate
     // const CHANNEL: RangeInclusive<usize> = 46..=48;
     /// The 8 bits from `reactive-mutiny`
     const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 49..=57;

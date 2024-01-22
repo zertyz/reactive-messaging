@@ -64,11 +64,8 @@ pub enum ConnectionEvent<const CONFIG:  u64,
 
 /// Base trait for services running servers and clients
 pub trait MessagingService<const CONFIG: u64> {
-    type RemoteMessages:      ReactiveMessagingDeserializer<Self::RemoteMessages>                                     + Send + Sync + PartialEq + Debug + 'static;
-    type LocalMessages:       ReactiveMessagingSerializer<Self::LocalMessages>                                        + Send + Sync + PartialEq + Debug + 'static;
-    type ProcessorUniType:    GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync                     + 'static;
-    type SenderChannel:       FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Send + Sync;
-    type StateType:                                                                                                     Send + Sync + Default   + Debug + 'static;
+    type StateType: Send + Sync + Default + Debug + 'static;
+
 
     /// Spawns a task dedicated to the given "unresponsive protocol processor", returning immediately.\
     /// The given `dialog_processor_builder_fn` will be called for each new connection and should return a `Stream`
@@ -94,11 +91,15 @@ pub trait MessagingService<const CONFIG: u64> {
     ///                              -> impl Stream<Item=()> {...}
     ///     ```
     /// -- if you want the processor to produce answer messages of type `LocalMessages` to be sent to clients, see [Self::spawn_responsive_processor()]:
-    async fn spawn_unresponsive_processor<OutputStreamItemsType:                                                                                                                                                                                                                                                                      Send + Sync + Debug       + 'static,
-                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                                        + Send                      + 'static,
-                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                                         + Send                      + 'static,
-                                          ConnectionEventsCallback:       Fn(/*event: */ConnectionEvent<CONFIG, Self::LocalMessages, Self::SenderChannel, Self::StateType>)                                                                                                                       -> ConnectionEventsCallbackFuture + Send + Sync               + 'static,
-                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, Self::StateType>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync               + 'static>
+    async fn spawn_unresponsive_processor<RemoteMessages:                 ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                           + Send + Sync + PartialEq + Debug + 'static,
+                                          LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                              + Send + Sync + PartialEq + Debug + 'static,
+                                          ProcessorUniType:               GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                                     + Send + Sync                     + 'static,
+                                          SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                             + Send + Sync                     + 'static,
+                                          OutputStreamItemsType:                                                                                                                                                                                                                                                    Send + Sync             + Debug + 'static,
+                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                      + Send                            + 'static,
+                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                       + Send                            + 'static,
+                                          ConnectionEventsCallback:       Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
+                                          ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                                          (&mut self,
                                           connection_events_callback:  ConnectionEventsCallback,
@@ -131,10 +132,14 @@ pub trait MessagingService<const CONFIG: u64> {
     ///     ```
     /// Notice that this method requires that `LocalMessages` implements, additionally, [ResponsiveMessages<>].\
     /// -- if you don't want the processor to produce answer messages, see [Self::spawn_unresponsive_processor()].
-    async fn spawn_responsive_processor<ServerStreamType:                Stream<Item=Self::LocalMessages>                                                                                                                                                                                                                          + Send        + 'static,
-                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                                         + Send        + 'static,
-                                        ConnectionEventsCallback:        Fn(/*event: */ConnectionEvent<CONFIG, Self::LocalMessages, Self::SenderChannel, Self::StateType>)                                                                                                                       -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                        ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, Self::StateType>>, /*client_messages_stream: */MessagingMutinyStream<Self::ProcessorUniType>) -> ServerStreamType               + Send + Sync + 'static>
+    async fn spawn_responsive_processor<RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                           + Send + Sync + PartialEq + Debug + 'static,
+                                        LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                              + Send + Sync + PartialEq + Debug + 'static,
+                                        ProcessorUniType:                GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                                     + Send + Sync                     + 'static,
+                                        SenderChannel:                   FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                             + Send + Sync                     + 'static,
+                                        ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                                              + Send                            + 'static,
+                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                       + Send                            + 'static,
+                                        ConnectionEventsCallback:        Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
+                                        ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                                        (&mut self,
                                         connection_events_callback:  ConnectionEventsCallback,
@@ -142,7 +147,7 @@ pub trait MessagingService<const CONFIG: u64> {
 
                                        -> Result<ConnectionChannel, Box<dyn std::error::Error + Sync + Send>>
 
-                                       where Self::LocalMessages: ResponsiveMessages<Self::LocalMessages>;
+                                       where LocalMessages: ResponsiveMessages<LocalMessages>;
 
     /// Start the service with a single processor (after calling either [Self::spawn_unresponsive_processor()]
     /// or [Self::spawn_responsive_processor()] once) -- A.K.A. "The Single Protocol Mode".\
@@ -193,3 +198,37 @@ pub trait MessagingService<const CONFIG: u64> {
     async fn terminate(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 }
+
+
+/// For internal use: defines `ProcessorUniType` & `SenderChannel` based on the given [Channels] parameter
+/// (for use when spawning processors with [MessagingService::spawn_unresponsive_processor()] &
+///  [MessagingService::spawn_responsive_processor()].)
+#[macro_export]
+macro_rules! _define_processor_uni_and_sender_channel_types {
+    ($const_config: expr, Atomic, $remote_messages: ty, $local_messages: ty) => {
+        const _CONST_CONFIG:              ConstConfig  = $const_config;
+        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_buffer as usize;
+        const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
+        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_buffer   as usize;
+        type ProcessorUniType = UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
+        type SenderChannel = ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>;
+    };
+    ($const_config: expr, FullSync, $remote_messages: ty, $local_messages: ty) => {
+        const _CONST_CONFIG:              ConstConfig  = $const_config;
+        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_buffer as usize;
+        const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
+        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_buffer   as usize;
+        type ProcessorUniType = UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
+        type SenderChannel = ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>;
+    };
+    ($const_config: expr, Crossbeam, $remote_messages: ty, $local_messages: ty) => {
+        const _CONST_CONFIG:              ConstConfig  = $const_config;
+        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_buffer as usize;
+        const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
+        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_buffer   as usize;
+        type ProcessorUniType = UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
+        type SenderChannel = ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>;
+    };
+}
+pub use _define_processor_uni_and_sender_channel_types;
+

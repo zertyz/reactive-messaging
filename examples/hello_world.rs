@@ -67,8 +67,8 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn std
     let mut server = None;
     if (start_server) {
         println!("==> starting the server");
-        let server = server.insert(new_socket_server!(CONFIG, LISTENING_INTERFACE, PORT, ClientMessages, ServerMessages));
-        let server_processor_handler = server.spawn_responsive_processor(
+        let server = server.insert(new_socket_server!(CONFIG, LISTENING_INTERFACE, PORT));
+        let server_processor_handler = spawn_responsive_server_processor!(CONFIG, Atomic, server, ClientMessages, ServerMessages,
             |_| future::ready(()),
             |_, _, _, client_stream| client_stream
                 .inspect(|client_message| println!(">>> {:?}", client_message.deref()))
@@ -76,14 +76,14 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn std
                     ClientMessages::Hello => ServerMessages::World(WORLD.to_string()),
                     _ => ServerMessages::NoAnswer,
                 })
-        ).await?;
+        )?;
         server.start_with_single_protocol(server_processor_handler).await?;
     }
 
     if (start_client) {
         println!("==> starting the client");
-        let mut client = new_socket_client!(CONFIG, LISTENING_INTERFACE, PORT, ServerMessages, ClientMessages);
-        start_unresponsive_client_processor!(client,
+        let mut client = new_socket_client!(CONFIG, LISTENING_INTERFACE, PORT);
+        start_unresponsive_client_processor!(CONFIG, Atomic, client, ServerMessages, ClientMessages,
             |connection_event| async {
                 match connection_event {
                     ConnectionEvent::PeerConnected { peer } => {

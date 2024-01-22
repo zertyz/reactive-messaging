@@ -67,9 +67,10 @@ pub const PROTOCOL_VERSION: &str = "2024-01-08";
 
 /// The states the dialog between client and server may be into
 /// (used for the "Composite Protocol Stacking" pattern)
-#[derive(Debug)]
+#[derive(Debug,Default)]
 pub enum ProtocolStates {
     /// Both client and server are in the "pre-game", awaiting for a negotiated configuration to actually start the game
+    #[default]
     PreGame,
     /// PreGame arrangements were not mutually agreed between client and server and a disconnection is about to happen
     Disconnect,
@@ -305,7 +306,11 @@ impl ResponsiveMessages<GameServerMessages> for GameServerMessages {
     }
 }
 
-impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
+impl ReactiveMessagingDeserializer<PreGameServerMessages> for PreGameServerMessages {
+    fn deserialize(local_message: &[u8]) -> Result<PreGameServerMessages, Box<dyn Error + Sync + Send>> {
+        ron_deserializer(local_message)
+    }
+}impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
     fn deserialize(local_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
         ron_deserializer(local_message)
     }

@@ -47,7 +47,7 @@ impl ServerProtocolProcessor {
     pub fn pre_game_connection_events_handler<const NETWORK_CONFIG: u64,
                                               SenderChannel:        FullDuplexUniChannel<ItemType=GameServerMessages, DerivedItemType=GameServerMessages> + Send + Sync>
                                              (&self,
-                                              connection_event: ConnectionEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel>) {
+                                              connection_event: ConnectionEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 debug!("Connected: {:?}", peer);
@@ -102,7 +102,7 @@ impl ServerProtocolProcessor {
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
                                           SenderChannel:        FullDuplexUniChannel<ItemType=GameServerMessages, DerivedItemType=GameServerMessages> + Send + Sync>
                                          (&self,
-                                          connection_event: ConnectionEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel>) {
+                                          connection_event: ConnectionEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 debug!("Game Started: {:?}", peer);

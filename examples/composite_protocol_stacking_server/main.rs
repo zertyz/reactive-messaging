@@ -11,6 +11,7 @@ use std::{
 };
 use reactive_messaging::prelude::*;
 use log::warn;
+use crate::composite_protocol_stacking_common::protocol_model::ProtocolStates;
 
 
 const LISTENING_INTERFACE: &str        = "0.0.0.0";
@@ -28,10 +29,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);
 
-    let mut socket_server = new_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, GameClientMessages, GameServerMessages);
-    start_responsive_server_processor!(socket_server,
+    let mut socket_server = new_composite_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ProtocolStates);
+    start_responsive_server_processor!(NETWORK_CONFIG, Atomic, socket_server, GameClientMessages, GameServerMessages,
         move |connection_event| {
-            server_processor_ref1.server_events_callback(connection_event);
+            server_processor_ref1.game_connection_events_handler(connection_event);
             future::ready(())
         },
         move |client_addr, port, peer, client_messages_stream| server_processor_ref2.game_dialog_processor(client_addr, port, peer, client_messages_stream)
