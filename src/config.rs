@@ -9,10 +9,10 @@ use strum_macros::FromRepr;
 // /// Specifies the channels (queues) from `reactive-mutiny` thay may be used to send/receive data.\
 // /// On different hardware, the performance characteristics may vary.
 // #[derive(Debug,PartialEq,FromRepr)]
-// pub enum Channels {
-//     Atomic,
-//     FullSync,
-//     Crossbeam,
+// pub enum Channels<const CONFIG: u64> {
+//     Atomic { uni: Option<>, sender: Option<> },
+//     FullSync { uni: None, sender: None },
+//     Crossbeam {},
 // }
 
 /// Specifies how to behave when communication failures happen

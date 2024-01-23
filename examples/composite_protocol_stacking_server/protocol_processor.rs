@@ -45,16 +45,16 @@ impl ServerProtocolProcessor {
     }
 
     pub fn pre_game_connection_events_handler<const NETWORK_CONFIG: u64,
-                                              SenderChannel:        FullDuplexUniChannel<ItemType=GameServerMessages, DerivedItemType=GameServerMessages> + Send + Sync>
+                                              SenderChannel:        FullDuplexUniChannel<ItemType=PreGameServerMessages, DerivedItemType=PreGameServerMessages> + Send + Sync>
                                              (&self,
-                                              connection_event: ConnectionEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>) {
+                                              connection_event: ConnectionEvent<NETWORK_CONFIG, PreGameServerMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
-                debug!("Connected: {:?}", peer);
+                warn!("Connected: {:?}", peer);
                 self.sessions.insert(peer.peer_id, Arc::new(Session { umpire: UnsafeCell::new(None) }));
             },
             ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
-                debug!("Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
+                warn!("Pre-Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
                 self.sessions.remove(&peer.peer_id);
             },
             ConnectionEvent::LocalServiceTermination => {},
@@ -74,7 +74,8 @@ impl ServerProtocolProcessor {
                                     -> impl Stream<Item=PreGameServerMessages> {
                             
         let session = self.sessions.get(&peer.peer_id)
-                                                 .unwrap_or_else(|| panic!("Server BUG! Peer {:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback", peer))
+                                                 .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
+                                                                           self.sessions.len()))
                                                  .value()
                                                  .clone();     // .clone() the Arc, so we are free to move it to the the next closure (and drop it after the Stream closes)
         client_messages_stream.map(move |client_message| {
@@ -105,10 +106,10 @@ impl ServerProtocolProcessor {
                                           connection_event: ConnectionEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
-                debug!("Game Started: {:?}", peer);
+                warn!("Game Started: {:?}", peer);
             },
             ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
-                debug!("Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
+                warn!("Game Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
                 self.sessions.remove(&peer.peer_id);
             }
             ConnectionEvent::LocalServiceTermination => {
@@ -130,7 +131,8 @@ impl ServerProtocolProcessor {
                                  -> impl Stream<Item=GameServerMessages> {
 
         let session = self.sessions.get(&peer.peer_id)
-                                                 .unwrap_or_else(|| panic!("Server BUG! Peer {:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback", peer))
+                                                 .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
+                                                                           self.sessions.len()))
                                                  .value()
                                                  .clone();     // .clone() the Arc, so we are free to move it to the the next closure (and drop it after the Stream closes)
         let umpire_option = unsafe { &mut * (session.umpire.get()) };

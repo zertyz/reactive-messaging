@@ -11,7 +11,8 @@ use std::{
 };
 use reactive_messaging::prelude::*;
 use log::warn;
-use crate::composite_protocol_stacking_common::protocol_model::ProtocolStates;
+use tokio::net::TcpStream;
+use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
 
 
 const LISTENING_INTERFACE: &str        = "0.0.0.0";
@@ -28,15 +29,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let server_processor_ref1 = Arc::new(ServerProtocolProcessor::new());
     let server_processor_ref2 = Arc::clone(&server_processor_ref1);
+    let server_processor_ref3 = Arc::clone(&server_processor_ref1);
+    let server_processor_ref4 = Arc::clone(&server_processor_ref1);
 
     let mut socket_server = new_composite_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ProtocolStates);
-    start_responsive_server_processor!(NETWORK_CONFIG, Atomic, socket_server, GameClientMessages, GameServerMessages,
+    // pre-game protocol processor
+    let pre_game_processor = spawn_responsive_server_processor!(NETWORK_CONFIG, Atomic, socket_server, PreGameClientMessages, PreGameServerMessages,
         move |connection_event| {
-            server_processor_ref1.game_connection_events_handler(connection_event);
+            server_processor_ref1.pre_game_connection_events_handler(connection_event);
             future::ready(())
         },
-        move |client_addr, port, peer, client_messages_stream| server_processor_ref2.game_dialog_processor(client_addr, port, peer, client_messages_stream)
+        move |client_addr, port, peer, client_messages_stream| server_processor_ref2.pre_game_dialog_processor(client_addr, port, peer, client_messages_stream)
     )?;
+    // game protocol processor
+    let game_processor = spawn_responsive_server_processor!(NETWORK_CONFIG, Atomic, socket_server, GameClientMessages, GameServerMessages,
+        move |connection_event| {
+            server_processor_ref3.game_connection_events_handler(connection_event);
+            future::ready(())
+        },
+        move |client_addr, port, peer, client_messages_stream| server_processor_ref4.game_dialog_processor(client_addr, port, peer, client_messages_stream)
+    )?;
+    socket_server.start_with_routing_closure(move |_connection: &TcpStream, last_state: Option<ProtocolStates>|
+        last_state.map(|last_state|
+            match last_state {
+                ProtocolStates::PreGame    => Some(pre_game_processor.clone_sender()),
+                ProtocolStates::Game       => Some(game_processor.clone_sender()),
+                ProtocolStates::Disconnect => None,
+            })
+            .unwrap_or_else(|| Some(pre_game_processor.clone_sender()))
+    ).await?;
 
     let wait_for_termination = socket_server.termination_waiter();
     tokio::spawn( async move {
