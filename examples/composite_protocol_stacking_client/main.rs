@@ -102,14 +102,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                     })
             }
         )?;
-        socket_client.start_with_routing_closure(move |_connection: &TcpStream, last_state: Option<ProtocolStates>|
-            last_state.map(|last_state|
-                match last_state {
-                    ProtocolStates::PreGame    => Some(pre_game_processor.clone_sender()),
-                    ProtocolStates::Game       => Some(game_processor.clone_sender()),
-                    ProtocolStates::Disconnect => None,
-                })
-            .unwrap_or_else(|| Some(pre_game_processor.clone_sender()))
+        socket_client.start_with_routing_closure(ProtocolStates::PreGame, move |socket_connection: &SocketConnection<ProtocolStates>, _|
+            match socket_connection.state() {
+                ProtocolStates::PreGame    => Some(pre_game_processor.clone_sender()),
+                ProtocolStates::Game       => Some(game_processor.clone_sender()),
+                ProtocolStates::Disconnect => None,
+            }
         ).await?;
 
         socket_clients.push(socket_client);

@@ -16,15 +16,20 @@
 //! struct, instead of requiring several const generic parameters.
 
 
-use crate::{socket_client::common::upgrade_to_connection_event_tracking, types::{
-    ConnectionEvent,
-    MessagingMutinyStream,
-    ResponsiveMessages,
-}, socket_connection::{
-    peer::Peer,
-    socket_connection_handler::SocketConnectionHandler,
-    connection_provider::{ClientConnectionManager, ConnectionChannel},
-}, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use crate::{
+    socket_services::socket_client::common::upgrade_to_connection_event_tracking,
+    types::{
+        ConnectionEvent,
+        MessagingMutinyStream,
+        ResponsiveMessages,
+    },
+    socket_connection::{
+        peer::Peer,
+        socket_connection_handler::SocketConnectionHandler,
+        connection_provider::{ClientConnectionManager, ConnectionChannel},
+    },
+    serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer},
+};
 use std::{
     fmt::Debug,
     future::Future,
@@ -164,7 +169,8 @@ macro_rules! start_responsive_client_processor {
     }}
 }
 pub use start_responsive_client_processor;
-use crate::prelude::MessagingService;
+use crate::socket_connection::connection::SocketConnection;
+use crate::socket_services::types::MessagingService;
 
 
 /// Real definition & implementation for our Socket Client, full of generic parameters.\
@@ -178,7 +184,7 @@ use crate::prelude::MessagingService;
 ///   - `SenderChannel`:    an instance of a `reactive-mutiny`'s Uni movable `Channel`, which will provide a `Stream` of messages to be sent to the server;
 ///   - `StateType`:        The state type used by the "connection routing closure" (to be provided), enabling the "Composite Protocol Stacking" pattern.
 pub struct CompositeSocketClient<const CONFIG: u64,
-                                 StateType:    Send + Sync + Default + Debug + 'static> {
+                                 StateType:    Send + Sync + Clone + Debug + 'static> {
 
     /// false if a disconnection happened, as tracked by the socket logic
     connected: Arc<AtomicBool>,
@@ -193,13 +199,13 @@ pub struct CompositeSocketClient<const CONFIG: u64,
     local_termination_is_complete_sender: tokio::sync::mpsc::Sender<()>,
     /// The client connection is returned by processors after they are done with it -- this connection
     /// may be routed to another processor if the "Composite Protocol Stacking" pattern is in play.
-    returned_connection_source: Option<tokio::sync::mpsc::Receiver<(TcpStream, Option<StateType>)>>,
-    returned_connection_sink: tokio::sync::mpsc::Sender<(TcpStream, Option<StateType>)>,
+    returned_connection_source: Option<tokio::sync::mpsc::Receiver<SocketConnection<StateType>>>,
+    returned_connection_sink: tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
     /// The count of processors, for termination notification purposes
     spawned_processors_count: u32,
 }
 impl<const CONFIG: u64,
-     StateType:    Send + Sync + Default + Debug + 'static>
+     StateType:    Send + Sync + Clone + Debug + 'static>
 CompositeSocketClient<CONFIG, StateType> {
 
     /// Instantiates a client to connect to a TCP/IP Server:
@@ -209,7 +215,7 @@ CompositeSocketClient<CONFIG, StateType> {
               (ip:   IntoString,
                port: u16)
               -> Self {
-        let (returned_connection_sink, returned_connection_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<StateType>)>(1);
+        let (returned_connection_sink, returned_connection_source) = tokio::sync::mpsc::channel::<SocketConnection<StateType>>(1);
         let (client_termination_signaler, _) = tokio::sync::broadcast::channel(1);
         let (local_termination_is_complete_sender, local_termination_is_complete_receiver) = tokio::sync::mpsc::channel(1);
         Self {
@@ -237,7 +243,7 @@ CompositeSocketClient<CONFIG, StateType> {
 }
 
 impl<const CONFIG: u64,
-     StateType:    Send + Sync + Default + Debug + 'static>
+     StateType:    Send + Sync + Clone + Debug + 'static>
 MessagingService<CONFIG>
 for CompositeSocketClient<CONFIG, StateType> {
     type StateType = StateType;
@@ -258,7 +264,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                                           connection_events_callback:  ConnectionEventsCallback,
                                           dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                         -> Result<ConnectionChannel, Box<dyn std::error::Error + Sync + Send>> {
+                                         -> Result<ConnectionChannel<StateType>, Box<dyn std::error::Error + Sync + Send>> {
 
         let ip = self.ip.clone();
         let port = self.port;
@@ -314,7 +320,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                                         connection_events_callback:  ConnectionEventsCallback,
                                         dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                       -> Result<ConnectionChannel, Box<dyn std::error::Error + Sync + Send>>
+                                       -> Result<ConnectionChannel<StateType>, Box<dyn std::error::Error + Sync + Send>>
 
                                        where LocalMessages: ResponsiveMessages<LocalMessages> {
 
@@ -346,8 +352,8 @@ for CompositeSocketClient<CONFIG, StateType> {
                                                                                                                dialog_processor_builder_fn).await
                     .map_err(|err| format!("Error while executing the dialog processor: {err}"));
                 match result {
-                    Ok((mut socket, _)) => {
-                        if let Err(err) = socket.shutdown().await {
+                    Ok(mut socket_connection) => {
+                        if let Err(err) = socket_connection.connection_mut().shutdown().await {
                             trace!("`reactive-messaging::CompositeGenericSocketClient`: COULDN'T shutdown the socket (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
                             // ... it may have already been done by the other end
                         }
@@ -363,7 +369,8 @@ for CompositeSocketClient<CONFIG, StateType> {
     }
 
     async fn start_with_routing_closure(&mut self,
-                                        mut connection_routing_closure: impl FnMut(/*connection: */& tokio::net::TcpStream, /*last_state: */Option<StateType>) -> Option<tokio::sync::mpsc::Sender<TcpStream>> + Send + 'static)
+                                        initial_connection_state:       StateType,
+                                        mut connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<StateType>>> + Send + 'static)
                                        -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&self.ip, self.port);
@@ -385,17 +392,18 @@ for CompositeSocketClient<CONFIG, StateType> {
         tokio::spawn(async move {
 
             loop {
-                let (mut connection, sender) = match just_opened_connection.take() {
+                let (mut socket_connection, sender) = match just_opened_connection.take() {
                     // process the just-opened connection (once)
                     Some(just_opened_connection) => {
-                        let sender = connection_routing_closure(&just_opened_connection, None);
-                        (just_opened_connection, sender)
+                        let mut just_opened_socket_connection = SocketConnection::new(just_opened_connection, initial_connection_state.clone());
+                        let sender = connection_routing_closure(&just_opened_socket_connection, false);
+                        (just_opened_socket_connection, sender)
                     },
                     // process connections returned by the processors (after they ended processing them)
                     None => {
-                        let Some((returned_connection, last_state)) = returned_connection_source.recv().await else { break };
-                        let sender = connection_routing_closure(&returned_connection, last_state);
-                        (returned_connection, sender)
+                        let Some(mut returned_socket_connection) = returned_connection_source.recv().await else { break };
+                        let sender = connection_routing_closure(&returned_socket_connection, true);
+                        (returned_socket_connection, sender)
                     },
                 };
 
@@ -403,13 +411,13 @@ for CompositeSocketClient<CONFIG, StateType> {
                 match sender {
                     Some(sender) => {
                         trace!("`reactive-messaging::CompositeSocketClient`: ROUTING the connection with the server @ {ip}:{port} to another processor");
-                        if let Err(_) = sender.send(connection).await {
+                        if let Err(_) = sender.send(socket_connection).await {
                             error!("`reactive-messaging::CompositeSocketClient`: BUG(?) in the client connected to the server @ {ip}:{port} while re-routing the connection: THE NEW (ROUTED) PROCESSOR CAN NO LONGER RECEIVE CONNECTIONS -- THE CONNECTION WILL BE DROPPED");
                             break
                         }
                     },
                     None => {
-                        if let Err(err) = connection.shutdown().await {
+                        if let Err(err) = socket_connection.connection_mut().shutdown().await {
                             error!("`reactive-messaging::CompositeSocketClient`: ERROR in the client connected to the server @ {ip}:{port} while shutting down the connection (after the processors ended): {err}");
                         }
                     }
@@ -466,6 +474,8 @@ mod tests {
     use std::time::Duration;
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
+    use crate::{new_socket_server, start_responsive_server_processor, start_unresponsive_server_processor};
+    use crate::serde::{ron_deserializer, ron_serializer};
 
 
     const REMOTE_SERVER: &str = "66.45.249.218";
@@ -610,8 +620,8 @@ mod tests {
             ..ConstConfig::default()
         };
         let mut client = CompositeSocketClient :: <{CUSTOM_CONFIG.into()},
-                                                                         () >
-                                                                     :: new(REMOTE_SERVER,443);
+                                                                          () >
+                                                                      :: new(REMOTE_SERVER,443);
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.receiver_buffer as usize}, 1, {CUSTOM_CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.sender_buffer as usize}, 1>;
         let connection_channel = client.spawn_unresponsive_processor::<DummyClientAndServerMessages,
@@ -743,18 +753,13 @@ mod tests {
             PORT,
             Protocols );
 
-        #[derive(Debug)]
+        #[derive(Clone,Debug)]
         enum Protocols {
             Handshake,
             WelcomeAuthenticatedFriend,
             AccountSettings,
             GoodbyeOptions,
             Disconnect,
-        }
-        impl Default for Protocols {
-            fn default() -> Self {
-                Self::Handshake
-            }
         }
 
         // first level processors shouldn't do anything until the client says something meaningful -- newcomers must know, a priori, who they are talking to (a security measure)
@@ -853,19 +858,15 @@ mod tests {
 
         // this closure will route the connections based on the states the processors above had set
         // (it will be called whenever a protocol processor ends -- "returning" the connection)
-        let connection_routing_closure = move |_connection: &TcpStream, last_state: Option<Protocols>|
-            if let Some(last_state) = last_state {
-                match last_state {
-                    Protocols::Handshake                  => Some(handshake_processor.clone_sender()),
-                    Protocols::WelcomeAuthenticatedFriend => Some(welcome_authenticated_friend_processor.clone_sender()),
-                    Protocols::AccountSettings            => Some(account_settings_processor.clone_sender()),
-                    Protocols::GoodbyeOptions             => Some(goodbye_options_processor.clone_sender()),
-                    Protocols::Disconnect                 => None,
-                }
-            } else {
-                Some(handshake_processor.clone_sender())
+        let connection_routing_closure = move |socket_connection: &SocketConnection<Protocols>, _|
+            match socket_connection.state() {
+                Protocols::Handshake                  => Some(handshake_processor.clone_sender()),
+                Protocols::WelcomeAuthenticatedFriend => Some(welcome_authenticated_friend_processor.clone_sender()),
+                Protocols::AccountSettings            => Some(account_settings_processor.clone_sender()),
+                Protocols::GoodbyeOptions             => Some(goodbye_options_processor.clone_sender()),
+                Protocols::Disconnect                 => None,
             };
-        client.start_with_routing_closure(connection_routing_closure).await?;
+        client.start_with_routing_closure(Protocols::Handshake, connection_routing_closure).await?;
 
         let client_waiter = client.termination_waiter();
         // wait for the client to do its stuff

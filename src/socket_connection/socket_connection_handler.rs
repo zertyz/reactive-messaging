@@ -1,7 +1,7 @@
 //! Common & low-level code for reactive clients and servers
 
 
-use crate::ReactiveMessagingSerializer;
+use crate::serde::ReactiveMessagingSerializer;
 
 use crate::{
     config::*,
@@ -27,6 +27,7 @@ use tokio::{
     net::TcpStream,
 };
 use log::{trace, debug, warn, error};
+use crate::socket_connection::connection::SocketConnection;
 
 
 /// Contains abstractions, useful for clients and servers, for dealing with socket connections handled by Stream Processors:\
@@ -37,7 +38,7 @@ pub struct SocketConnectionHandler<const CONFIG:        u64,
                                    LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
                                    ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
                                    SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
-                                   StateType:                                                                                                 Send + Sync + Default   + Debug + 'static = ()> {
+                                   StateType:                                                                                                 Send + Sync + Clone     + Debug + 'static = ()> {
     _phantom:   PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType)>,
 }
 
@@ -46,8 +47,11 @@ impl<const CONFIG:        u64,
      LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:    GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
      SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
-     StateType:                                                                                                 Send + Sync + Default   + Debug + 'static>
+     StateType:                                                                                                 Send + Sync + Clone     + Debug + 'static>
  SocketConnectionHandler<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType> {
+
+    const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
+
 
     pub fn new() -> Self {
         Self {
@@ -70,8 +74,8 @@ impl<const CONFIG:        u64,
                                                            (self,
                                                             listening_interface:         &str,
                                                             listening_port:              u16,
-                                                            mut connection_source:       tokio::sync::mpsc::Receiver<TcpStream>,
-                                                            connection_sink:             tokio::sync::mpsc::Sender<(TcpStream, Option<StateType>)>,
+                                                            mut connection_source:       tokio::sync::mpsc::Receiver<SocketConnection<StateType>>,
+                                                            connection_sink:             tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
                                                             connection_events_callback:  ConnectionEventsCallback,
                                                             dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -84,10 +88,10 @@ impl<const CONFIG:        u64,
 
         tokio::spawn( async move {
 
-            while let Some(connection) = connection_source.recv().await {
+            while let Some(socket_connection) = connection_source.recv().await {
 
                 // client info
-                let addr = match connection.peer_addr() {
+                let addr = match socket_connection.connection().peer_addr() {
                     Ok(addr) => addr,
                     Err(err) => {
                         error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while determining an incoming client's address: {err}");
@@ -101,7 +105,7 @@ impl<const CONFIG:        u64,
 
                 // prepares for the dialog to come with the (just accepted) connection
                 let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
-                let peer = Arc::new(Peer::new(sender, addr, StateType::default()));
+                let peer = Arc::new(Peer::new(sender, addr, &socket_connection));//       THIS LINE IS HANGING!!
                 let peer_ref1 = Arc::clone(&peer);
                 let peer_ref2 = Arc::clone(&peer);
 
@@ -123,14 +127,14 @@ impl<const CONFIG:        u64,
                 let listening_interface_and_port = listening_interface_and_port.clone();
                 let cloned_connection_sink = Arc::clone(&connection_sink);
                 tokio::spawn(tokio::task::unconstrained(async move {
-                    let (connection, last_state) = match cloned_self.dialog_loop_for_textual_protocol(connection, peer.clone(), processor_sender).await {
-                        Ok((connection, last_state)) => (connection, last_state),
+                    let socket_connection = match cloned_self.dialog_loop_for_textual_protocol(socket_connection, peer.clone(), processor_sender).await {
+                        Ok(socket_connection) => socket_connection,
                         Err(err) => {
                             error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while starting the dialog with client {client_ip}:{client_port}: {err}");
                             return
                         }
                     };
-                    if let Err(_) = cloned_connection_sink.send((connection, last_state)).await {
+                    if let Err(_) = cloned_connection_sink.send(socket_connection).await {
                         error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while returning the connection with {client_ip}:{client_port} to the caller. It will now be forcibly closed.");
                     };
                     // if let Err(err) = connection.shutdown().await {
@@ -160,16 +164,16 @@ impl<const CONFIG:        u64,
                                                        ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                       (self,
-                                                       socket:                      TcpStream,
+                                                       socket_connection:           SocketConnection<StateType>,
                                                        mut shutdown_signaler:       tokio::sync::broadcast::Receiver<()>,
                                                        connection_events_callback:  ConnectionEventsCallback,
                                                        dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                      -> Result<(TcpStream, Option<StateType>), Box<dyn std::error::Error + Sync + Send>> {
+                                                      -> Result<SocketConnection<StateType>, Box<dyn std::error::Error + Sync + Send>> {
 
-        let addr = socket.peer_addr()?;
+        let addr = socket_connection.connection().peer_addr()?;
         let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
-        let peer = Arc::new(Peer::new(sender, addr, StateType::default()));
+        let peer = Arc::new(Peer::new(sender, addr, &socket_connection));
         let peer_ref1 = Arc::clone(&peer);
         let peer_ref2 = Arc::clone(&peer);
         let peer_ref3 = Arc::clone(&peer);
@@ -204,8 +208,7 @@ impl<const CONFIG:        u64,
 
         // the processor
         let arc_self = Arc::new(self);
-        let (socket, last_state) = arc_self.dialog_loop_for_textual_protocol(socket, peer.clone(), processor_sender).await?;
-        Ok((socket, last_state))
+        arc_self.dialog_loop_for_textual_protocol(socket_connection, peer.clone(), processor_sender).await
     }
 
     /// Handles the "local" side of the peers dialog that is to take place once the connection is established -- provided the communications are done through a textual chat
@@ -217,27 +220,25 @@ impl<const CONFIG:        u64,
     ///   - after the processor is done with the `textual_socket`, the method returns it back to the caller if no errors had happened.
     #[inline(always)]
     async fn dialog_loop_for_textual_protocol(self: Arc<Self>,
-                                              mut textual_socket: TcpStream,
-                                              peer:               Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
-                                              processor_sender:   ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>)
+                                              mut socket_connection: SocketConnection<StateType>,
+                                              peer:                  Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
+                                              processor_sender:      ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>)
 
-                                              -> Result<(TcpStream, Option<StateType>), Box<dyn std::error::Error + Sync + Send>> {
-
-        let config = ConstConfig::from(CONFIG);
+                                             -> Result<SocketConnection<StateType>, Box<dyn std::error::Error + Sync + Send>> {
         // socket
-        if let Some(no_delay) = config.socket_options.no_delay {
-            textual_socket.set_nodelay(no_delay).map_err(|err| format!("error setting nodelay({no_delay}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
+        if let Some(no_delay) = Self::CONST_CONFIG.socket_options.no_delay {
+            socket_connection.connection_mut().set_nodelay(no_delay).map_err(|err| format!("error setting nodelay({no_delay}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
         }
-        if let Some(hops_to_live) = config.socket_options.hops_to_live {
+        if let Some(hops_to_live) = Self::CONST_CONFIG.socket_options.hops_to_live {
             let hops_to_live = hops_to_live.get() as u32;
-            textual_socket.set_ttl(hops_to_live).map_err(|err| format!("error setting ttl({hops_to_live}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
+            socket_connection.connection_mut().set_ttl(hops_to_live).map_err(|err| format!("error setting ttl({hops_to_live}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
         }
-        if let Some(millis) = config.socket_options.linger_millis {
-            textual_socket.set_linger(Some(Duration::from_millis(millis as u64))).map_err(|err| format!("error setting linger({millis}ms) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
+        if let Some(millis) = Self::CONST_CONFIG.socket_options.linger_millis {
+            socket_connection.connection_mut().set_linger(Some(Duration::from_millis(millis as u64))).map_err(|err| format!("error setting linger({millis}ms) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
         }
         // buffers
-        let mut read_buffer = Vec::with_capacity(config.msg_size_hint as usize);
-        let mut serialization_buffer = Vec::with_capacity(config.msg_size_hint as usize);
+        let mut read_buffer = Vec::with_capacity(Self::CONST_CONFIG.msg_size_hint as usize);
+        let mut serialization_buffer = Vec::with_capacity(Self::CONST_CONFIG.msg_size_hint as usize);
 
         let (mut sender_stream, _) = peer.create_stream();
 
@@ -253,7 +254,7 @@ impl<const CONFIG:        u64,
                         Some(to_send) => {
                             LocalMessagesType::serialize(&to_send, &mut serialization_buffer);
                             serialization_buffer.push(b'\n');
-                            if let Err(err) = textual_socket.write_all(&serialization_buffer).await {
+                            if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
                                 warn!("reactive-messaging: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
                                 break 'connection
                             }
@@ -266,7 +267,7 @@ impl<const CONFIG:        u64,
                 },
 
                 // receive?
-                read = textual_socket.read_buf(&mut read_buffer) => {
+                read = socket_connection.connection_mut().read_buf(&mut read_buffer) => {
                     match read {
                         Ok(n) if n > 0 => {
                             let mut next_line_index = 0;
@@ -334,11 +335,12 @@ impl<const CONFIG:        u64,
             );
 
         }
-        _ = processor_sender.close(Duration::from_millis(config.graceful_close_timeout_millis as u64)).await;
+        _ = processor_sender.close(Duration::from_millis(Self::CONST_CONFIG.graceful_close_timeout_millis as u64)).await;
         peer.cancel_and_close();
-        textual_socket.flush().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
-        //textual_socket.shutdown().await.map_err(|err| format!("error shutting down the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
-        Ok((textual_socket, peer.take_state().await))
+        socket_connection.connection_mut().flush().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
+        peer.take_state().await
+            .map(|state| socket_connection.set_state(state));
+        Ok(socket_connection)
     }
 
     /// Similar to [UnresponsiveSocketConnectionHandle::server_loop_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
@@ -352,12 +354,12 @@ impl<const CONFIG:        u64,
                                                          (self,
                                                           listening_interface:         &str,
                                                           listening_port:              u16,
-                                                          connection_source:           tokio::sync::mpsc::Receiver<TcpStream>,
-                                                          connection_sink:             tokio::sync::mpsc::Sender<(TcpStream, Option<StateType>)>,
+                                                          connection_source:           tokio::sync::mpsc::Receiver<SocketConnection<StateType>>,
+                                                          connection_sink:             tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
                                                           connection_events_callback:  ConnectionEventsCallback,
                                                           dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                          -> Result<(), Box<dyn std::error::Error + Sync + Send>>
+                                                         -> Result<(), Box<dyn std::error::Error + Sync + Send>>
 
                                                          where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
 
@@ -381,23 +383,23 @@ impl<const CONFIG:        u64,
                                                      ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                     (self,
-                                                     socket:                      TcpStream,
+                                                     socket_connection:           SocketConnection<StateType>,
                                                      shutdown_signaler:           tokio::sync::broadcast::Receiver<()>,
                                                      connection_events_callback:  ConnectionEventsCallback,
                                                      dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                    -> Result<(TcpStream, Option<StateType>), Box<dyn std::error::Error + Sync + Send>>
+                                                    -> Result<SocketConnection<StateType>, Box<dyn std::error::Error + Sync + Send>>
 
                                                     where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
 
-        let addr = socket.peer_addr()?;
+        let addr = socket_connection.connection().peer_addr()?;
         // upgrade the "unresponsive" streams from `dialog_processor_builder_fn()` to "responsive" streams that will send the outcome to clients
         let dialog_processor_builder_fn = |server_addr, port, peer, server_messages_stream| {
             let dialog_processor_stream = dialog_processor_builder_fn(server_addr, port, Arc::clone(&peer), server_messages_stream);
             self.to_responsive_stream(peer, dialog_processor_stream)
         };
         let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType>::new();
-        unresponsive_socket_connection_handler.client_for_unresponsive_text_protocol(socket, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
+        unresponsive_socket_connection_handler.client_for_unresponsive_text_protocol(socket_connection, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
             .map_err(|err| Box::from(format!("error when starting client for server @ {addr} with `client_for_unresponsive_text_protocol()`: {err}")))
     }
 
@@ -556,11 +558,11 @@ mod tests {
         // Rust checks
         //////////////
         // `Futures` are `Send` -- see compiler bug https://github.com/rust-lang/rust/issues/102211
-        let mut connection_provider = ServerConnectionHandler::new("127.0.0.1", 8579).await
+        let mut connection_provider = ServerConnectionHandler::new("127.0.0.1", 8579, ()).await
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             "127.0.0.1", 8579, new_connections_source, returned_connections_sink,
@@ -592,12 +594,12 @@ mod tests {
         // server
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
-        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT).await
+        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT, ()).await
             .expect("Sanity Check: couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("Sanity Check: couldn't move the Connection Receiver out of the Connection Provider");
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
             |connection_event| {
@@ -632,11 +634,12 @@ mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
-        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let socket_connection = SocketConnection::new(tokio_connection, ());
         let client_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         tokio::spawn(
             client_communications_handler.client_for_unresponsive_text_protocol(
-                socket, client_shutdown_receiver,
+                socket_connection, client_shutdown_receiver,
                 move |connection_event| {
                     match connection_event {
                         ConnectionEvent::PeerConnected { peer } => {
@@ -688,11 +691,11 @@ mod tests {
         let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(1);
 
         // server
-        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT).await
+        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT, ()).await
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
@@ -714,11 +717,12 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_ref = Arc::clone(&counter);
         // client
-        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         tokio::spawn(
             socket_communications_handler.client_for_unresponsive_text_protocol(
-                socket, client_shutdown_receiver,
+                socket_connection, client_shutdown_receiver,
                 |connection_event| {
                     match connection_event {
                         ConnectionEvent::PeerConnected { peer } => {
@@ -783,11 +787,11 @@ mod tests {
         let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaputt
         let received_messages_count_ref = Arc::clone(&received_messages_count);
         let unordered_ref = Arc::clone(&unordered);
-        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT).await
+        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT, ()).await
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
@@ -813,11 +817,12 @@ mod tests {
         // client
         let sent_messages_count = Arc::new(AtomicU32::new(0));
         let sent_messages_count_ref = Arc::clone(&sent_messages_count);
-        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
         tokio::spawn(
             socket_connection_handler.client_for_unresponsive_text_protocol(
-                socket,
+                socket_connection,
                 client_shutdown_receiver,
                 move |connection_event| {
                     let sent_messages_count = Arc::clone(&sent_messages_count_ref);
@@ -892,11 +897,11 @@ mod tests {
         // server
         let client_secret_ref = client_secret.clone();
         let server_secret_ref = server_secret.clone();
-        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT).await
+        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT, ()).await
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_communications_handler.server_loop_for_responsive_text_protocol(LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
                                                                                |_connection_event| future::ready(()),
@@ -922,10 +927,11 @@ mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_ref = Arc::clone(&observed_secret);
-        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         tokio::spawn(
-            socket_communications_handler.client_for_responsive_text_protocol(socket, client_shutdown_receiver,
+            socket_communications_handler.client_for_responsive_text_protocol(socket_connection, client_shutdown_receiver,
                                                                               move |_connection_event| future::ready(()),
                                                                               move |_client_addr, _client_port, peer, server_messages_stream| {
                     let observed_secret_ref = Arc::clone(&observed_secret_ref);
@@ -965,13 +971,13 @@ mod tests {
         let client_disconnected = Arc::new(AtomicBool::new(false));
         let client_disconnected_ref = Arc::clone(&client_disconnected);
 
-        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(1);
+        let (client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(2);
 
-        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT).await
+        let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT, ()).await
             .expect("couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
-        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<(TcpStream, Option<()>)>(2);
+        let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         socket_communications_handler.server_loop_for_unresponsive_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
@@ -989,12 +995,13 @@ mod tests {
         // wait a bit for the server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let socket = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
 
         tokio::spawn(
             socket_communications_handler.client_for_unresponsive_text_protocol(
-                socket, client_shutdown_receiver,
+                socket_connection, client_shutdown_receiver,
                 move |connection_event| {
                     let client_disconnected = Arc::clone(&client_disconnected_ref);
                     async move {
@@ -1008,9 +1015,9 @@ mod tests {
         );
 
         // wait a bit for the connection, shutdown the client, wait another bit
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
         client_shutdown_sender.send(()).expect("sending client shutdown signal");
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
 
         assert!(client_disconnected.load(Relaxed), "Client didn't drop the connection with the server");
         assert!(server_disconnected.load(Relaxed), "Server didn't notice the drop in the connection made by the client");

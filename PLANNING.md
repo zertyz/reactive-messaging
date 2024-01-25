@@ -17,6 +17,26 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Being-Done
 
+**(r7)** 2024-01-04: Refactor the Connection & associated State -- move the state & id from Peer to a new, special `TcpStream` type.\
+Taking in consideration "Composite Protocol Stacking" introduced in *(f6)*, a few ties were left behind regarding the connection States:
+a) `StateType` had to implement `Default` -- this is used to distinguish if the connection is new (just opened) or reused. The former will
+have the state set to `None` and the later have it set to the `Default` -- a safeguard if the processor code doesn't set any state;
+b) Due to (a), when a connection is moved to another state (AKA, another protocol processor), the Peer state will be `Default` -- which is
+very wrong.
+c) Session Keeping: When the connection is passed along to other processors (in a composite protocol stacking service), a new peer id is generated,
+which makes impossible for the server logic code to keep the session information (usually based on the ID).
+It happens this may be fixed by creating a dedicated "Connection" type, which would contain the `TcpStream`, the `StateType` and the `ConnectionId`.
+Suggested Steps:
+1) Make `connection_provider.rs` to use the new connection type. New connections (client or server) will have the state set to `None`
+2) Remove the `Default` constraint on `StateType` anywhere it is used -- this will reveal the places it should be gathered from the new
+   connection type;
+3) Remove all occurrences where the tuple `(TcpStream, StateType)` is present, replacing it for the new connection type
+4) Update the test socket_client::composite_protocol_stacking_pattern on every `PeerConnected` event to assert that the peer state
+   (which is, actually, the connection state) matches the hard coded values
+5) Idem for the server version of this test
+6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous states, which is not currently possible today)
+7) Move `peer.id` to the connection and refactor all related code
+
 **(f6)** 2023-11-01: Support Composite Protocol Stacking -- Complex authenticated protocols as well as WebSockets would benefit from this feature, as the whole composite stack could be modeled by different `enums`, avoiding unrepresentable states:
 1) The `socket_connection_handler.rs` main logic should be upgraded to:
    a) start processing already opened connections
@@ -29,26 +49,6 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 
 # Backlog
-
-**(r7)** 2024-01-04: Refactor the Connection & associated State -- move the state & id from Peer to a new, special `TcpStream` type.\
-Taking in consideration "Composite Protocol Stacking" introduced in *(f6)*, a few ties were left behind regarding the connection States:
-a) `StateType` had to implement `Default` -- this is used to distinguish if the connection is new (just opened) or reused. The former will
-   have the state set to `None` and the later have it set to the `Default` -- a safeguard if the processor code doesn't set any state;
-b) Due to (a), when a connection is moved to another state (AKA, another protocol processor), the Peer state will be `Default` -- which is
-   very wrong.
-c) Session Keeping: When the connection is passed along to other processors (in a composite protocol stacking service), a new peer id is generated,
-   which makes impossible for the server logic code to keep the session information (usually based on the ID).
-It happens this may be fixed by creating a dedicated "Connection" type, which would contain the `TcpStream`, the `StateType` and the `ConnectionId`.
-Suggested Steps:
-1) Make `connection_provider.rs` to use the new connection type. New connections (client or server) will have the state set to `None`
-2) Remove the `Default` constraint on `StateType` anywhere it is used -- this will reveal the places it should be gathered from the new
-   connection type;
-3) Remove all occurrences where the tuple `(TcpStream, StateType)` is present, replacing it for the new connection type
-4) Update the test socket_client::composite_protocol_stacking_pattern on every `PeerConnected` event to assert that the peer state
-   (which is, actually, the connection state) matches the hard coded values
-5) Idem for the server version of this test
-6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous states, which is not currently possible today)
-7) Move `peer.id` to the connection and refactor all related code
 
 **(n8)** 2024-01-04: Introduce binary messages:
 1) Use RKYV for serialization (the fastest & more flexible among current options, after a chat gpt & bard research)

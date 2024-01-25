@@ -1,7 +1,7 @@
-//! Resting place for [Peer], representing the remote part on a TCP/IP socket connection
+//! Resting place for [Peer], representing the remote party on a TCP/IP socket connection
 
 use crate::{
-    ReactiveMessagingSerializer,
+    serde::ReactiveMessagingSerializer,
     socket_connection::common::{
         ReactiveMessagingSender,
     },
@@ -17,11 +17,7 @@ use reactive_mutiny::prelude::advanced::{
     FullDuplexUniChannel,
 };
 use tokio::sync::Mutex;
-
-
-static PEER_COUNTER: AtomicU32 = AtomicU32::new(0);
-pub type PeerId = u32;
-
+use crate::socket_connection::connection::{ConnectionId, SocketConnection};
 
 
 /// Represents a reactive channel connected to a remote peer, through which we're able to send out "local messages" of type `RetryableSenderImpl::LocalMessages`.\
@@ -31,8 +27,9 @@ pub type PeerId = u32;
 pub struct Peer<const CONFIG:     u64,
                 LocalMessages:    ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                 SenderChannel:    FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-                StateType:                                                                                      Send + Sync             + Debug + 'static = ()> {
-    pub peer_id:          PeerId,
+                StateType:                                                                                      Send + Sync + Clone     + Debug + 'static = ()> {
+    // TODO rename to `id`
+    pub peer_id:          ConnectionId,
     pub peer_address:     SocketAddr,
     pub state:            Mutex<Option<StateType>>,
         retryable_sender: ReactiveMessagingSender<CONFIG, LocalMessages, SenderChannel>,
@@ -41,14 +38,14 @@ pub struct Peer<const CONFIG:     u64,
 impl<const CONFIG:  u64,
      LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
      SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-     StateType:                                                                                   Send + Sync             + Debug>
+     StateType:                                                                                   Send + Sync + Clone     + Debug>
 Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
 
-    pub fn new(retryable_sender: ReactiveMessagingSender<CONFIG, LocalMessages, SenderChannel>, peer_address: SocketAddr, initial_state: StateType) -> Self {
+    pub fn new(retryable_sender: ReactiveMessagingSender<CONFIG, LocalMessages, SenderChannel>, peer_address: SocketAddr, connection: &SocketConnection<StateType>) -> Self {
         Self {
-            peer_id: PEER_COUNTER.fetch_add(1, Relaxed),
+            peer_id: connection.id(),
             peer_address,
-            state: Mutex::new(Some(initial_state)),
+            state: Mutex::new(Some(connection.state().clone())),
             retryable_sender,
         }
     }
@@ -119,7 +116,7 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
 impl<const CONFIG:  u64,
      LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
      SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-     StateType:                                                                                   Send + Sync             + Debug>
+     StateType:                                                                                   Send + Sync + Clone     + Debug>
 Debug for
 Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

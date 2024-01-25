@@ -1,24 +1,11 @@
 #![doc = include_str!("../README.md")]
 
 
+pub(crate) mod types;
 pub(crate) mod config;
 
-mod socket_connection;
+pub(crate) mod socket_connection;
 
-mod serde;
-pub use crate::serde::{
-    ReactiveMessagingSerializer,
-    ReactiveMessagingDeserializer,
-    ron_serializer,
-    ron_deserializer,
-};
-
-mod types;
-
+pub(crate) mod serde;
+pub(crate) mod socket_services;
 pub mod prelude;
-
-mod socket_server;
-pub use socket_server::*;
-
-mod socket_client;
-pub use socket_client::*;

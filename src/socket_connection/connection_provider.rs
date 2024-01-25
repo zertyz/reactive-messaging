@@ -10,6 +10,7 @@
 //! IMPLEMENTATION NOTE: this code may be improved when Rust allows "async fn in traits": a common trait
 //!                      may be implemented.
 
+use std::fmt::Debug;
 use std::future;
 use std::future::Future;
 use std::iter::Peekable;
@@ -23,6 +24,7 @@ use tokio::net::{ TcpStream, TcpListener };
 use log::{trace, error, warn};
 use tokio::sync::Mutex;
 use crate::config::{ConstConfig, RetryingStrategies};
+use crate::socket_connection::connection::SocketConnection;
 
 
 type ConnectionFuture = Pin < Box < dyn Future < Output=RetryProducerResult<TcpStream, Box<dyn std::error::Error + Sync + Send>> > > >;
@@ -140,20 +142,20 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
 /// Abstracts out, from servers, the connection handling so to enable the "Protocol Stack Composition" pattern:\
 /// Binds to a network listening interface and port and starts a network event loop for accepting connections,
 /// supplying them to an internal [ConnectionChannel] (while also allowing manually fed connections).
-pub struct ServerConnectionHandler {
-    connection_channel:          ConnectionChannel,
+pub struct ServerConnectionHandler<StateType: Debug + Clone + Send + 'static> {
+    connection_channel:          ConnectionChannel<StateType>,
     network_event_loop_signaler: tokio::sync::oneshot::Sender<()>,
 }
 
-impl ServerConnectionHandler {
+impl<StateType: Debug + Clone + Send + 'static> ServerConnectionHandler<StateType> {
 
     /// Creates a new instance of a server, binding to the specified `listening_interface` and `listening_port`.\
     /// Incoming connections are [feed()] as they arrive -- but you can also do so manually, by calling the mentioned method.
-    pub async fn new(listening_interface: &str, listening_port: u16) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+    pub async fn new(listening_interface: &str, listening_port: u16, connection_initial_state: StateType) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         let connection_channel = ConnectionChannel::new();
         let connection_sender = connection_channel.sender.clone();
         let (network_event_loop_sender, network_event_loop_receiver) = tokio::sync::oneshot::channel::<()>();
-        Self::spawn_connection_listener(&listening_interface, listening_port, connection_sender, network_event_loop_receiver).await?;
+        Self::spawn_connection_listener(&listening_interface, listening_port, connection_initial_state, connection_sender, network_event_loop_receiver).await?;
         Ok(Self {
             connection_channel,
             network_event_loop_signaler: network_event_loop_sender,
@@ -163,7 +165,8 @@ impl ServerConnectionHandler {
     /// spawns the server network loop in a new task, possibly returning an error if binding to the specified `listening_interface` and `listening_port` was not allowed.
     async fn spawn_connection_listener(listening_interface:             &str,
                                        listening_port:                  u16,
-                                       sender:                          tokio::sync::mpsc::Sender<TcpStream>,
+                                       connection_initial_state:        StateType,
+                                       sender:                          tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
                                        mut network_event_loop_signaler: tokio::sync::oneshot::Receiver<()>)
                                       -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         let listening_interface_and_port = format!("{}:{}", listening_interface, listening_port);
@@ -171,7 +174,7 @@ impl ServerConnectionHandler {
         tokio::spawn( async move {
             loop {
                 // wait for a connection -- or for a shutdown signal
-                let (connection, _addr) = if let Some(accepted_connection_and_addr) = tokio::select! {
+                let (connection, client_address) = if let Some(accepted_connection_and_addr) = tokio::select! {
                     // incoming connection
                     acceptance_result = listener.accept() => {
                         if let Err(err) = acceptance_result {
@@ -196,8 +199,8 @@ impl ServerConnectionHandler {
                     continue
                 };
 
-                if let Err(unconsumed_connection) = sender.send(connection).await {
-                    let client_address = unconsumed_connection.0.peer_addr().map(|peer_addr| peer_addr.to_string()).unwrap_or(String::from("<<couldn't determine the client's address>>"));
+                let dispatching_result = sender.send(SocketConnection::new(connection, connection_initial_state.clone())).await;
+                if let Err(unconsumed_connection) = dispatching_result {
                     error!("`reactive-messaging::IncomingConnectionHandler` BUG! -- The server @ {listening_interface_and_port} faced an ERROR when feeding an incoming connection (from '{client_address}') to the 'connections consumer': it had dropped the consumption receiver prematurely. The server's network event loop will be ABORTED and you should expect undefined behavior, as the application thinks the server is still running.");
                     break;
                 }
@@ -211,14 +214,14 @@ impl ServerConnectionHandler {
     /// The receiver blocks while there are no connections available and
     /// yields `None` if `self` is dropped -- meaning no more connections
     /// will be feed through the channel.
-    pub fn connection_receiver(&mut self) -> Option<tokio::sync::mpsc::Receiver<TcpStream>> {
+    pub fn connection_receiver(&mut self) -> Option<tokio::sync::mpsc::Receiver<SocketConnection<StateType>>> {
         self.connection_channel.receiver()
     }
 
     /// Delivers `connection` to the receiver obtained via a call to [Self::connection_receiver()],
     /// blocking if there are previous connections awaiting delivery
-    pub async fn feed_connection(&self, connection: TcpStream) -> Result<(), ReceiverDroppedErr<TcpStream>> {
-        self.connection_channel.feed(connection).await
+    pub async fn feed_connection(&self, socket_connection: SocketConnection<StateType>) -> Result<(), ReceiverDroppedErr<SocketConnection<StateType>>> {
+        self.connection_channel.feed(socket_connection).await
     }
 
     /// "Shutdown" the connection listener for this server, releasing the bind to the listening interface and port
@@ -238,18 +241,18 @@ impl ServerConnectionHandler {
 /// added to the `Stream` (in addition to fresh incoming ones).\
 /// When the end-of-stream is reached (possibly due to a "server shutdown" request),
 /// the `Stream` will return `None`.
-pub struct ConnectionChannel {
-    pub(crate) sender:   tokio::sync::mpsc::Sender<TcpStream>,
-               receiver: Option<tokio::sync::mpsc::Receiver<TcpStream>>,
+pub struct ConnectionChannel<StateType: Debug> {
+    pub(crate) sender:   tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
+               receiver: Option<tokio::sync::mpsc::Receiver<SocketConnection<StateType>>>,
     // throttling may be implemented by using a moving average for the number of opened connections
     // and the statistics struct from `reactive-mutiny` may help here
 }
 
-impl ConnectionChannel {
+impl<StateType: Debug> ConnectionChannel<StateType> {
 
     /// Creates a new instance
     pub fn new() -> Self {
-        let (sender, receiver) = tokio::sync::mpsc::channel::<TcpStream>(2);
+        let (sender, receiver) = tokio::sync::mpsc::channel::<SocketConnection<StateType>>(2);
         Self {
             sender,
             receiver: Some(receiver),
@@ -261,14 +264,14 @@ impl ConnectionChannel {
     /// The receiver blocks while there are no connections available and
     /// yields `None` if `self` is dropped -- meaning no more connections
     /// will be feed through the channel.
-    pub fn receiver(&mut self) -> Option<tokio::sync::mpsc::Receiver<TcpStream>> {
+    pub fn receiver(&mut self) -> Option<tokio::sync::mpsc::Receiver<SocketConnection<StateType>>> {
         self.receiver.take()
     }
 
     /// Delivers `connection` to the receiver obtained via a call to [Self::receiver()],
     /// blocking if there are previous connections awaiting delivery
-    pub async fn feed(&self, connection: TcpStream) -> Result<(), ReceiverDroppedErr<TcpStream>> {
-        self.sender.send(connection).await
+    pub async fn feed(&self, socket_connection: SocketConnection<StateType>) -> Result<(), ReceiverDroppedErr<SocketConnection<StateType>>> {
+        self.sender.send(socket_connection).await
             .map_err(|unconsumed_connection| ReceiverDroppedErr(unconsumed_connection.0))
     }
 
@@ -277,7 +280,7 @@ impl ConnectionChannel {
     /// a cloned sender will prevent the channel from shutting down,
     /// rendering [Self::close()] useless -- currently there is no way
     /// for `close()` to detect this situation.
-    pub fn clone_sender(&self) -> tokio::sync::mpsc::Sender<TcpStream> {
+    pub fn clone_sender(&self) -> tokio::sync::mpsc::Sender<SocketConnection<StateType>> {
         self.sender.clone()
     }
 
@@ -326,8 +329,9 @@ mod tests {
             stream_ended_ref.store(true, Relaxed);
         });
         for _i in 0..10 {
-            let value = TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str("66.45.249.218")?), 80)).await?;
-            connection_channel.feed(value).await.unwrap_or_else(|_| panic!("Failed to send value"));
+            let tokio_connection = TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str("66.45.249.218")?), 80)).await?;
+            let socket_connection = SocketConnection::new(tokio_connection, ());
+            connection_channel.feed(socket_connection).await.unwrap_or_else(|_| panic!("Failed to send value"));
         }
         assert_eq!(stream_ended.load(Relaxed), false, "The connections stream was prematurely closed");
         connection_channel.close().await;
@@ -346,7 +350,7 @@ mod tests {
         let received_count_ref = received_count.clone();
         let stream_ended = Arc::new(AtomicBool::new(false));
         let stream_ended_ref = stream_ended.clone();
-        let mut server_connection_handler = ServerConnectionHandler::new(interface, port).await?;
+        let mut server_connection_handler = ServerConnectionHandler::new(interface, port, ()).await?;
         let mut connection_receiver = server_connection_handler.connection_receiver().expect("The `receiver` should be available at this point");
         tokio::spawn(async move {
             while let Some(_connection) = connection_receiver.recv().await {
@@ -355,10 +359,11 @@ mod tests {
             stream_ended_ref.store(true, Relaxed);
         });
         for i in 0..10 {
-            let value = TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str(interface)?), port)).await?;
+            let tokio_connection = TcpStream::connect(SocketAddr::new(IpAddr::V4(Ipv4Addr::from_str(interface)?), port)).await?;
             if i == 0 {
                 // feed a single extra connection manually, to check that we can do so
-                server_connection_handler.feed_connection(value).await.unwrap_or_else(|_| panic!("Failed to send value"));
+                let extra_socket_connection = SocketConnection::new(tokio_connection, ());
+                server_connection_handler.feed_connection(extra_socket_connection).await.unwrap_or_else(|_| panic!("Failed to send value"));
             }
         }
         assert_eq!(stream_ended.load(Relaxed), false, "The connections stream was prematurely closed");
@@ -405,7 +410,7 @@ mod tests {
         assert_eq!(error_message, "Couldn't connect to socket address '127.0.0.1:8357' resolved from '127.0.0.1:8357': Connection refused (os error 111)", "Wrong error message");
 
         // now with a server listening
-        let mut server_connection_handler = ServerConnectionHandler::new(interface, port).await?;
+        let mut server_connection_handler = ServerConnectionHandler::new(interface, port, ()).await?;
         let mut connection_receiver = server_connection_handler.connection_receiver().expect("The `receiver` should be available at this point");
         tokio::spawn(async move {
             while let Some(_connection) = connection_receiver.recv().await {

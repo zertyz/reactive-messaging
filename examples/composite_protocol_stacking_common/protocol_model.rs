@@ -57,9 +57,8 @@
 
 use std::error::Error;
 use super::logic::ping_pong_models::*;
+use reactive_messaging::prelude::{ResponsiveMessages, ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use serde::{Serialize, Deserialize};
-use reactive_messaging::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
-use reactive_messaging::prelude::ResponsiveMessages;
 
 
 pub const PROTOCOL_VERSION: &str = "2024-01-08";
@@ -67,10 +66,9 @@ pub const PROTOCOL_VERSION: &str = "2024-01-08";
 
 /// The states the dialog between client and server may be into
 /// (used for the "Composite Protocol Stacking" pattern)
-#[derive(Debug,Default)]
+#[derive(Debug,Clone)]
 pub enum ProtocolStates {
     /// Both client and server are in the "pre-game", awaiting for a negotiated configuration to actually start the game
-    #[default]
     PreGame,
     /// PreGame arrangements were not mutually agreed between client and server and a disconnection is about to happen
     Disconnect,

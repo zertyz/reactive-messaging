@@ -6,7 +6,6 @@ use crate::{
         ConstConfig,
         RetryingStrategies,
     },
-    ReactiveMessagingSerializer
 };
 use reactive_mutiny::prelude::{GenericUni, MutinyStream,FullDuplexUniChannel};
 use std::{
@@ -16,6 +15,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use keen_retry::ExponentialJitter;
+use crate::serde::ReactiveMessagingSerializer;
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `COFNIG`
 pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
@@ -358,7 +358,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 /// Common test code for this module
 #[cfg(any(test,doc))]
 mod tests {
-    use crate::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+    use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
     use crate::types::ResponsiveMessages;
 
     /// Test implementation for our text-only protocol as used across this module
