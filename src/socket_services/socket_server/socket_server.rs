@@ -28,7 +28,6 @@ use crate::{
         connection_provider::{ServerConnectionHandler, ConnectionChannel},
     },
     serde::{ ReactiveMessagingDeserializer, ReactiveMessagingSerializer},
-    config::ConstConfig,
 };
 use std::{
     fmt::Debug,
@@ -36,17 +35,12 @@ use std::{
     sync::Arc,
 };
 use reactive_mutiny::prelude::advanced::{
-    ChannelUniMoveFullSync,
-    UniZeroCopyFullSync,
     FullDuplexUniChannel,
     GenericUni,
 };
 use std::net::SocketAddr;
 use futures::{future::BoxFuture, Stream};
-use tokio::{
-    io::AsyncWriteExt,
-    net::TcpStream,
-};
+use tokio::io::AsyncWriteExt;
 use log::{error, trace, warn};
 
 
@@ -336,14 +330,14 @@ for CompositeSocketServer<CONFIG, StateType> {
 
                     // process newly incoming connections
                     new_connection = new_connections_source.recv() => {
-                        let Some(mut  new_socket_connection) = new_connection else { break };
+                        let Some(new_socket_connection) = new_connection else { break };
                         let sender = connection_routing_closure(&new_socket_connection, false);
                         (new_socket_connection, sender)
                     },
 
                     // process connections returned by the processors (after they ended processing them)
                     returned_connection_and_state = returned_connections_source.recv() => {
-                        let Some(mut  returned_socket_connection) = returned_connection_and_state else { break };
+                        let Some(returned_socket_connection) = returned_connection_and_state else { break };
                         let sender = connection_routing_closure(&returned_socket_connection, true);
                         (returned_socket_connection, sender)
                     },
@@ -441,19 +435,19 @@ mod tests {
     /// Test that our instantiation macro for single protocol servers is able to produce servers backed by all possible channel types
     #[cfg_attr(not(doc),test)]
     fn single_protocol_instantiation() {
-        let atomic_server = new_socket_server!(
+        let _atomic_server = new_socket_server!(
             ConstConfig {
                 ..ConstConfig::default()
             },
             LISTENING_INTERFACE, PORT_START);
 
-        let fullsync_server  = new_socket_server!(
+        let _fullsync_server  = new_socket_server!(
             ConstConfig {
                 ..ConstConfig::default()
             },
             LISTENING_INTERFACE, PORT_START+1);
 
-        let crossbeam_server = new_socket_server!(
+        let _crossbeam_server = new_socket_server!(
             ConstConfig {
                 ..ConstConfig::default()
             },
@@ -463,19 +457,19 @@ mod tests {
     /// Test that our instantiation macro for composite protocol servers is able to produce servers backed by all possible channel types
     #[cfg_attr(not(doc),test)]
     fn composite_protocol_instantiation() {
-        let atomic_server = new_composite_socket_server!(
+        let _atomic_server = new_composite_socket_server!(
             ConstConfig {
                 ..ConstConfig::default()
             },
             LISTENING_INTERFACE, PORT_START+3, () );
 
-        let fullsync_server  = new_composite_socket_server!(
+        let _fullsync_server  = new_composite_socket_server!(
             ConstConfig {
                 ..ConstConfig::default()
             },
             LISTENING_INTERFACE, PORT_START+4, () );
 
-        let crossbeam_server = new_composite_socket_server!(
+        let _crossbeam_server = new_composite_socket_server!(
             ConstConfig {
                 ..ConstConfig::default()
             },
@@ -721,7 +715,7 @@ mod tests {
             PORT,
             Protocols);
 
-        #[derive(Clone,Debug)]
+        #[derive(Debug,PartialEq,Clone)]
         enum Protocols {
             IncomingClient,
             WelcomeAuthenticatedFriend,
@@ -736,6 +730,7 @@ mod tests {
         let incoming_client_processor = spawn_unresponsive_server_processor!(TEST_CONFIG, Atomic, server, String, String,
             |_| future::ready(()),
             move |_, _, peer, client_messages_stream| {
+                assert_eq!(peer.try_take_state(), Some(Some(Protocols::IncomingClient)), "Connection is in a wrong state");
                 let incoming_client_processor_greeted_ref = Arc::clone(&incoming_client_processor_greeted_ref);
                 client_messages_stream.then(move |_payload| {
                     let peer = Arc::clone(&peer);
@@ -763,6 +758,7 @@ mod tests {
                 }
             },
             move |_, _, peer, client_messages_stream| {
+                assert_eq!(peer.try_take_state(), Some(Some(Protocols::WelcomeAuthenticatedFriend)), "Connection is in a wrong state");
                 let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted_ref);
                 client_messages_stream.then(move |_payload| {
                     let peer = Arc::clone(&peer);
@@ -787,6 +783,7 @@ mod tests {
                 }
             },
             move |_, _, peer, client_messages_stream| {
+                assert_eq!(peer.try_take_state(), Some(Some(Protocols::AccountSettings)), "Connection is in a wrong state");
                 let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted_ref);
                 client_messages_stream.then(move |_payload| {
                     let peer = Arc::clone(&peer);
@@ -811,6 +808,7 @@ mod tests {
                 }
             },
             move |_, _, peer, client_messages_stream| {
+                assert_eq!(peer.try_take_state(), Some(Some(Protocols::GoodbyeOptions)), "Connection is in a wrong state");
                 let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted_ref);
                 client_messages_stream.then(move |_payload| {
                     let peer = Arc::clone(&peer);

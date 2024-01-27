@@ -11,7 +11,6 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use futures::Stream;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
-use tokio::net::TcpStream;
 
 
 /// Base trait for services running servers and clients
@@ -111,7 +110,7 @@ pub trait MessagingService<const CONFIG: u64> {
                                        -> Result<(), Box<dyn std::error::Error + Sync + Send>>
                                        where Self::StateType: Default {
         // this closure will cause incoming or just-opened connections to be sent to `connection_channel` and returned connections to be dropped
-        let connection_routing_closure = move |socket_connection: &SocketConnection<Self::StateType>, is_reused: bool|
+        let connection_routing_closure = move |_socket_connection: &SocketConnection<Self::StateType>, is_reused: bool|
             if is_reused {
                 None
             } else {

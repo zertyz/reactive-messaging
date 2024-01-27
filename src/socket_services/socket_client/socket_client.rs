@@ -39,12 +39,9 @@ use std::{
     },
 };
 use std::sync::atomic::Ordering::Relaxed;
-use reactive_mutiny::prelude::advanced::{ChannelUniMoveFullSync, UniZeroCopyFullSync, FullDuplexUniChannel, GenericUni, ChannelUniZeroCopyAtomic, ChannelUniZeroCopyFullSync};
+use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 use futures::{future::BoxFuture, Stream};
-use tokio::{
-    io::AsyncWriteExt,
-    net::TcpStream,
-};
+use tokio::io::AsyncWriteExt;
 use log::{trace, warn, error};
 
 
@@ -395,13 +392,13 @@ for CompositeSocketClient<CONFIG, StateType> {
                 let (mut socket_connection, sender) = match just_opened_connection.take() {
                     // process the just-opened connection (once)
                     Some(just_opened_connection) => {
-                        let mut just_opened_socket_connection = SocketConnection::new(just_opened_connection, initial_connection_state.clone());
+                        let just_opened_socket_connection = SocketConnection::new(just_opened_connection, initial_connection_state.clone());
                         let sender = connection_routing_closure(&just_opened_socket_connection, false);
                         (just_opened_socket_connection, sender)
                     },
                     // process connections returned by the processors (after they ended processing them)
                     None => {
-                        let Some(mut returned_socket_connection) = returned_connection_source.recv().await else { break };
+                        let Some(returned_socket_connection) = returned_connection_source.recv().await else { break };
                         let sender = connection_routing_closure(&returned_socket_connection, true);
                         (returned_socket_connection, sender)
                     },
@@ -484,19 +481,19 @@ mod tests {
     /// Test that our instantiation macro is able to produce clients backed by all possible channel types
     #[cfg_attr(not(doc), test)]
     fn single_protocol_instantiation() {
-        let atomic_client = new_socket_client!(
+        let _atomic_client = new_socket_client!(
             ConstConfig {
                 ..ConstConfig::default()
             },
             REMOTE_SERVER, 443);
 
-        let fullsync_client = new_socket_client!(
+        let _fullsync_client = new_socket_client!(
             ConstConfig {
                 ..ConstConfig::default()
             },
             REMOTE_SERVER, 443);
 
-        let crossbeam_client = new_socket_client!(
+        let _crossbeam_client = new_socket_client!(
             ConstConfig {
                 ..ConstConfig::default()
             },
@@ -506,19 +503,19 @@ mod tests {
     /// Test that our instantiation macro is able to produce clients backed by all possible channel types
     #[cfg_attr(not(doc), test)]
     fn composite_protocol_instantiation() {
-        let atomic_client = new_composite_socket_client!(
+        let _atomic_client = new_composite_socket_client!(
             ConstConfig {
                 ..ConstConfig::default()
             },
             REMOTE_SERVER, 443, () );
 
-        let fullsync_client = new_composite_socket_client!(
+        let _fullsync_client = new_composite_socket_client!(
             ConstConfig {
                 ..ConstConfig::default()
             },
             REMOTE_SERVER, 443, () );
 
-        let crossbeam_client = new_composite_socket_client!(
+        let _crossbeam_client = new_composite_socket_client!(
             ConstConfig {
                 ..ConstConfig::default()
             },

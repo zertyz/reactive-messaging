@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let possible_options = vec!["server-only", "client-only"];
     println!("Usage: hello_world [{}]", possible_options.iter().fold(String::new(), |mut acc, item| { if acc.len() > 0 {acc.push('|')}; acc.push_str(item); acc } ));
 
-    let mut args: Vec<String> = env::args().collect();
+    let args: Vec<String> = env::args().collect();
     if args.len() > 2 {
         return Err(Box::from(String::from("This program takes a single optional argument")))
     }
@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut server = None;
-    if (start_server) {
+    if start_server {
         println!("==> starting the server");
         let server = server.insert(new_socket_server!(CONFIG, LISTENING_INTERFACE, PORT));
         let server_processor_handler = spawn_responsive_server_processor!(CONFIG, Atomic, server, ClientMessages, ServerMessages,
@@ -80,7 +80,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn std
         server.start_with_single_protocol(server_processor_handler).await?;
     }
 
-    if (start_client) {
+    if start_client {
         println!("==> starting the client");
         let mut client = new_socket_client!(CONFIG, LISTENING_INTERFACE, PORT);
         start_unresponsive_client_processor!(CONFIG, Atomic, client, ServerMessages, ClientMessages,
@@ -113,7 +113,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn std
             server_waiter().await?;
             println!("==> server ended. Goodbye");
         }
-    } else if let Some(mut server) = server {
+    } else if let Some(server) = server {
         println!("Server is running without a client. Wait 3 minutes or press CTRL-C. On another terminal, run `nc -vvvv localhost 1234` and act as a client");
         tokio::time::sleep(Duration::from_secs(60*3)).await;
         server.terminate().await?

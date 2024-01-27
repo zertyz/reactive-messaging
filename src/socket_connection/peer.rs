@@ -8,7 +8,6 @@ use crate::{
 };
 use std::{
     fmt::{Debug, Formatter},
-    sync::atomic::{AtomicU32, Ordering::Relaxed},
     net::SocketAddr,
     time::Duration,
 };
@@ -79,11 +78,12 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
     }
 
     /// Use [set_state()] (async) if possible
-    pub fn set_state_sync(&self, state: StateType) {
+    pub fn try_set_state(&self, state: StateType) -> bool {
         if let Ok(mut locked_state) = self.state.try_lock() {
             *locked_state = Some(state);
+            true
         } else {
-            panic!("BUG in peer::set_state_sync({state:?}) -- couldn't lock the state")
+            false
         }
     }
 
@@ -91,6 +91,15 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
     /// (a requirement to allow the "Composite Protocol Stacking" pattern)
     pub async fn take_state(&self) -> Option<StateType> {
         self.state.lock().await.take()
+    }
+
+    /// Use [Self::take_state()] (async) if possible
+    pub fn try_take_state(&self) -> Option<Option<StateType>> {
+        if let Ok(mut locked_state) = self.state.try_lock() {
+            Some(locked_state.take())
+        } else {
+            None
+        }
     }
 
     #[inline(always)]

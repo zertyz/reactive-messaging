@@ -22,10 +22,7 @@ use std::{
 };
 use reactive_mutiny::prelude::advanced::{GenericUni, FullDuplexUniChannel};
 use futures::{StreamExt, Stream};
-use tokio::{
-    io::{self,AsyncReadExt,AsyncWriteExt},
-    net::TcpStream,
-};
+use tokio::io::{self,AsyncReadExt,AsyncWriteExt};
 use log::{trace, debug, warn, error};
 use crate::socket_connection::connection::SocketConnection;
 
@@ -492,6 +489,7 @@ mod tests {
     };
     use reactive_mutiny::{prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic}, types::{ChannelCommon, ChannelUni, ChannelProducer}};
     use futures::stream;
+    use tokio::net::TcpStream;
     use tokio::sync::Mutex;
     use crate::socket_connection::connection_provider::ServerConnectionHandler;
 

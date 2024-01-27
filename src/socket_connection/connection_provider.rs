@@ -200,7 +200,7 @@ impl<StateType: Debug + Clone + Send + 'static> ServerConnectionHandler<StateTyp
                 };
 
                 let dispatching_result = sender.send(SocketConnection::new(connection, connection_initial_state.clone())).await;
-                if let Err(unconsumed_connection) = dispatching_result {
+                if let Err(_unconsumed_connection) = dispatching_result {
                     error!("`reactive-messaging::IncomingConnectionHandler` BUG! -- The server @ {listening_interface_and_port} faced an ERROR when feeding an incoming connection (from '{client_address}') to the 'connections consumer': it had dropped the consumption receiver prematurely. The server's network event loop will be ABORTED and you should expect undefined behavior, as the application thinks the server is still running.");
                     break;
                 }

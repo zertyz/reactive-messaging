@@ -63,8 +63,8 @@ impl ClientProtocolProcessor {
                                      StreamItemType:       AsRef<PreGameServerMessages>>
 
                                     (self:                   &Arc<Self>,
-                                     server_addr:            String,
-                                     port:                   u16,
+                                     _server_addr:           String,
+                                     _port:                  u16,
                                      peer:                   Arc<Peer<NETWORK_CONFIG, PreGameClientMessages, SenderChannel, ProtocolStates>>,
                                      server_messages_stream: impl Stream<Item=StreamItemType>)
 
@@ -78,7 +78,7 @@ impl ClientProtocolProcessor {
                 PreGameServerMessages::Version(server_protocol_version) => {
                     if server_protocol_version == PROTOCOL_VERSION {
                         // Upgrade to the next protocol
-                        peer.set_state_sync(ProtocolStates::Game);
+                        peer.try_set_state(ProtocolStates::Game);
                         peer.cancel_and_close();
                         PreGameClientMessages::NoAnswer
                     } else {
@@ -90,7 +90,7 @@ impl ClientProtocolProcessor {
 
                 PreGameServerMessages::Error(err) => {
                     error!("Server (pre game) answered with error '{err}' -- closing the connection");
-                    peer.set_state_sync(ProtocolStates::Disconnect);
+                    peer.try_set_state(ProtocolStates::Disconnect);
                     peer.cancel_and_close();
                     PreGameClientMessages::NoAnswer
                 },
@@ -213,7 +213,7 @@ impl ClientProtocolProcessor {
 
                 GameServerMessages::Error(err) => {
                     error!("Server answered with error '{err}'");
-                    peer.set_state_sync(ProtocolStates::Disconnect);
+                    peer.try_set_state(ProtocolStates::Disconnect);
                     vec![GameClientMessages::Quit]
                 },
 
@@ -222,7 +222,7 @@ impl ClientProtocolProcessor {
                 },
 
                 GameServerMessages::GoodBye | GameServerMessages::ServerShutdown => {
-                    peer.set_state_sync(ProtocolStates::Disconnect);
+                    peer.try_set_state(ProtocolStates::Disconnect);
                     peer.cancel_and_close();
                     vec![/* no answer */]
                 },

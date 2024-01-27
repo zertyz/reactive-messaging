@@ -230,13 +230,13 @@ impl ResponsiveMessages<GameClientMessages> for GameClientMessages {
         matches!(processor_answer, GameClientMessages::Quit)
     }
     #[inline(always)]
-    fn is_no_answer_message(processor_answer: &GameClientMessages) -> bool {
+    fn is_no_answer_message(_processor_answer: &GameClientMessages) -> bool {
         false
     }
 }
 impl ResponsiveMessages<PreGameClientMessages> for PreGameClientMessages {
     #[inline(always)]
-    fn is_disconnect_message(processor_answer: &PreGameClientMessages) -> bool {
+    fn is_disconnect_message(_processor_answer: &PreGameClientMessages) -> bool {
         false
     }
     #[inline(always)]

@@ -3,7 +3,7 @@
 use std::{ops::RangeInclusive, num::NonZeroU8};
 use std::time::Duration;
 use reactive_mutiny::prelude::Instruments;
-use strum_macros::FromRepr;
+//use strum_macros::FromRepr;
 
 
 // /// Specifies the channels (queues) from `reactive-mutiny` thay may be used to send/receive data.\

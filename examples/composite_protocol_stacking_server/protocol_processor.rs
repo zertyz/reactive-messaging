@@ -15,7 +15,7 @@ use reactive_messaging::prelude::{ConnectionEvent, Peer};
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use dashmap::DashMap;
 use futures::stream::{self, Stream, StreamExt};
-use log::{debug, info, warn, error};
+use log::{info, warn, error};
 use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
 
 
@@ -86,12 +86,12 @@ impl ServerProtocolProcessor {
                     let umpire_option = unsafe { &mut * (session.umpire.get()) };
                     let umpire = Umpire::new(&match_config, Players::Opponent);
                     umpire_option.replace(umpire);
-                    peer.set_state_sync(ProtocolStates::Game);
+                    peer.try_set_state(ProtocolStates::Game);
                     PreGameServerMessages::Version(String::from(PROTOCOL_VERSION))
                 },
                 PreGameClientMessages::Error(err) => {
                     error!("Pre-game Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
-                    peer.set_state_sync(ProtocolStates::Disconnect);
+                    peer.try_set_state(ProtocolStates::Disconnect);
                     peer.cancel_and_close();
                     PreGameServerMessages::NoAnswer
                 },
@@ -220,12 +220,12 @@ impl ServerProtocolProcessor {
 
                 GameClientMessages::Error(err) => {
                     error!("Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
-                    peer.set_state_sync(ProtocolStates::Disconnect);
+                    peer.try_set_state(ProtocolStates::Disconnect);
                     vec![GameServerMessages::GoodBye]
                 },
 
                 GameClientMessages::Quit => {
-                    peer.set_state_sync(ProtocolStates::Disconnect);
+                    peer.try_set_state(ProtocolStates::Disconnect);
                     vec![GameServerMessages::GoodBye]
                 },
             }
