@@ -750,7 +750,7 @@ mod tests {
             PORT,
             Protocols );
 
-        #[derive(Clone,Debug)]
+        #[derive(Debug,PartialEq,Clone)]
         enum Protocols {
             Handshake,
             WelcomeAuthenticatedFriend,
@@ -771,6 +771,7 @@ mod tests {
                 }
             },
             move |_, _, peer, server_messages_stream| {
+                assert_eq!(peer.try_take_state(), Some(Some(Protocols::Handshake)), "Connection is in a wrong state");
                 let handshake_processor_greeted_ref = Arc::clone(&handshake_processor_greeted_ref);
                 server_messages_stream.then(move |_payload| {
                     let peer = Arc::clone(&peer);
@@ -795,6 +796,7 @@ mod tests {
                 }
             },
             move |_, _, peer, server_messages_stream| {
+                assert_eq!(peer.try_take_state(), Some(Some(Protocols::WelcomeAuthenticatedFriend)), "Connection is in a wrong state");
                 let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted_ref);
                 server_messages_stream.then(move |_payload| {
                     let peer = Arc::clone(&peer);
@@ -818,6 +820,7 @@ mod tests {
                 }
             },
             move |_, _, peer, server_messages_stream| {
+                assert_eq!(peer.try_take_state(), Some(Some(Protocols::AccountSettings)), "Connection is in a wrong state");
                 let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted_ref);
                 server_messages_stream.then(move |_payload| {
                     let peer = Arc::clone(&peer);
@@ -841,6 +844,7 @@ mod tests {
                 }
             },
             move |_, _, peer, server_messages_stream| {
+                assert_eq!(peer.try_take_state(), Some(Some(Protocols::GoodbyeOptions)), "Connection is in a wrong state");
                 let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted_ref);
                 server_messages_stream.then(move |_payload| {
                     let peer = Arc::clone(&peer);

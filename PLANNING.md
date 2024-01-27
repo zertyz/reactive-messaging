@@ -90,7 +90,7 @@ Suggested Steps:
 4) Update the test socket_client::composite_protocol_stacking_pattern on every `PeerConnected` event to assert that the peer state
    (which is, actually, the connection state) matches the hard coded values
 5) Idem for the server version of this test
-6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous states, which is not currently possible today)
+_6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous states, which is not currently possible today)_’’
 7) Move `peer.id` to the connection and refactor all related code
 
 
