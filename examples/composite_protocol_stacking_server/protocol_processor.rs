@@ -54,8 +54,10 @@ impl ServerProtocolProcessor {
                 self.sessions.insert(peer.peer_id, Arc::new(Session { umpire: UnsafeCell::new(None) }));
             },
             ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
-                warn!("Pre-Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
-                self.sessions.remove(&peer.peer_id);
+                // TODO 2024-01-27: add another state on ConnectionEvent to differentiate a "ProcessorEnded" from a "SocketDisconnected", or else memory leaks (for the session) will occur
+                // TODO 2024-01-27: also rename "is_disconnect_message" for "is_processor_ending_message"
+                // warn!("Pre-Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
+                // self.sessions.remove(&peer.peer_id);
             },
             ConnectionEvent::LocalServiceTermination => {},
         }
@@ -86,12 +88,13 @@ impl ServerProtocolProcessor {
                     let umpire_option = unsafe { &mut * (session.umpire.get()) };
                     let umpire = Umpire::new(&match_config, Players::Opponent);
                     umpire_option.replace(umpire);
-                    peer.try_set_state(ProtocolStates::Game);
+                    _ = peer.try_set_state(ProtocolStates::Game);
+                    peer.cancel_and_close();
                     PreGameServerMessages::Version(String::from(PROTOCOL_VERSION))
                 },
                 PreGameClientMessages::Error(err) => {
                     error!("Pre-game Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
-                    peer.try_set_state(ProtocolStates::Disconnect);
+                    _ = peer.try_set_state(ProtocolStates::Disconnect);
                     peer.cancel_and_close();
                     PreGameServerMessages::NoAnswer
                 },
@@ -107,6 +110,7 @@ impl ServerProtocolProcessor {
         match connection_event {
             ConnectionEvent::PeerConnected { peer } => {
                 warn!("Game Started: {:?}", peer);
+                _ = peer.send(GameServerMessages::GameStarted);
             },
             ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
                 warn!("Game Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
@@ -130,6 +134,8 @@ impl ServerProtocolProcessor {
 
                                  -> impl Stream<Item=GameServerMessages> {
 
+        _ = peer.try_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
+                                                                // TODO 2024-01-27: this may be moved to the connection event handler
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
                                                                            self.sessions.len()))
@@ -220,12 +226,10 @@ impl ServerProtocolProcessor {
 
                 GameClientMessages::Error(err) => {
                     error!("Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
-                    peer.try_set_state(ProtocolStates::Disconnect);
                     vec![GameServerMessages::GoodBye]
                 },
 
                 GameClientMessages::Quit => {
-                    peer.try_set_state(ProtocolStates::Disconnect);
                     vec![GameServerMessages::GoodBye]
                 },
             }

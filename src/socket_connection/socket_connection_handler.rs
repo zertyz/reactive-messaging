@@ -252,12 +252,12 @@ impl<const CONFIG:        u64,
                             LocalMessagesType::serialize(&to_send, &mut serialization_buffer);
                             serialization_buffer.push(b'\n');
                             if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
-                                warn!("reactive-messaging: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
+                                warn!("`dialog_loop_for_textual_protocol`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
                                 break 'connection
                             }
                         },
                         None => {
-                            debug!("reactive-messaging: Sender for {peer:#?} ended (most likely, .cancel_all_streams() was called on the `peer` by the processor.");
+                            debug!("`dialog_loop_for_textual_protocol`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer` by the unresponsive processor OR a disconnection message was previously answered by the responsive processor)");
                             break 'connection
                         }
                     }
@@ -277,7 +277,7 @@ impl<const CONFIG:        u64,
                                         Ok(client_message) => {
                                             if let Err((abort_processor, error_msg_processor)) = processor_sender.send(client_message).await {
                                                 // log & send the error message to the remote peer
-                                                error!("reactive-messaging: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
+                                                error!("`dialog_loop_for_textual_protocol`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
                                                 if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
                                                         warn!("reactive-messaging: {error_msg_sender} -- Slow reader {:?}", peer);
                                                     if abort_sender {
@@ -294,11 +294,11 @@ impl<const CONFIG:        u64,
                                             let error_message = format!("Unknown command received from {:?} (peer id {}): '{}': {}",
                                                                             peer.peer_address, peer.peer_id, stripped_line, err);
                                             // log & send the error message to the remote peer
-                                            warn!("reactive-messaging: {error_message}");
+                                            warn!("`dialog_loop_for_textual_protocol`:  {error_message}");
                                             let outgoing_error = LocalMessagesType::processor_error_message(error_message);
                                             if let Err((abort, error_msg)) = peer.send_async(outgoing_error).await {
                                                 if abort {
-                                                    warn!("reactive-messaging: {error_msg} -- Slow reader {:?}", peer);
+                                                    warn!("`dialog_loop_for_textual_protocol`:  {error_msg} -- Slow reader {:?}", peer);
                                                     break 'connection
                                                 }
                                             }
@@ -319,12 +319,12 @@ impl<const CONFIG:        u64,
                             }
                         },
                         Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
-                            trace!("reactive-messaging: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                            trace!("`dialog_loop_for_textual_protocol`: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
                             break 'connection
                         },
                         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
                         Err(err) => {
-                            error!("reactive-messaging: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
+                            error!("`dialog_loop_for_textual_protocol`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
                             break 'connection
                         },
                     }
@@ -418,16 +418,16 @@ impl<const CONFIG:        u64,
                 // send the message, skipping messages that are programmed not to generate any response
                 if !is_disconnect && !is_no_answer {
                     // send the answer
-                    trace!("reactive-messaging: Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
+                    trace!("`to_responsive_stream()`: Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
                     if let Err((abort, error_msg)) = peer.send(outgoing) {
                         // peer is slow-reading -- and, possibly, fast sending
-                        warn!("reactive-messaging: Slow reader detected while sending to {:?}: {error_msg}", peer);
+                        warn!("`to_responsive_stream()`: Slow reader detected while sending to {:?}: {error_msg}", peer);
                         if abort {
                             peer.cancel_and_close();
                         }
                     }
                 } else if is_disconnect {
-                    trace!("reactive-messaging: SocketServer: processor choose to drop connection with {} (peer id {}): '{:?}'", peer.peer_address, peer.peer_id, outgoing);
+                    debug!("`to_responsive_stream()`: Processor choose to drop connection with {} (peer id {}) by answering with the DISCONNECT MESSAGE '{:?}'", peer.peer_address, peer.peer_id, outgoing);
                     if !is_no_answer {
                         if let Err((_abort, error_msg)) = peer.send(outgoing) {
                             warn!("reactive-messaging: Slow reader detected while sending the closing message to {:?}: {error_msg}", peer);

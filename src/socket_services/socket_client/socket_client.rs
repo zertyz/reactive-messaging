@@ -287,10 +287,9 @@ for CompositeSocketClient<CONFIG, StateType> {
                                                                                                                   dialog_processor_builder_fn).await
                     .map_err(|err| format!("Error while executing the dialog processor: {err}"));
                 match result {
-                    Ok(connection_and_state) => {
-                        if let Err(err) = returned_connection_sink.send(connection_and_state).await {
-                            trace!("`reactive-messaging::CompositeGenericSocketClient`: ERROR returning the connection (after the unresponsive & textual processor ended) @ {ip}:{port}: {err}");
-                            // ... it may have already been done by the other end
+                    Ok(socket_connection) => {
+                        if let Err(err) = returned_connection_sink.send(socket_connection).await {
+                            warn!("`reactive-messaging::CompositeGenericSocketClient`: ERROR returning the connection (after the unresponsive & textual processor ended) @ {ip}:{port}: {err}");
                         }
                     }
                     Err(err) => {
@@ -324,7 +323,7 @@ for CompositeSocketClient<CONFIG, StateType> {
         let ip = self.ip.clone();
         let port = self.port;
 
-        //let returned_connection_sink = self.returned_connection_sink.clone();
+        let returned_connection_sink = self.returned_connection_sink.clone();
         let local_termination_is_complete_sender = self.local_termination_is_complete_sender.clone();
         let client_termination_signaler = self.client_termination_signaler.clone();
 
@@ -350,9 +349,8 @@ for CompositeSocketClient<CONFIG, StateType> {
                     .map_err(|err| format!("Error while executing the dialog processor: {err}"));
                 match result {
                     Ok(mut socket_connection) => {
-                        if let Err(err) = socket_connection.connection_mut().shutdown().await {
-                            trace!("`reactive-messaging::CompositeGenericSocketClient`: COULDN'T shutdown the socket (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
-                            // ... it may have already been done by the other end
+                        if let Err(err) = returned_connection_sink.send(socket_connection).await {
+                            warn!("`reactive-messaging::CompositeGenericSocketClient`: ERROR returning the connection (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
                         }
                     }
                     Err(err) => {

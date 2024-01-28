@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                         if DEBUG {
                             ron_serializer(server_message.as_ref(), &mut debug_serializer_buffer)
                                 .expect("`ron_serializer()` of our `ServerMessages`");
-                            println!("<<<< {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            println!("<<<< (PRE-GAME) {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
                         }
                     });
                 let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                         if DEBUG {
                             ron_serializer(client_message, &mut debug_serializer_buffer)
                                 .expect("`ron_serializer()` of the received `ClientMessages`");
-                            println!(">>>> {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            println!(">>>> (PRE-GAME) {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
                         }
                     })
             }
@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                         if DEBUG {
                             ron_serializer(server_message.as_ref(), &mut debug_serializer_buffer)
                                 .expect("`ron_serializer()` of our `ServerMessages`");
-                            println!("<<<< {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            println!("<<<< (GAME) {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
                         }
                     });
                 let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                         if DEBUG {
                             ron_serializer(client_message, &mut debug_serializer_buffer)
                                 .expect("`ron_serializer()` of the received `ClientMessages`");
-                            println!(">>>> {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            println!(">>>> (GAME) {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
                         }
                     })
             }

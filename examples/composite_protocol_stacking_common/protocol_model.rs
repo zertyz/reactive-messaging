@@ -131,7 +131,11 @@ pub enum GameClientMessages {
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum PreGameServerMessages {
 
-    /// After being asked by [PreGameClientMessages::Version], tells the client which version of the server we're running
+    /// After taking notice of a new client -- after it sent [PreGameClientMessages::Config] --
+    /// answers to the client which version the server is running.\
+    /// After this, the server progresses to the [GameServerMessages] protocol and the
+    /// client should do it as well (progressing to [GameClientMessages]) or disconnect if
+    /// it doesn't agree with the server version.
     Version(String),
 
     // standard messages
@@ -188,17 +192,6 @@ impl AsRef<PreGameClientMessages> for PreGameClientMessages {
     }
 }
 
-impl ReactiveMessagingSerializer<GameClientMessages> for GameClientMessages {
-    #[inline(always)]
-    fn serialize(remote_message: &GameClientMessages, buffer: &mut Vec<u8>) {
-        ron_serializer(remote_message, buffer)
-            .expect("BUG in `ReactiveMessagingSerializer<GameClientMessages>`. Is the buffer too small?");
-    }
-    #[inline(always)]
-    fn processor_error_message(err: String) -> GameClientMessages {
-        GameClientMessages::Error(err)
-    }
-}
 impl ReactiveMessagingSerializer<PreGameClientMessages> for PreGameClientMessages {
     #[inline(always)]
     fn serialize(remote_message: &PreGameClientMessages, buffer: &mut Vec<u8>) {
@@ -210,30 +203,31 @@ impl ReactiveMessagingSerializer<PreGameClientMessages> for PreGameClientMessage
         PreGameClientMessages::Error(err)
     }
 }
-
-impl ReactiveMessagingDeserializer<GameClientMessages> for GameClientMessages {
+impl ReactiveMessagingSerializer<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn deserialize(local_message: &[u8]) -> Result<GameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
-        ron_deserializer(local_message)
+    fn serialize(remote_message: &GameClientMessages, buffer: &mut Vec<u8>) {
+        ron_serializer(remote_message, buffer)
+            .expect("BUG in `ReactiveMessagingSerializer<GameClientMessages>`. Is the buffer too small?");
+    }
+    #[inline(always)]
+    fn processor_error_message(err: String) -> GameClientMessages {
+        GameClientMessages::Error(err)
     }
 }
+
 impl ReactiveMessagingDeserializer<PreGameClientMessages> for PreGameClientMessages {
     #[inline(always)]
     fn deserialize(local_message: &[u8]) -> Result<PreGameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
         ron_deserializer(local_message)
     }
 }
-
-impl ResponsiveMessages<GameClientMessages> for GameClientMessages {
+impl ReactiveMessagingDeserializer<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn is_disconnect_message(processor_answer: &GameClientMessages) -> bool {
-        matches!(processor_answer, GameClientMessages::Quit)
-    }
-    #[inline(always)]
-    fn is_no_answer_message(_processor_answer: &GameClientMessages) -> bool {
-        false
+    fn deserialize(local_message: &[u8]) -> Result<GameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+        ron_deserializer(local_message)
     }
 }
+
 impl ResponsiveMessages<PreGameClientMessages> for PreGameClientMessages {
     #[inline(always)]
     fn is_disconnect_message(_processor_answer: &PreGameClientMessages) -> bool {
@@ -244,31 +238,30 @@ impl ResponsiveMessages<PreGameClientMessages> for PreGameClientMessages {
         matches!(processor_answer, PreGameClientMessages::NoAnswer)
     }
 }
-
-impl AsRef<GameServerMessages> for GameServerMessages {
+impl ResponsiveMessages<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn as_ref(&self) -> &GameServerMessages {
-        self
+    fn is_disconnect_message(processor_answer: &GameClientMessages) -> bool {
+        matches!(processor_answer, GameClientMessages::Quit)
+    }
+    #[inline(always)]
+    fn is_no_answer_message(_processor_answer: &GameClientMessages) -> bool {
+        false
     }
 }
+
 impl AsRef<PreGameServerMessages> for PreGameServerMessages {
     #[inline(always)]
     fn as_ref(&self) -> &PreGameServerMessages {
         self
     }
 }
-
-impl ReactiveMessagingSerializer<GameServerMessages> for GameServerMessages {
+impl AsRef<GameServerMessages> for GameServerMessages {
     #[inline(always)]
-    fn serialize(local_message: &GameServerMessages, buffer: &mut Vec<u8>) {
-        ron_serializer(local_message, buffer)
-            .expect("BUG in `ReactiveMessagingSerializer<ServerMessages>`. Is the buffer too small?");
-    }
-    #[inline(always)]
-    fn processor_error_message(err: String) -> GameServerMessages {
-        GameServerMessages::Error(err)
+    fn as_ref(&self) -> &GameServerMessages {
+        self
     }
 }
+
 impl ReactiveMessagingSerializer<PreGameServerMessages> for PreGameServerMessages {
     #[inline(always)]
     fn serialize(local_message: &PreGameServerMessages, buffer: &mut Vec<u8>) {
@@ -280,12 +273,33 @@ impl ReactiveMessagingSerializer<PreGameServerMessages> for PreGameServerMessage
         PreGameServerMessages::Error(err)
     }
 }
+impl ReactiveMessagingSerializer<GameServerMessages> for GameServerMessages {
+    #[inline(always)]
+    fn serialize(local_message: &GameServerMessages, buffer: &mut Vec<u8>) {
+        ron_serializer(local_message, buffer)
+            .expect("BUG in `ReactiveMessagingSerializer<ServerMessages>`. Is the buffer too small?");
+    }
+    #[inline(always)]
+    fn processor_error_message(err: String) -> GameServerMessages {
+        GameServerMessages::Error(err)
+    }
+}
+
+impl ReactiveMessagingDeserializer<PreGameServerMessages> for PreGameServerMessages {
+    fn deserialize(local_message: &[u8]) -> Result<PreGameServerMessages, Box<dyn Error + Sync + Send>> {
+        ron_deserializer(local_message)
+    }
+}impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
+    fn deserialize(local_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
+        ron_deserializer(local_message)
+    }
+}
 
 impl ResponsiveMessages<PreGameServerMessages> for PreGameServerMessages {
     /// Disconnects when our processor issues either of "GoodBye" or "GameCancelled"
     #[inline(always)]
     fn is_disconnect_message(processor_answer: &PreGameServerMessages) -> bool {
-        matches!(processor_answer, PreGameServerMessages::Version(_))
+        matches!(processor_answer, PreGameServerMessages::Error(..))
     }
     #[inline(always)]
     fn is_no_answer_message(processor_answer: &PreGameServerMessages) -> bool {
@@ -301,15 +315,5 @@ impl ResponsiveMessages<GameServerMessages> for GameServerMessages {
     #[inline(always)]
     fn is_no_answer_message(processor_answer: &GameServerMessages) -> bool {
         matches!(processor_answer, GameServerMessages::NoAnswer)
-    }
-}
-
-impl ReactiveMessagingDeserializer<PreGameServerMessages> for PreGameServerMessages {
-    fn deserialize(local_message: &[u8]) -> Result<PreGameServerMessages, Box<dyn Error + Sync + Send>> {
-        ron_deserializer(local_message)
-    }
-}impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
-    fn deserialize(local_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
-        ron_deserializer(local_message)
     }
 }
