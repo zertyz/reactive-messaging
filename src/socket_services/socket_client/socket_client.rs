@@ -42,7 +42,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 use futures::{future::BoxFuture, Stream};
 use tokio::io::AsyncWriteExt;
-use log::{trace, warn, error};
+use log::{trace, warn, error, debug};
 
 
 /// Instantiates & allocates resources for a stateless [GenericCompositeSocketClient] (suitable for single protocol communications),
@@ -325,7 +325,7 @@ for CompositeSocketClient<CONFIG, StateType> {
 
         let returned_connection_sink = self.returned_connection_sink.clone();
         let local_termination_is_complete_sender = self.local_termination_is_complete_sender.clone();
-        let client_termination_signaler = self.client_termination_signaler.clone();
+        let client_termination_signaler = self.client_termination_signaler.as_ref().expect("BUG! client_termination_signaler is NONE").clone();
 
         let connection_events_callback = upgrade_to_connection_event_tracking(&self.connected, local_termination_is_complete_sender, connection_events_callback);
 
@@ -339,7 +339,7 @@ for CompositeSocketClient<CONFIG, StateType> {
 
         tokio::spawn(async move {
             /*while*/ if let Some(connection) = connection_source.recv().await {
-                let client_termination_receiver = client_termination_signaler.expect("BUG! client_termination_signaler is NONE").subscribe();
+                let client_termination_receiver = client_termination_signaler.subscribe();
 
                 let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
                 let result = socket_communications_handler.client_for_responsive_text_protocol(connection,
@@ -348,7 +348,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                                                                                                                dialog_processor_builder_fn).await
                     .map_err(|err| format!("Error while executing the dialog processor: {err}"));
                 match result {
-                    Ok(mut socket_connection) => {
+                    Ok(socket_connection) => {
                         if let Err(err) = returned_connection_sink.send(socket_connection).await {
                             warn!("`reactive-messaging::CompositeGenericSocketClient`: ERROR returning the connection (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
                         }
@@ -359,7 +359,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                 }
             }
         });
-        self.spawned_processors_count = 1;
+        self.spawned_processors_count += 1;
         Ok(connection_provider)
     }
 
@@ -379,6 +379,8 @@ for CompositeSocketClient<CONFIG, StateType> {
 
         let ip = self.ip.clone();
         let port = self.port;
+
+        // let shutdown_signaler = self.client_termination_signaler.as_ref().expect("BUG! client_termination_signaler is NONE").clone();
 
         // Spawns the "connection routing task" to:
         //   - Listen to newly incoming connections as well as upgraded/downgraded ones shared between processors
@@ -413,13 +415,16 @@ for CompositeSocketClient<CONFIG, StateType> {
                     },
                     None => {
                         if let Err(err) = socket_connection.connection_mut().shutdown().await {
-                            error!("`reactive-messaging::CompositeSocketClient`: ERROR in the client connected to the server @ {ip}:{port} while shutting down the connection (after the processors ended): {err}");
+                            debug!("`reactive-messaging::CompositeSocketClient`: ERROR in the client connected to the server @ {ip}:{port} while shutting down the connection (after the processors ended): {err}");
                         }
+                        break
                     }
                 }
             }
             // loop ended
             trace!("`reactive-messaging::CompositeSocketClient`: The 'Connection Routing Task' for the client connected to the server @ {ip}:{port} ended -- hopefully, due to a graceful client termination.");
+            // // guarantees this client is properly shutdown
+            //_ = shutdown_signaler.send(())
         });
         Ok(())
     }

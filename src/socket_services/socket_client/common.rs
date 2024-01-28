@@ -52,13 +52,13 @@ pub fn upgrade_to_connection_event_tracking<const CONFIG:                   u64,
                     user_provided_connection_events_callback(connection_event).await;
                 },
                 ConnectionEvent::PeerDisconnected { .. } => {
-                    report_service_termination("Socket Client: The remote party ended the connection, but a previous termination process seems to have already taken place. May this message be considered for elimination? Ignoring the current termination request...").await;
                     connected_state.store(false, Relaxed);
                     user_provided_connection_events_callback(connection_event).await;
+                    report_service_termination("Socket Client: The remote party ended the connection, but a previous termination process seems to have already taken place. May this message be considered for elimination? Ignoring the current termination request...").await;
                 },
                 ConnectionEvent::LocalServiceTermination => {
-                    report_service_termination("Socket Client: a local service termination was asked, but a previous termination process seems to have already taken place. This is suggestive of a bug in your shutdown logic. Ignoring the current termination request...").await;
                     user_provided_connection_events_callback(connection_event).await;
+                    report_service_termination("Socket Client: a local service termination was asked, but a previous termination process seems to have already taken place. This is suggestive of a bug in your shutdown logic. Ignoring the current termination request...").await;
                 }
             }
         })

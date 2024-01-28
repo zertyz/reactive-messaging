@@ -135,7 +135,7 @@ impl ServerProtocolProcessor {
                                  -> impl Stream<Item=GameServerMessages> {
 
         _ = peer.try_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
-                                                                // TODO 2024-01-27: this may be moved to the connection event handler
+                                                                // TODO 2024-01-27: this may be moved to the connection event handler after the new state is added
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
                                                                            self.sessions.len()))

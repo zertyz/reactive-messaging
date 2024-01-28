@@ -319,7 +319,7 @@ impl<const CONFIG:        u64,
                             }
                         },
                         Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
-                            trace!("`dialog_loop_for_textual_protocol`: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                            debug!("`dialog_loop_for_textual_protocol`: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
                             break 'connection
                         },
                         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},

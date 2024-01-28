@@ -108,7 +108,7 @@ impl ClientProtocolProcessor {
             ConnectionEvent::PeerConnected { peer: _ } => {},
             ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
                 let in_messages_count = self.in_messages_count.load(Relaxed);
-                info!("Disconnected: {:?}; stats: {:?} -- with {} messages IN & OUT: {:.2}/s",
+                info!("CLIENT Disconnected: {:?}; stats: {:?} -- with {} messages IN & OUT: {:.2}/s",
                       peer,
                       stream_stats,
                       in_messages_count, in_messages_count as f64 / self.start_instant.elapsed().as_secs_f64());
@@ -131,6 +131,8 @@ impl ClientProtocolProcessor {
 
                                 -> impl Stream<Item=GameClientMessages> {
 
+        _ = peer.try_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
+                                                                // TODO 2024-01-27: this may be moved to the connection event handler after the new state is added
         let cloned_self = Arc::clone(self);
         let mut umpire = Umpire::new(&MATCH_CONFIG, Players::Ourself);
         server_messages_stream.map(move |server_message| {
@@ -213,7 +215,6 @@ impl ClientProtocolProcessor {
 
                 GameServerMessages::Error(err) => {
                     error!("Server answered with error '{err}'");
-                    peer.try_set_state(ProtocolStates::Disconnect);
                     vec![GameClientMessages::Quit]
                 },
 
@@ -222,7 +223,6 @@ impl ClientProtocolProcessor {
                 },
 
                 GameServerMessages::GoodBye | GameServerMessages::ServerShutdown => {
-                    peer.try_set_state(ProtocolStates::Disconnect);
                     peer.cancel_and_close();
                     vec![/* no answer */]
                 },
