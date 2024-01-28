@@ -47,6 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let possible_options = vec!["server-only", "client-only"];
     println!("Usage: hello_world [{}]", possible_options.iter().fold(String::new(), |mut acc, item| { if acc.len() > 0 {acc.push('|')}; acc.push_str(item); acc } ));
 
+    // command line options
     let args: Vec<String> = env::args().collect();
     if args.len() > 2 {
         return Err(Box::from(String::from("This program takes a single optional argument")))
@@ -60,6 +61,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             panic!("Unknown argument '{arg}'")
         })
         .unwrap_or((true, true));
+
+    // start
     logic(start_server, start_client).await
 }
 

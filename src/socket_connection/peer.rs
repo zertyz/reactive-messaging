@@ -70,7 +70,7 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
         self.retryable_sender.send_async_trait(message).await
     }
 
-    /// Sets this object to a user-provided state, to facilitate communications between producers and senders of messages
+    /// Sets this object to a user-provided state, to facilitate communications between protocol processors
     /// (a requirement to allow the "Composite Protocol Stacking" pattern).\
     /// See also [Self::take_state()]
     pub async fn set_state(&self, state: StateType) {
@@ -87,7 +87,7 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
         }
     }
 
-    /// "Takes" this object's user-provided state, previously set by [Self::set_state()] -- used to facilitate communications between producers and senders
+    /// "Takes" this object's user-provided state, previously set by [Self::set_state()] -- used to facilitate communications between protocol processors
     /// (a requirement to allow the "Composite Protocol Stacking" pattern)
     pub async fn take_state(&self) -> Option<StateType> {
         self.state.lock().await.take()

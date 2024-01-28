@@ -1,6 +1,5 @@
 //! Resting place for [SocketConnection] -- our connection wrapper
 
-
 use std::fmt::Debug;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::Relaxed;
@@ -11,7 +10,10 @@ static CONNECTION_COUNTER: AtomicU32 = AtomicU32::new(0);
 pub type ConnectionId = u32;
 
 
-/// A wrapper for a [TcpStream], along with its state and id
+/// A wrapper for a [TcpStream] -- attaching a custom "state" and unique id to it.\
+/// This abstraction plays a role in enabling the "Composite Protocol Stacking" design pattern.\
+/// IMPLEMENTATION NOTE: The [crate::prelude::Peer] object still holds a copy of the state -- synced elsewhere with us here
+///                      -- in the future, this should be reworked.
 #[derive(Debug)]
 pub struct SocketConnection<StateType: Debug> {
     /// The connection object
