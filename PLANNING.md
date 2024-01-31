@@ -17,18 +17,21 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Being-Done
 
-**(f6)** 2023-11-01: Support Composite Protocol Stacking -- Complex authenticated protocols as well as WebSockets would benefit from this feature, as the whole composite stack could be modeled by different `enums`, avoiding unrepresentable states:
-1) The `socket_connection_handler.rs` main logic should be upgraded to:
-   a) start processing already opened connections
-   b) bailing out without closing, returning the connection when the dialog functions are over
-2) The client code, that owns the client instance, would have to receive generic enum with the `CompositeProtocols`:
-   a) The processor code, upon commanding the protocol upgrade, would arrange for an instance of `CompositeProtocols` to be returned to the owner of the instance
-   containing both the connection and any (custom) session information -- so that the code from the owner could use that connection to spawn a new client.
-3) On the counter-part, the server processor would now receive a "ProtocolUpgradeFn" that would simply spawn a new server task with the connection -- like we do today.
-
 
 
 # Backlog
+
+**(r10)** 2024-01-28: TECH DEBT followup for **(f6)**: Remodel "events", improve event firing tests, refactor duplicated code, simplify the API
+1) Remodel `ConnectionEvents`: with the introduction of the Composite Protocols (that allows using several processors), several event handlers
+   are also allowed, making events such as "PeerDisconnected" not belonging to any of such handlers (as it is an event of a connection, and not
+   a protocol's). To solve: There is a need for a distinction between `ConnectionEvents` and `ProtocolEvents` (for instance, for situations like
+   the processor ends but the connection doesn't -- and vice-versa). Remember this distinction is only needed for the Composite Protocol use case;
+   for the single protocol use case, a third model may be created: `SingleProtocolEvents`.
+2) There were issues reported regarding the disconnection events not being fired for certain cases. This is alarming, as it causes memory
+   leaks on the user application (e.g, a server when handling multiple connections that create a session on connection and drop them on disconnection).
+   TO DO: a) write elaborated integration tests (on api.rs or functional_requisites.rs) for the most varying scenarios for the client and server
+             -- dropped by the other party, timing out, etc;
+          b) Write stress tests
 
 **(n8)** 2024-01-04: Introduce binary messages:
 1) Use RKYV for serialization (the fastest & more flexible among current options, after a chat gpt & bard research)
@@ -72,6 +75,15 @@ This is to be exposed on the connection event via a non-hashed, stable string co
 
 
 # Done
+
+**(f6)** 2023-11-01: Support Composite Protocol Stacking -- Complex authenticated protocols as well as WebSockets would benefit from this feature, as the whole composite stack could be modeled by different `enums`, avoiding unrepresentable states:
+1) The `socket_connection_handler.rs` main logic should be upgraded to:
+   a) start processing already opened connections
+   b) bailing out without closing, returning the connection when the dialog functions are over
+2) The client code, that owns the client instance, would have to receive generic enum with the `CompositeProtocols`:
+   a) The processor code, upon commanding the protocol upgrade, would arrange for an instance of `CompositeProtocols` to be returned to the owner of the instance
+   containing both the connection and any (custom) session information -- so that the code from the owner could use that connection to spawn a new client.
+3) On the counter-part, the server processor would now receive a "ProtocolUpgradeFn" that would simply spawn a new server task with the connection -- like we do today.
 
 **(r7)** 2024-01-04: Refactor the Connection & associated State -- move the state & id from Peer to a new, special `TcpStream` type.\
 Taking in consideration "Composite Protocol Stacking" introduced in *(f6)*, a few ties were left behind regarding the connection States:
