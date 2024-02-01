@@ -11,7 +11,7 @@
 //!
 //! For every client variant, the `Stream` items may be a combination of fallible/non-fallible (using `Result<>` or not) & future/non-future.
 //!
-//! Instead of using the mentioned macros, you might want take a look at [CompositeSocketClient] to access the inner implementation directly
+//! Instead of using the mentioned macros, you might want to take a look at [CompositeSocketClient] to access the inner implementation directly
 //! -- both ways have the same flexibility, but the macro version takes in all parameters in the conveniently packed and documented [ConstConfig]
 //! struct, instead of requiring several const generic parameters.
 
@@ -613,7 +613,7 @@ mod tests {
         ////////////////////////////////////////////
         // notice there may be a discrepancy in the `ConstConfig` you provide and the actual concrete types
         // you also provide for `UniProcessor` and `SenderChannel` -- therefore, this usage is not recommended
-        // (but it is here anyway since it may bring, theoretically, a infinitesimal performance benefit)
+        // (but it is here anyway since it may bring, theoretically, an infinitesimal performance benefit)
         const CUSTOM_CONFIG: ConstConfig = ConstConfig {
             receiver_buffer:      2048,
             sender_buffer:        1024,
@@ -677,7 +677,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert!(connected_to_client.load(Relaxed), "Client didn't connect to server");
         assert!(client.is_connected(), "`client` didn't report any connection");
-        client.terminate().await.expect("Couldn not terminate the client");
+        client.terminate().await.expect("Could not terminate the client");
         _ = tokio::time::timeout(Duration::from_millis(100), termination_waiter()).await
             .expect("Timed out (>100ms) waiting the the client's termination");
         server.terminate().await.expect("Could not terminate the server");

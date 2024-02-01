@@ -11,7 +11,7 @@
 //!
 //! For every server variant, the `Stream` items may be a combination of fallible/non-fallible (using `Result<>` or not) & future/non-future.
 //!
-//! Instead of using the mentioned macros, you might want take a look at [CompositeSocketServer] to access the inner implementation directly
+//! Instead of using the mentioned macros, you might want to take a look at [CompositeSocketServer] to access the inner implementation directly
 //! -- both ways have the same flexibility, but the macro version takes in all parameters in the conveniently packed and documented [ConstConfig]
 //! struct, instead of requiring several const generic parameters.
 

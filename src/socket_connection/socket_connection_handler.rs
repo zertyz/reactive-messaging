@@ -401,7 +401,7 @@ impl<const CONFIG:        u64,
             .map_err(|err| Box::from(format!("error when starting client for server @ {addr} with `client_for_unresponsive_text_protocol()`: {err}")))
     }
 
-    /// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
+    /// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able to send answers back to the `peer`
     #[inline(always)]
     fn to_responsive_stream(&self,
                             peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
@@ -441,7 +441,7 @@ impl<const CONFIG:        u64,
             })
     }
 
-    /// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able send answers back to the `peer`
+    /// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able to send answers back to the `peer`
     #[inline(always)]
     fn _to_responsive_stream_of_fallibles(&self,
                                           peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
@@ -783,7 +783,7 @@ mod tests {
         // server -- do not answer to (flood) messages (just parses & counts them, making sure they are received in the right order)
         // message format is "DoNotAnswer(n)", where n should be sent by the client in natural order, starting from 0
         let received_messages_count = Arc::new(AtomicU32::new(0));
-        let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaputt
+        let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaput
         let received_messages_count_ref = Arc::clone(&received_messages_count);
         let unordered_ref = Arc::clone(&unordered);
         let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT, ()).await

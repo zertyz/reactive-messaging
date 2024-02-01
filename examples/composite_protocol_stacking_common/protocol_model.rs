@@ -15,7 +15,7 @@
 //!      "rally ending message" is sent by either of them;
 //!   3) Scores are computed and the game continues according to the following possibilities:
 //!     3.1) If one of the players reaches the `score_limit` (set in the "configuration message"), the server starts the "end game process";
-//!     3.2) The next service responsability will be assigned to the peer who just had their score incremented.
+//!     3.2) The next service responsibility will be assigned to the peer who just had their score incremented.
 //!
 //! If the client fails to progress in the game for more than 1 second, the server will answer with either "No service" or "No rebate" and will score a point
 //! -- unless the client fails to configure the game in that period, which is considered a "protocol dishonor".
@@ -28,7 +28,7 @@
 //! in a service, this represents a failure with scoring consequences; during the rally, this is just a warning.
 //!
 //! An "end game process" starts with the server sending "GAME OVER: Score: Server X; Client: Y" and is issued by the server.
-//! The client have the responsability of verifying the results and answering with "Endorsed" or "Contested: Score: Server Y; Client: X".
+//! The client have the responsibility of verifying the results and answering with "Endorsed" or "Contested: Score: Server Y; Client: X".
 //! After receiving that, the server should close the connection -- which also gets closed if the client doesn't issue a verification within 1 second.
 //!
 //! At any time, the client may send "Stop", which should have the server to start the "end game process".
@@ -68,7 +68,7 @@ pub const PROTOCOL_VERSION: &str = "2024-01-08";
 /// (used for the "Composite Protocol Stacking" pattern)
 #[derive(Debug,Clone)]
 pub enum ProtocolStates {
-    /// Both client and server are in the "pre-game", awaiting for a negotiated configuration to actually start the game
+    /// Both client and server are in the "pre-game", waiting for a negotiated configuration to actually start the game
     PreGame,
     /// PreGame arrangements were not mutually agreed between client and server and a disconnection is about to happen
     Disconnect,
@@ -76,7 +76,7 @@ pub enum ProtocolStates {
     Game,
 }
 
-/// Client messages to setup the game in the server
+/// Client messages to set up the game in the server
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
 pub enum PreGameClientMessages {
 

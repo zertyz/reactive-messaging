@@ -99,7 +99,6 @@ SocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, RemoteMes
 ///     type THE_TYPE_I_WANT = <SocketServer<...> as GenericSocketServer>::THE_TYPE_YOU_WANT
 pub trait GenericSocketServer<const PROCESSOR_UNI_INSTRUMENTS: usize,
                               const PROCESSOR_BUFFER_SIZE: usize> {
-    const PROCESSOR_UNI_INSTRUMENTS: usize;
     const CONFIG: usize;
     type RemoteMessages;
     type LocalMessages;
@@ -127,7 +126,6 @@ SocketServer<CONFIG,
              SenderChannelType> {
 
     const CONFIG: usize                    = CONFIG;
-    const PROCESSOR_UNI_INSTRUMENTS: usize = PROCESSOR_UNI_INSTRUMENTS;
     type RemoteMessages                    = RemoteMessages;
     type LocalMessages                     = LocalMessages;
     type ProcessorUniType                  = ProcessorUniType;

@@ -1,4 +1,4 @@
-//! Common types used across this sub-module
+//! Common types used across this submodule
 
 use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use crate::prelude::Peer;
@@ -150,7 +150,7 @@ pub trait MessagingService<const CONFIG: u64> {
 
     /// Notifies the service it is time to stop / shutdown / terminate.\
     /// It is a recommended practice that the `connection_events_handler()` you provided (when starting each dialog processor)
-    /// inform all clients that a remote-initiated disconnection (due to the call to this function) is happening -- the protocol must support that, 'though.
+    /// inform all clients that a remote-initiated disconnection (due to the call to this function) is happening -- the protocol must support that, though.
     async fn terminate(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 }

@@ -1,7 +1,7 @@
 //! Implementation of the Ping-Pong game logic as described in [protocol_model]
 
 use super::ping_pong_models::*;
-use rand::Rng;
+use rand::{random, Rng};
 
 
 /// Represents a Ping-Pong match "official" or "Umpire", responsible for ensuring the ping-pong rules are followed and for accounting scores & declaring the winner.\
@@ -163,7 +163,7 @@ impl Umpire {
 
 /// This is how to play a Ping-Pong: by picking a number in 0.00..1.00
 pub fn act() -> PlayerAction {
-    PlayerAction { lucky_number: rand::thread_rng().gen() }
+    PlayerAction { lucky_number: random() }
 }
 
 

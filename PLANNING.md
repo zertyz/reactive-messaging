@@ -26,11 +26,11 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 2) There were issues reported regarding the disconnection events not being fired for certain cases. This is alarming, as it causes memory
    leaks on the user application (e.g, a server when handling multiple connections that create a session on connection and drop them on disconnection).
    TO DO: a) write elaborated integration tests (on api.rs or functional_requisites.rs) for the most varying scenarios for the client and server
-   -- dropped by the other party, timing out, etc;
-   b) Write stress tests
+          -- dropped by the other party, timing out, etc.;
+          b) Write stress tests
 
 **(n8)** 2024-01-04: Introduce binary messages:
-1) Use RKYV for serialization (the fastest & more flexible among current options, after a chat gpt & bard research)
+1) Use RKYV for serialization (the fastest & more flexible among current options, after a ChatGPT & bard research)
 2) Formats will be textual (with \n separating messages) or binary (with a u16 payload size prefixing each message)
 3) Opting between binary or textual should be done easily via ConstConfig -- provided the protocol types implement the appropriate traits
 4) Build benchmarks comparing RON vs RKYV
@@ -102,11 +102,11 @@ Suggested Steps:
 4) Update the test socket_client::composite_protocol_stacking_pattern on every `PeerConnected` event to assert that the peer state
    (which is, actually, the connection state) matches the hard coded values
 5) Idem for the server version of this test
-_6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous states, which is not currently possible today)_’’
+_6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous states, which is not currently possible today)_
 7) Move `peer.id` to the connection and refactor all related code
 
 
-**(n1)** 2023-07-27: Develop and introduce the freshly planned *Zero-Cost Const Configuration Pattern* pattern.
+**(n1)** 2023-07-27: Develop and introduce the freshly planned *Zero-Cost Const Configuration Pattern*.
 1) Build a proof-of-concept in the Rust playground -- https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=f6ce6729eb1cf60021cfa594cace1364 -- adding the rationalle for the pattern, which is:
    > Allow generic types to have comprehensive configuration options with a single constant, since `const`` generics of custom enums/structs is not allowed (yet?)
 2) Tune it to perfection, inspect the assembly and share the ideas on the Rust forum -- asking for feedback;
@@ -119,9 +119,9 @@ _6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous
 4) For the above, the possible actions are:
      - `Ignore` (without retrying nor dropping the connection)
      - `EndCommunications` (dropping the connection, if not dropped already)"
-     - `RetryYieldingForUpTo(n)` for up to n milliseconds, where n is in 0..8 and the milliseconds will be (n^2)ms",
+     - `RetryYieldingForUpTo(n)` for up to n milliseconds, where n is in 0..8 and the milliseconds will be `(n^2)ms`,
      - `RetrySpinningForUpTo(n)` like the above,
-     - `RetrySleepingGeometrically(n)` for `n` attempts (n in 0..8), each one sleeping for (n^2)*10ms",
+     - `RetrySleepingGeometrically(n)` for `n` attempts (n in 0..8), each one sleeping for `(n^2)*10ms`,
 5) For a chosen action in (4), introduce a modifier to **log the occurrence** or not
 
 **(n3)** 2023-07-27: Allow `reactive-mutiny` channels to be configured as an option in the *Const Configuration* pattern.

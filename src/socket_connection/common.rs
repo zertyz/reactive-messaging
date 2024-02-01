@@ -17,7 +17,7 @@ use std::{
 use keen_retry::ExponentialJitter;
 use crate::serde::ReactiveMessagingSerializer;
 
-/// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `COFNIG`
+/// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `CONFIG`
 pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
                                             ItemType:        Send + Sync + Debug + 'static,
                                             DerivedItemType: Send + Sync + Debug + 'static,
@@ -204,7 +204,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
     /// On error, returns whether the connection should be dropped or not.\
     /// Returns `Ok` if sent successfully, `Err(details)` if sending was not possible, where `details` contain:
     ///   - `(abort_the_connection?, error_message)`
-    /// See [Self::send_async_trait()] if your retrying strategy sleeps and you are calling this from an async context.
+    /// See [Self::send_async_trait()] if your retrying strategy sleeps, and you are calling this from an async context.
     #[inline(always)]
     pub fn send(&self,
                 message: LocalMessages)

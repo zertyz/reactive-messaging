@@ -19,7 +19,7 @@ pub fn react_to_rally_event(umpire:                  &mut Umpire,
     if reported_state_matcher(expected_state) {
         let expected_event = umpire.process_turn(Players::Opponent, opponent_action);
         if reported_event == expected_event {
-            // the opponent successfully sent us the ball. Lets take an action to rebate it!
+            // the opponent successfully sent us the ball. Let's take an action to rebate it!
             let our_action = act();
             // our event
             umpire.process_turn(Players::Ourself, &our_action)

@@ -52,7 +52,7 @@ pub enum FaultEvents {
     NoBounce,
     /// occurs when the ball either bounces twice into the player's field or when it touches it only once, then follows into the ground -- where the player was expected to rebate it just after the first kick
     NoRebate,
-    /// occurs when the rabate (or service) attempt simply doesn't touch the ball
+    /// occurs when the rebate (or service) attempt simply doesn't touch the ball
     Mishit,
     /// occurs when the ball touches the rebating player field before crossing the net
     PreBounce,
@@ -72,7 +72,7 @@ pub enum GameStates {
         attempt: u32,
     },
     /// The game is in the "rally" phase, which starts when the serviced ball hits the opponent's field and in which a score point is under dispute.\
-    /// When rebating, `ToucedTheNet` is no longer considered a fault (nor light nor hard)
+    /// When rebating, `TouchedTheNet` is no longer considered a fault (nor light nor hard)
     Rally,
     GameOver(GameOverStates),
 }
@@ -85,7 +85,7 @@ pub enum GameOverStates {
         last_player_action: PlayerAction,
         last_fault:         FaultEvents,
     },
-    /// A rule was not honored, causing the game to be aborted due to the given (human readable) reason
+    /// A rule was not honored, causing the game to be aborted due to the given (human-readable) reason
     GameCancelled {
         partial_score:           MatchScore,
         broken_rule_description: String,

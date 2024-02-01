@@ -1,5 +1,5 @@
 //! Abstractions for providing connections to Servers and Clients, with the following purposes:
-//!   * Allows both incoming connections as well as upgraded connections (previously originated
+//!   * Allows both incoming connections and upgraded connections (previously originated
 //!     in other protocols, such as WebSockets) to be provided -- enabling the "Protocol Stack Composition"
 //!     pattern.\
 //!     See [ServerConnectionHandler] and the lower level [ConnectionChannel].
@@ -97,7 +97,7 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
     }
 
     /// Advanced connection procedure suitable for retrying: returns an async closure that does the connection with advanced and special features:
-    ///   * If the `server` is a name and it resolves to several IPs, calling the returned closure again will attempt to connect to the next IP
+    ///   * If the `server` is a name, and it resolves to several IPs, calling the returned closure again will attempt to connect to the next IP
     ///   * If the IPs list is over, a new host resolution will be done and the process above repeats
     ///   * The continuation closure may be indefinitely stored by the client, so an easy reconnection might be attempted at any time -- in case it drops.
     /// IMPLEMENTATION NOTE: this method implements the "Partial Completion with Continuation Closure", as described in the `keen-retry` crate's book.
@@ -210,7 +210,7 @@ impl<StateType: Debug + Clone + Send + 'static> ServerConnectionHandler<StateTyp
         Ok(())
     }
 
-    /// Consumes and returns the `tokio::sync::mpsc::Receiver` which will able to
+    /// Consumes and returns the `tokio::sync::mpsc::Receiver` which will be able to
     /// provide connections previously sent through [Self::feed_connection()].\
     /// The receiver blocks while there are no connections available and
     /// yields `None` if `self` is dropped -- meaning no more connections
@@ -260,7 +260,7 @@ impl<StateType: Debug> ConnectionChannel<StateType> {
         }
     }
 
-    /// Consumes and returns the `tokio::sync::mpsc::Receiver` which will able to
+    /// Consumes and returns the `tokio::sync::mpsc::Receiver` which will be able to
     /// provide connections previously sent through [Self::feed()].\
     /// The receiver blocks while there are no connections available and
     /// yields `None` if `self` is dropped -- meaning no more connections

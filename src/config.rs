@@ -6,7 +6,7 @@ use reactive_mutiny::prelude::Instruments;
 //use strum_macros::FromRepr;
 
 
-// /// Specifies the channels (queues) from `reactive-mutiny` thay may be used to send/receive data.\
+// /// Specifies the channels (queues) from `reactive-mutiny` that may be used to send/receive data.\
 // /// On different hardware, the performance characteristics may vary.
 // #[derive(Debug,PartialEq,FromRepr)]
 // pub enum Channels<const CONFIG: u64> {
@@ -27,14 +27,14 @@ pub enum RetryingStrategies {
     /// Drops the connection on "buffer is full" errors, also without retrying
     EndCommunications,
 
-    /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieve.\
+    /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieved.\
     /// Uses an Exponential Backoff strategy with factor 2.526 and 20% jitter, giving the milliseconds to sleep between,
     /// at most, the given number of attempts.\
     /// The total retrying time would be the sum of the geometric progression: (-1+2.526^n)/(1.526) -- in milliseconds.\
     /// Example: for up to 5 minutes retrying, use 14 attempts.
     RetryWithBackoffUpTo(u8),
 
-    /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieve
+    /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieved
     /// during the specified milliseconds -- during which retrying will be performed in a pool loop, yielding
     /// to tokio before each attempt.\
     /// Use this option if low latency is desirable -- but see also [Self::RetrySleepingArithmetically]
@@ -64,12 +64,12 @@ impl RetryingStrategies {
             2 => Self::RetryWithBackoffUpTo(n as u8),
             3 => Self::RetryYieldingForUpToMillis(n as u8),
             4 => Self::RetrySpinningForUpToMillis(n as u8),
-            _ => unreachable!(),    // If this errors, did a new enum member was added?
+            _ => unreachable!(),    // If this errors out, did a new enum member was added?
         }
     }
 }
 
-/// Socket options for the local peer to be set when the connection is stablished
+/// Socket options for the local peer to be set when the connection is established
 #[derive(Debug,PartialEq)]
 pub struct SocketOptions {
     /// Also known as time-to-live (TTL), specifies how many hops may relay an outgoing packet before it being dropped and an error being returned.\
@@ -78,12 +78,12 @@ pub struct SocketOptions {
     /// If specified, must be a power of 2 with the number of milliseconds to wait for any unsent messages when closing the connection.\
     /// In Linux, defaults to 0.
     pub linger_millis: Option<u32>,
-    /// Set this to `true` if lower latency is prefered over throughput; `false` (default on Linux) to use all the available bandwidth
-    /// (sending full packets, waiting up to 200ms for fullfilment).\
+    /// Set this to `true` if lower latency is preferred over throughput; `false` (default on Linux) to use all the available bandwidth
+    /// (sending full packets, waiting up to 200ms for fulfillment).\
     /// `None` will leave it as the system's default -- in Linux, false.
     /// Some hints:
     ///   - The peer reporting events may prefer to set it to `true`;
-    ///   - The other peer, receiving events from many, many peers and sending messages that won't be used for decision making, may set it to `false`
+    ///   - The other peer, receiving events from many, many peers and sending messages that won't be used for decision-making, may set it to `false`
     pub no_delay: Option<bool>,
 }
 impl SocketOptions {
@@ -172,7 +172,7 @@ impl ConstConfig {
     const RETRYING_STRATEGY: RangeInclusive<usize> = 19..=29;
     /// One of [SocketOptions], converted by [SocketOptions::as_repr()]
     const SOCKET_OPTIONS: RangeInclusive<usize> = 30..=45;
-    // /// The channel types the syntatic-sugar macros should instantiate
+    // /// The channel types the synthatic-sugar macros should instantiate
     // const CHANNEL: RangeInclusive<usize> = 46..=48;
     /// The 8 bits from `reactive-mutiny`
     const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 49..=57;
@@ -199,7 +199,7 @@ impl ConstConfig {
     }
 
     /// For use when instantiating a generic struct that uses the "Const Config Pattern"
-    /// -- when chosing a pre-defined configuration.\
+    /// -- when choosing a pre-defined configuration.\
     /// See also [Self::custom()].\
     /// Example:
     /// ```nocompile
@@ -353,7 +353,7 @@ const fn _set_bits_from_power_of_2_u8(config: u64, bits: RangeInclusive<usize>, 
 // const versions of some `Option<>` functions
 //////////////////////////////////////////////
 
-/// same as Option::<bool>::unwrap_or(fakse), but const
+/// same as Option::<bool>::unwrap_or(false), but const
 const fn unwrap_bool_or_default(option: Option<bool>) -> bool {
     match option {
         Some(v) => v,

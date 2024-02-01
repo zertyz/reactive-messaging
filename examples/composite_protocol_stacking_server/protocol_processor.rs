@@ -79,7 +79,7 @@ impl ServerProtocolProcessor {
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
                                                                            self.sessions.len()))
                                                  .value()
-                                                 .clone();     // .clone() the Arc, so we are free to move it to the the next closure (and drop it after the Stream closes)
+                                                 .clone();     // .clone() the Arc, so we are free to move it to the next closure (and drop it after the Stream closes)
         client_messages_stream.map(move |client_message| {
             // crate a umpire for the new game
             match client_message.as_ref() {
@@ -140,7 +140,7 @@ impl ServerProtocolProcessor {
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
                                                                            self.sessions.len()))
                                                  .value()
-                                                 .clone();     // .clone() the Arc, so we are free to move it to the the next closure (and drop it after the Stream closes)
+                                                 .clone();     // .clone() the Arc, so we are free to move it to the next closure (and drop it after the Stream closes)
         let umpire_option = unsafe { &mut * (session.umpire.get()) };
         let Some(umpire) = umpire_option else {
             panic!("BUG! There is no umpire in the session entry for peer {peer:?}");

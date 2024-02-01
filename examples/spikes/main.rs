@@ -1,6 +1,6 @@
 //! Here you'll only find the Spikes used to help in the top-down design of the server APIs during early development phases.
 //! Search elsewhere if you want real examples of how to use the resulting lib.
-//! All the structs & traits conteined here are just representative simplifications of the real counter-parts, to help focusing
+//! All the structs & traits contained here are just representative simplifications of the real counter-parts, to help focusing
 //! on the design.
 
 mod uni;
@@ -49,7 +49,7 @@ fn modality_1() {
         );
 }
 
-/// With fully qualifyed types for external functions.\
+/// With fully qualified types for external functions.\
 /// Modality 2: using impl Iterator\
 /// Modality 3: omitted, would be using the concrete alternative '_StreamType', avoiding the 'impl'
 fn modality_2_and_3() {

@@ -33,7 +33,7 @@ pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMess
     /// IMPLEMENTORS: #[inline(always)]
     fn is_disconnect_message(processor_answer: &LocalPeerMessages) -> bool;
 
-    /// Tells if internal sender if the given `processor_answer` represents a "no message" -- a message that should produce no answer to the peer.\
+    /// Tells if internal sender is the given `processor_answer` represents a "no message" -- a message that should produce no answer to the peer.\
     /// IMPLEMENTORS: #[inline(always)]
     fn is_no_answer_message(processor_answer: &LocalPeerMessages) -> bool;
 }
