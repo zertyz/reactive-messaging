@@ -40,7 +40,7 @@ type StreamItemType = ServerType::StreamItemType;
 let server: trait = ServerType::new();
 ```
 
-1. Built-in closures, with omited types:
+1. Built-in closures, with omitted types:
 
     ```rust
         server.start(

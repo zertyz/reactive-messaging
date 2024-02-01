@@ -10,6 +10,7 @@
 //! IMPLEMENTATION NOTE: this code may be improved when Rust allows "async fn in traits": a common trait
 //!                      may be implemented.
 
+use std::error::Error;
 use std::fmt::Debug;
 use std::future;
 use std::future::Future;
@@ -27,7 +28,7 @@ use crate::config::{ConstConfig, RetryingStrategies};
 use crate::socket_connection::connection::SocketConnection;
 
 
-type ConnectionFuture = Pin < Box < dyn Future < Output=RetryProducerResult<TcpStream, Box<dyn std::error::Error + Sync + Send>> > > >;
+type ConnectionFuture = Pin < Box < dyn Future < Output=RetryProducerResult<TcpStream, Box<dyn Error + Sync + Send>> > > >;
 
 /// Abstracts out the TCP/IP intricacies for establishing (and retrying) connections,
 /// while still enabling the "Protocol Stack Composition" pattern by accepting existing
@@ -46,7 +47,7 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
         Self { host, port, connect_continuation_closure: Arc::new(Mutex::new(connect_closure)) }
     }
 
-    pub async fn connect_retryable(&mut self) -> Result<TcpStream, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn connect_retryable(&mut self) -> Result<TcpStream, Box<dyn Error + Send + Sync>> {
         let config = ConstConfig::from(CONFIG_U64);
         let retry_result_supplier = |retrying_start_time: SystemTime| {
             let mut connect_continuation_closure = self.connect_continuation_closure.try_lock().expect("BUG (locking)");
@@ -151,7 +152,7 @@ impl<StateType: Debug + Clone + Send + 'static> ServerConnectionHandler<StateTyp
 
     /// Creates a new instance of a server, binding to the specified `listening_interface` and `listening_port`.\
     /// Incoming connections are [feed()] as they arrive -- but you can also do so manually, by calling the mentioned method.
-    pub async fn new(listening_interface: &str, listening_port: u16, connection_initial_state: StateType) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+    pub async fn new(listening_interface: &str, listening_port: u16, connection_initial_state: StateType) -> Result<Self, Box<dyn Error + Sync + Send>> {
         let connection_channel = ConnectionChannel::new();
         let connection_sender = connection_channel.sender.clone();
         let (network_event_loop_sender, network_event_loop_receiver) = tokio::sync::oneshot::channel::<()>();
@@ -168,7 +169,7 @@ impl<StateType: Debug + Clone + Send + 'static> ServerConnectionHandler<StateTyp
                                        connection_initial_state:        StateType,
                                        sender:                          tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
                                        mut network_event_loop_signaler: tokio::sync::oneshot::Receiver<()>)
-                                      -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+                                      -> Result<(), Box<dyn Error + Sync + Send>> {
         let listening_interface_and_port = format!("{}:{}", listening_interface, listening_port);
         let listener = TcpListener::bind(&listening_interface_and_port).await?;
         tokio::spawn( async move {
@@ -313,7 +314,7 @@ mod tests {
 
     /// Checks that the low level [ConnectionChannel] works according to the specification
     #[tokio::test]
-    async fn connection_channel() -> Result<(), Box<dyn std::error::Error>> {
+    async fn connection_channel() -> Result<(), Box<dyn Error>> {
         let expected_count = 10;
         let received_count = Arc::new(AtomicU32::new(0));
         let received_count_ref = received_count.clone();
@@ -342,7 +343,7 @@ mod tests {
 
     /// Checks that [ServerConnectionHandler] works according to the specification
     #[tokio::test]
-    async fn server_connection_handler() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+    async fn server_connection_handler() -> Result<(), Box<dyn Error + Sync + Send>> {
         let expected_count = 10 + 1;    // 10 received + 1 feed manually
         let interface = "127.0.0.1";
         let port = 8356;
@@ -375,7 +376,7 @@ mod tests {
 
     /// Checks that [ClientConnectionManager] works according to the specification
     #[tokio::test]
-    async fn client_connection() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+    async fn client_connection() -> Result<(), Box<dyn Error + Sync + Send>> {
         let expected_count = 10;
         let interface = "127.0.0.1";
         let port = 8357;

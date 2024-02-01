@@ -42,7 +42,7 @@ enum ServerMessages {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("Welcome to the `reactive-messaging` Hello World example");
     let possible_options = vec!["server-only", "client-only"];
     println!("Usage: hello_world [{}]", possible_options.iter().fold(String::new(), |mut acc, item| { if acc.len() > 0 {acc.push('|')}; acc.push_str(item); acc } ));
@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     logic(start_server, start_client).await
 }
 
-async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut server = None;
     if start_server {
         println!("==> starting the server");

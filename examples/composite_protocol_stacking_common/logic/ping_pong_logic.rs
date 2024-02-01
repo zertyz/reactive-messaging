@@ -289,7 +289,7 @@ mod tests {
 
         // wrong player action
         let mut umpire = Umpire::new(&config, Players::Ourself);
-        let expected_game_over_state = GameOverStates::GameCancelled { partial_score: MatchScore { limit: 2, oneself: 0, opponent: 0 }, broken_rule_description: format!("The expected player for this turn was OneSelf, but Opponent claimed it instead") };
+        let expected_game_over_state = GameOverStates::GameCancelled { partial_score: MatchScore { limit: 2, oneself: 0, opponent: 0 }, broken_rule_description: String::from("The expected player for this turn was OneSelf, but Opponent claimed it instead") };
         assert_eq!(umpire.process_turn(Players::Opponent, &PlayerAction { lucky_number: 1.0 }),
                    PingPongEvent::GameOver(expected_game_over_state.clone()),
                    "The game should be cancelled when a player strikes the ball out of his/her turn");

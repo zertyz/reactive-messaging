@@ -29,7 +29,7 @@ pub fn upgrade_to_connection_event_tracking<const CONFIG:                   u64,
                                            -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
 
     let connected_state = Arc::clone(connected_state);
-    let termination_is_complete_signaler = Arc::new(Mutex::new(Option::Some(termination_is_complete_signaler)));
+    let termination_is_complete_signaler = Arc::new(Mutex::new(Some(termination_is_complete_signaler)));
     let user_provided_connection_events_callback = Arc::new(user_provided_connection_events_callback);
     move |connection_event | {
         let connected_state = Arc::clone(&connected_state);

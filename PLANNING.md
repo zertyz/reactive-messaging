@@ -17,10 +17,6 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Being-Done
 
-
-
-# Backlog
-
 **(r10)** 2024-01-28: TECH DEBT followup for **(f6)**: Remodel "events", improve event firing tests, refactor duplicated code, simplify the API
 1) Remodel `ConnectionEvents`: with the introduction of the Composite Protocols (that allows using several processors), several event handlers
    are also allowed, making events such as "PeerDisconnected" not belonging to any of such handlers (as it is an event of a connection, and not
@@ -30,14 +26,18 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 2) There were issues reported regarding the disconnection events not being fired for certain cases. This is alarming, as it causes memory
    leaks on the user application (e.g, a server when handling multiple connections that create a session on connection and drop them on disconnection).
    TO DO: a) write elaborated integration tests (on api.rs or functional_requisites.rs) for the most varying scenarios for the client and server
-             -- dropped by the other party, timing out, etc;
-          b) Write stress tests
+   -- dropped by the other party, timing out, etc;
+   b) Write stress tests
 
 **(n8)** 2024-01-04: Introduce binary messages:
 1) Use RKYV for serialization (the fastest & more flexible among current options, after a chat gpt & bard research)
 2) Formats will be textual (with \n separating messages) or binary (with a u16 payload size prefixing each message)
 3) Opting between binary or textual should be done easily via ConstConfig -- provided the protocol types implement the appropriate traits
 4) Build benchmarks comparing RON vs RKYV
+
+
+
+# Backlog
 
 **(f9)** 2024-01-17: Security -- support SSL/TSL + Client & Server fingerprinting for text & binary transmissions (depends on **(n8)**),
 where fingerprinting is not an alleged number, but one determined by investigating the TCP/IP layers and the security metadata.
@@ -122,6 +122,6 @@ _6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous
      - `RetryYieldingForUpTo(n)` for up to n milliseconds, where n is in 0..8 and the milliseconds will be (n^2)ms",
      - `RetrySpinningForUpTo(n)` like the above,
      - `RetrySleepingGeometrically(n)` for `n` attempts (n in 0..8), each one sleeping for (n^2)*10ms",
-5) For a chosen action in (4), introduce a modifyer to **log the occurrence** or not
+5) For a chosen action in (4), introduce a modifier to **log the occurrence** or not
 
 **(n3)** 2023-07-27: Allow `reactive-mutiny` channels to be configured as an option in the *Const Configuration* pattern.

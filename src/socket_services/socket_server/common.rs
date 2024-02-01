@@ -29,7 +29,7 @@ pub(crate) fn upgrade_to_termination_tracking<const CONFIG:                   u6
 
                                           -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> Pin<Box<dyn Future<Output=()> + Send>> {
 
-    let shutdown_is_complete_signaler = Arc::new(Mutex::new(Option::Some(shutdown_is_complete_signaler)));
+    let shutdown_is_complete_signaler = Arc::new(Mutex::new(Some(shutdown_is_complete_signaler)));
     let user_provided_connection_events_callback = Arc::new(user_provided_connection_events_callback);
     move |connection_event | {
         let shutdown_is_complete_signaler = Arc::clone(&shutdown_is_complete_signaler);

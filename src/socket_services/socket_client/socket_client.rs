@@ -31,6 +31,7 @@ use crate::{
     serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer},
 };
 use std::{
+    error::Error,
     fmt::Debug,
     future::Future,
     sync::{
@@ -261,7 +262,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                                           connection_events_callback:  ConnectionEventsCallback,
                                           dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                         -> Result<ConnectionChannel<StateType>, Box<dyn std::error::Error + Sync + Send>> {
+                                         -> Result<ConnectionChannel<StateType>, Box<dyn Error + Sync + Send>> {
 
         let ip = self.ip.clone();
         let port = self.port;
@@ -275,7 +276,7 @@ for CompositeSocketClient<CONFIG, StateType> {
         // the source of connections for this processor to start working on
         let mut connection_provider = ConnectionChannel::new();
         let mut connection_source = connection_provider.receiver()
-            .ok_or_else(|| format!("couldn't move the Connection Receiver out of the Connection Provider"))?;
+            .ok_or_else(|| String::from("couldn't move the Connection Receiver out of the Connection Provider"))?;
 
         tokio::spawn(async move {
             /*while*/ if let Some(connection) = connection_source.recv().await {
@@ -316,7 +317,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                                         connection_events_callback:  ConnectionEventsCallback,
                                         dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                       -> Result<ConnectionChannel<StateType>, Box<dyn std::error::Error + Sync + Send>>
+                                       -> Result<ConnectionChannel<StateType>, Box<dyn Error + Sync + Send>>
 
                                        where LocalMessages: ResponsiveMessages<LocalMessages> {
 
@@ -332,7 +333,7 @@ for CompositeSocketClient<CONFIG, StateType> {
         // the source of connections for this processor to start working on
         let mut connection_provider = ConnectionChannel::new();
         let mut connection_source = connection_provider.receiver()
-            .ok_or_else(|| format!("couldn't move the Connection Receiver out of the Connection Provider"))?;
+            .ok_or_else(|| String::from("couldn't move the Connection Receiver out of the Connection Provider"))?;
 
 
 
@@ -366,7 +367,7 @@ for CompositeSocketClient<CONFIG, StateType> {
     async fn start_with_routing_closure(&mut self,
                                         initial_connection_state:       StateType,
                                         mut connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<StateType>>> + Send + 'static)
-                                       -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+                                       -> Result<(), Box<dyn Error + Sync + Send>> {
 
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&self.ip, self.port);
         let connection = connection_manager.connect_retryable().await
@@ -429,7 +430,7 @@ for CompositeSocketClient<CONFIG, StateType> {
         Ok(())
     }
 
-    fn termination_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn std::error::Error + Send + Sync>>>> {
+    fn termination_waiter(&mut self) -> Box<dyn FnOnce() -> BoxFuture<'static, Result<(), Box<dyn Error + Send + Sync>>>> {
         let mut local_termination_receiver = self.local_termination_is_complete_receiver.take();
         let mut latch = self.spawned_processors_count;
         Box::new(move || Box::pin({
@@ -438,7 +439,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                     while latch > 0 {
                         match local_termination_receiver.recv().await {
                             Some(()) => latch -= 1,
-                            None     => return Err(Box::from(format!("CompositeGenericSocketClient::termination_waiter(): It is no longer possible to tell when the client will be terminated: the broadcast channel was closed")))
+                            None     => return Err(Box::from(String::from("CompositeGenericSocketClient::termination_waiter(): It is no longer possible to tell when the client will be terminated: the broadcast channel was closed")))
                         }
                     }
                     Ok(())
@@ -449,7 +450,7 @@ for CompositeSocketClient<CONFIG, StateType> {
         }))
     }
 
-    async fn terminate(mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn terminate(mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         match self.client_termination_signaler.take() {
             Some(client_sender) => {
                 warn!("`reactive-messaging::CompositeGenericSocketClient`: Shutdown asked & initiated for client connected @ {}:{}", self.ip, self.port);

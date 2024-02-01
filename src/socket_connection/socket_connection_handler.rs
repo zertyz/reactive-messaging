@@ -13,6 +13,7 @@ use crate::{
     },
 };
 use std::{
+    error::Error,
     fmt::Debug,
     future::Future,
     net::SocketAddr,
@@ -76,7 +77,7 @@ impl<const CONFIG:        u64,
                                                             connection_events_callback:  ConnectionEventsCallback,
                                                             dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                            -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+                                                            -> Result<(), Box<dyn Error + Sync + Send>> {
 
         let arc_self = Arc::new(self);
         let connection_events_callback = Arc::new(connection_events_callback);
@@ -166,7 +167,7 @@ impl<const CONFIG:        u64,
                                                        connection_events_callback:  ConnectionEventsCallback,
                                                        dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                      -> Result<SocketConnection<StateType>, Box<dyn std::error::Error + Sync + Send>> {
+                                                      -> Result<SocketConnection<StateType>, Box<dyn Error + Sync + Send>> {
 
         let addr = socket_connection.connection().peer_addr()?;
         let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
@@ -221,7 +222,7 @@ impl<const CONFIG:        u64,
                                               peer:                  Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
                                               processor_sender:      ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>)
 
-                                             -> Result<SocketConnection<StateType>, Box<dyn std::error::Error + Sync + Send>> {
+                                             -> Result<SocketConnection<StateType>, Box<dyn Error + Sync + Send>> {
         // socket
         if let Some(no_delay) = Self::CONST_CONFIG.socket_options.no_delay {
             socket_connection.connection_mut().set_nodelay(no_delay).map_err(|err| format!("error setting nodelay({no_delay}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
@@ -356,7 +357,7 @@ impl<const CONFIG:        u64,
                                                           connection_events_callback:  ConnectionEventsCallback,
                                                           dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                         -> Result<(), Box<dyn std::error::Error + Sync + Send>>
+                                                         -> Result<(), Box<dyn Error + Sync + Send>>
 
                                                          where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
 
@@ -385,7 +386,7 @@ impl<const CONFIG:        u64,
                                                      connection_events_callback:  ConnectionEventsCallback,
                                                      dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                    -> Result<SocketConnection<StateType>, Box<dyn std::error::Error + Sync + Send>>
+                                                    -> Result<SocketConnection<StateType>, Box<dyn Error + Sync + Send>>
 
                                                     where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
 
@@ -444,7 +445,7 @@ impl<const CONFIG:        u64,
     #[inline(always)]
     fn _to_responsive_stream_of_fallibles(&self,
                                           peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
-                                          request_processor_stream: impl Stream<Item = Result<LocalMessagesType, Box<dyn std::error::Error + Sync + Send>>>)
+                                          request_processor_stream: impl Stream<Item = Result<LocalMessagesType, Box<dyn Error + Sync + Send>>>)
 
                                          -> impl Stream<Item = ()>
 
