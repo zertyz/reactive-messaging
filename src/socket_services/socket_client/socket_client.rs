@@ -30,6 +30,9 @@ use crate::{
     },
     serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer},
 };
+use crate::socket_connection::connection::SocketConnection;
+use crate::socket_services::types::MessagingService;
+use crate::types::ConnectionEvent;
 use std::{
     error::Error,
     fmt::Debug,
@@ -122,7 +125,7 @@ macro_rules! start_unresponsive_client_processor {
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         match spawn_unresponsive_client_processor!($const_config, $channel_type, $socket_client, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
-            Ok(connection_channel) => $socket_client.start_with_single_protocol(connection_channel).await,
+            Ok(connection_channel) => $socket_client.start_single_protocol(connection_channel).await,
             Err(err) => Err(err),
         }
     }}
@@ -160,15 +163,13 @@ macro_rules! start_responsive_client_processor {
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         match spawn_responsive_client_processor!($const_config, $channel_type, $socket_client, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
-            Ok(connection_channel) => $socket_client.start_with_single_protocol(connection_channel).await,
+            Ok(connection_channel) => $socket_client.start_single_protocol(connection_channel).await,
             Err(err) => Err(err),
         }
 
     }}
 }
 pub use start_responsive_client_processor;
-use crate::socket_connection::connection::SocketConnection;
-use crate::socket_services::types::MessagingService;
 
 
 /// Real definition & implementation for our Socket Client, full of generic parameters.\
@@ -364,16 +365,17 @@ for CompositeSocketClient<CONFIG, StateType> {
         Ok(connection_provider)
     }
 
-    async fn start_multi_protocol(&mut self,
+    async fn start_multi_protocol<ConnectionEventsCallbackFuture:  Future<Output=()> + Send>
+                                 (&mut self,
                                   initial_connection_state:       StateType,
-                                  mut connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<StateType>>> + Send + 'static)
+                                  mut connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<StateType>>> + Send + 'static,
+                                  connection_events_callback:     impl Fn(/*event: */ConnectionEvent<StateType>)                                       -> ConnectionEventsCallbackFuture                                 + Send + 'static)
                                  -> Result<(), Box<dyn Error + Sync + Send>> {
 
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&self.ip, self.port);
         let connection = connection_manager.connect_retryable().await
             .map_err(|err| format!("Error making client connection to {}:{} -- {err}", self.ip, self.port))?;
         let mut just_opened_connection = Some(connection);
-
 
         let mut returned_connection_source = self.returned_connection_source.take()
             .ok_or_else(|| String::from("couldn't move the 'Returned Connection Source' out of the Connection Channel"))?;
@@ -394,6 +396,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                     // process the just-opened connection (once)
                     Some(just_opened_connection) => {
                         let just_opened_socket_connection = SocketConnection::new(just_opened_connection, initial_connection_state.clone());
+                        connection_events_callback(ConnectionEvent::Connected(&just_opened_socket_connection)).await;
                         let sender = connection_routing_closure(&just_opened_socket_connection, false);
                         (just_opened_socket_connection, sender)
                     },
@@ -415,6 +418,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                         }
                     },
                     None => {
+                        connection_events_callback(ConnectionEvent::Disconnected(&socket_connection)).await;
                         if let Err(err) = socket_connection.connection_mut().shutdown().await {
                             debug!("`reactive-messaging::CompositeSocketClient`: ERROR in the client connected to the server @ {ip}:{port} while shutting down the connection (after the processors ended): {err}");
                         }
@@ -871,7 +875,7 @@ mod tests {
                 Protocols::GoodbyeOptions             => Some(goodbye_options_processor.clone_sender()),
                 Protocols::Disconnect                 => None,
             };
-        client.start_multi_protocol(Protocols::Handshake, connection_routing_closure).await?;
+        client.start_multi_protocol(Protocols::Handshake, connection_routing_closure, |_| future::ready(())).await?;
 
         let client_waiter = client.termination_waiter();
         // wait for the client to do its stuff

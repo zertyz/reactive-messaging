@@ -1,11 +1,13 @@
 //! Common types used across this submodule
 
+use std::error::Error;
 use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use crate::prelude::Peer;
 use crate::socket_connection::connection_provider::ConnectionChannel;
-use crate::types::{ProtocolEvent, MessagingMutinyStream, ResponsiveMessages};
+use crate::types::{ProtocolEvent, MessagingMutinyStream, ResponsiveMessages, ConnectionEvent};
 use crate::socket_connection::connection::SocketConnection;
 use std::fmt::Debug;
+use std::future;
 use std::future::Future;
 use std::sync::Arc;
 use futures::future::BoxFuture;
@@ -56,7 +58,7 @@ pub trait MessagingService<const CONFIG: u64> {
                                           connection_events_callback:  ConnectionEventsCallback,
                                           dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                         -> Result<ConnectionChannel<Self::StateType>, Box<dyn std::error::Error + Sync + Send>>;
+                                         -> Result<ConnectionChannel<Self::StateType>, Box<dyn Error + Sync + Send>>;
 
     /// Spawns a task dedicated to the given "responsive protocol processor", returning immediately,
     /// The given `dialog_processor_builder_fn` will be called for each new connection and will return a `Stream`
@@ -96,7 +98,7 @@ pub trait MessagingService<const CONFIG: u64> {
                                         connection_events_callback:  ConnectionEventsCallback,
                                         dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                       -> Result<ConnectionChannel<Self::StateType>, Box<dyn std::error::Error + Sync + Send>>
+                                       -> Result<ConnectionChannel<Self::StateType>, Box<dyn Error + Sync + Send>>
 
                                        where LocalMessages: ResponsiveMessages<LocalMessages>;
 
@@ -107,7 +109,7 @@ pub trait MessagingService<const CONFIG: u64> {
     ///
     /// Starts the service using the provided `connection_channel` to distribute the connections.
     async fn start_single_protocol(&mut self, connection_channel: ConnectionChannel<Self::StateType>)
-                                  -> Result<(), Box<dyn std::error::Error + Sync + Send>>
+                                  -> Result<(), Box<dyn Error + Sync + Send>>
                                   where Self::StateType: Default {
         // this closure will cause incoming or just-opened connections to be sent to `connection_channel` and returned connections to be dropped
         let connection_routing_closure = move |_socket_connection: &SocketConnection<Self::StateType>, is_reused: bool|
@@ -116,8 +118,9 @@ pub trait MessagingService<const CONFIG: u64> {
             } else {
                 Some(connection_channel.clone_sender())
             };
-        self.start_multi_protocol(Self::StateType::default(), connection_routing_closure).await
-
+        // tracking the connection events is not really necessary for the "single protocol" case here, as, for this specific case, the protocol events contain that information already
+        let connection_events_callback = |_: ConnectionEvent<'_, Self::StateType>| future::ready(());
+        self.start_multi_protocol(Self::StateType::default(), connection_routing_closure, connection_events_callback).await
     }
 
     /// Starts the service using the provided `connection_routing_closure` to
@@ -136,10 +139,12 @@ pub trait MessagingService<const CONFIG: u64> {
     /// This method returns an error in the following cases:
     ///   1) if the connecting/binding process fails;
     ///   2) if no processors were configured.
-    async fn start_multi_protocol(&mut self,
-                                  initial_connection_state:   Self::StateType,
-                                  connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<Self::StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<Self::StateType>>> + Send + 'static)
-                                 -> Result<(), Box<dyn std::error::Error + Sync + Send>>;
+    async fn start_multi_protocol<ConnectionEventsCallbackFuture:  Future<Output=()> + Send>
+                                 (&mut self,
+                                  initial_connection_state:    Self::StateType,
+                                  connection_routing_closure:  impl FnMut(/*socket_connection: */&SocketConnection<Self::StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<Self::StateType>>> + Send + 'static,
+                                  connection_events_callback:  impl for <'r> Fn(/*event: */ConnectionEvent<'r, Self::StateType>)                          -> ConnectionEventsCallbackFuture                                       + Send + 'static)
+                                 -> Result<(), Box<dyn Error + Sync + Send>>;
 
     /// Returns an async closure that blocks until [Self::terminate()] is called.
     /// Example:

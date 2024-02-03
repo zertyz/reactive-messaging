@@ -53,7 +53,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ProtocolStates::PreGame    => Some(pre_game_processor.clone_sender()),
             ProtocolStates::Game       => Some(game_processor.clone_sender()),
             ProtocolStates::Disconnect => None,
-        }
+        },
+        |_| future::ready(())
     ).await?;
 
     let wait_for_termination = socket_server.termination_waiter();

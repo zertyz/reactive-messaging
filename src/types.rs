@@ -42,11 +42,11 @@ pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMess
 
 /// Event issued by Composite Protocol Clients & Servers when connections are made or dropped
 #[derive(Debug)]
-pub enum ConnectionEvent<StateType: Send + Sync + Clone + Debug + 'static> {
+pub enum ConnectionEvent<'a, StateType: Send + Sync + Clone + Debug> {
     /// Happens when a connection is established with a remote party
-    Connected(SocketConnection<StateType>),
+    Connected(&'a SocketConnection<StateType>),
     /// Happens as soon as a disconnection is detected
-    Disconnected(SocketConnection<StateType>),
+    Disconnected(&'a SocketConnection<StateType>),
     /// Happens when the local code has commanded the service (and all opened connections) to stop
     LocalServiceTermination,
 }

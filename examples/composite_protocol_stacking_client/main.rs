@@ -106,7 +106,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                 ProtocolStates::PreGame    => Some(pre_game_processor.clone_sender()),
                 ProtocolStates::Game       => Some(game_processor.clone_sender()),
                 ProtocolStates::Disconnect => None,
-            }
+            },
+           |_| future::ready(())
         ).await?;
 
         socket_clients.push(socket_client);
