@@ -80,7 +80,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
                     _ => ServerMessages::NoAnswer,
                 })
         )?;
-        server.start_with_single_protocol(server_processor_handler).await?;
+        server.start_single_protocol(server_processor_handler).await?;
     }
 
     if start_client {

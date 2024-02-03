@@ -68,7 +68,7 @@ pub use new_socket_server;
 
 /// Instantiates & allocates resources for a stateful [CompositeSocketServer] (suitable for the "Composite Protocol Stacking" pattern),
 /// ready to have processors added by [spawn_unresponsive_server_processor!()] or [spawn_responsive_server_processor!()]
-/// and to be later started by [CompositeSocketServer::start_with_routing_closure]
+/// and to be later started by [CompositeSocketServer::start_multi_protocol()]
 /// -- using the default "Atomic" channels (see [new_composite_fullsync_server!()] & [new_composite_crossbeam_server!()] for alternatives).\
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const/compile time optimizations;
@@ -304,10 +304,10 @@ for CompositeSocketServer<CONFIG, StateType> {
         Ok(connection_provider)
     }
 
-    async fn start_with_routing_closure(&mut self,
-                                        connection_initial_state:       StateType,
-                                        mut connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<StateType>>> + Send + 'static)
-                                       -> Result<(), Box<dyn Error + Sync + Send>> {
+    async fn start_multi_protocol(&mut self,
+                                  connection_initial_state:       StateType,
+                                  mut connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<StateType>>> + Send + 'static)
+                                 -> Result<(), Box<dyn Error + Sync + Send>> {
         let mut connection_provider = ServerConnectionHandler::new(&self.interface_ip, self.port, connection_initial_state).await
             .map_err(|err| format!("couldn't start the Connection Provider server event loop: {err}"))?;
         let mut new_connections_source = connection_provider.connection_receiver()
@@ -585,7 +585,7 @@ mod tests {
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await?;
-        server.start_with_single_protocol(connection_channel).await?;
+        server.start_single_protocol(connection_channel).await?;
         let termination_waiter = server.termination_waiter();
         server.terminate().await?;
         termination_waiter().await?;
@@ -658,7 +658,7 @@ mod tests {
                 })
             }
         ).await.expect("Spawning a server processor");
-        server.start_with_single_protocol(connection_channel).await.expect("Starting the server");
+        server.start_single_protocol(connection_channel).await.expect("Starting the server");
 
         // start a client that will engage in a flood ping with the server when provoked (never closing the connection)
         let mut client = new_socket_client!(
@@ -832,7 +832,7 @@ mod tests {
                 Protocols::GoodbyeOptions             => Some(goodbye_options_processor.clone_sender()),
                 Protocols::Disconnect                 => None,
             };
-        server.start_with_routing_closure(Protocols::IncomingClient, connection_routing_closure).await?;
+        server.start_multi_protocol(Protocols::IncomingClient, connection_routing_closure).await?;
         let server_termination_waiter = server.termination_waiter();
 
         // start the client that will only connect and listen to messages until it is disconnected

@@ -59,9 +59,9 @@ pub enum ConnectionEvent<StateType: Send + Sync + Clone + Debug + 'static> {
 ///                      -- the "error: implementation of `std::marker::Send` is not general enough" bug kept on popping up in user provided closures that called other async functions.
 #[derive(Debug)]
 pub enum ProtocolEvent<const CONFIG:  u64,
-    LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-    SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-    StateType:                                                                                   Send + Sync + Clone     + Debug + 'static = ()> {
+                       LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                       SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+                       StateType:                                                                                   Send + Sync + Clone     + Debug + 'static = ()> {
     /// Happens when a remote party is first made available to the reactive processor
     /// (caused either by a new connection or by a reactive protocol transition)
     PeerArrived { peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>> },

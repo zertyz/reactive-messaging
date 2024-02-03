@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         },
         move |client_addr, port, peer, client_messages_stream| server_processor_ref4.game_dialog_processor(client_addr, port, peer, client_messages_stream)
     )?;
-    socket_server.start_with_routing_closure(ProtocolStates::PreGame, move |socket_connection: &SocketConnection<ProtocolStates>, _|
+    socket_server.start_multi_protocol(ProtocolStates::PreGame, move |socket_connection: &SocketConnection<ProtocolStates>, _|
         match socket_connection.state() {
             ProtocolStates::PreGame    => Some(pre_game_processor.clone_sender()),
             ProtocolStates::Game       => Some(game_processor.clone_sender()),

@@ -102,13 +102,13 @@ pub trait MessagingService<const CONFIG: u64> {
 
     /// Start the service with a single processor (after calling either [Self::spawn_unresponsive_processor()]
     /// or [Self::spawn_responsive_processor()] once) -- A.K.A. "The Single Protocol Mode".\
-    /// See [Self::start_with_routing_closure()] if you want a service that shares connections among
+    /// See [Self::start_multi_protocol()] if you want a service that shares connections among
     /// different protocol processors.
     ///
     /// Starts the service using the provided `connection_channel` to distribute the connections.
-    async fn start_with_single_protocol(&mut self, connection_channel: ConnectionChannel<Self::StateType>)
-                                       -> Result<(), Box<dyn std::error::Error + Sync + Send>>
-                                       where Self::StateType: Default {
+    async fn start_single_protocol(&mut self, connection_channel: ConnectionChannel<Self::StateType>)
+                                  -> Result<(), Box<dyn std::error::Error + Sync + Send>>
+                                  where Self::StateType: Default {
         // this closure will cause incoming or just-opened connections to be sent to `connection_channel` and returned connections to be dropped
         let connection_routing_closure = move |_socket_connection: &SocketConnection<Self::StateType>, is_reused: bool|
             if is_reused {
@@ -116,7 +116,7 @@ pub trait MessagingService<const CONFIG: u64> {
             } else {
                 Some(connection_channel.clone_sender())
             };
-        self.start_with_routing_closure(Self::StateType::default(), connection_routing_closure).await
+        self.start_multi_protocol(Self::StateType::default(), connection_routing_closure).await
 
     }
 
@@ -136,10 +136,10 @@ pub trait MessagingService<const CONFIG: u64> {
     /// This method returns an error in the following cases:
     ///   1) if the connecting/binding process fails;
     ///   2) if no processors were configured.
-    async fn start_with_routing_closure(&mut self,
-                                        initial_connection_state:   Self::StateType,
-                                        connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<Self::StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<Self::StateType>>> + Send + 'static)
-                                       -> Result<(), Box<dyn std::error::Error + Sync + Send>>;
+    async fn start_multi_protocol(&mut self,
+                                  initial_connection_state:   Self::StateType,
+                                  connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<Self::StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<Self::StateType>>> + Send + 'static)
+                                 -> Result<(), Box<dyn std::error::Error + Sync + Send>>;
 
     /// Returns an async closure that blocks until [Self::terminate()] is called.
     /// Example:

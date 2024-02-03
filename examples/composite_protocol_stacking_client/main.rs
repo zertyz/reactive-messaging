@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                     })
             }
         )?;
-        socket_client.start_with_routing_closure(ProtocolStates::PreGame, move |socket_connection: &SocketConnection<ProtocolStates>, _|
+        socket_client.start_multi_protocol(ProtocolStates::PreGame, move |socket_connection: &SocketConnection<ProtocolStates>, _|
             match socket_connection.state() {
                 ProtocolStates::PreGame    => Some(pre_game_processor.clone_sender()),
                 ProtocolStates::Game       => Some(game_processor.clone_sender()),

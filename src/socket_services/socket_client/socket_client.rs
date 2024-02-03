@@ -364,10 +364,10 @@ for CompositeSocketClient<CONFIG, StateType> {
         Ok(connection_provider)
     }
 
-    async fn start_with_routing_closure(&mut self,
-                                        initial_connection_state:       StateType,
-                                        mut connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<StateType>>> + Send + 'static)
-                                       -> Result<(), Box<dyn Error + Sync + Send>> {
+    async fn start_multi_protocol(&mut self,
+                                  initial_connection_state:       StateType,
+                                  mut connection_routing_closure: impl FnMut(/*socket_connection: */&SocketConnection<StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<StateType>>> + Send + 'static)
+                                 -> Result<(), Box<dyn Error + Sync + Send>> {
 
         let mut connection_manager = ClientConnectionManager::<CONFIG>::new(&self.ip, self.port);
         let connection = connection_manager.connect_retryable().await
@@ -633,7 +633,7 @@ mod tests {
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await.expect("Error spawning a protocol processor");
-        client.start_with_single_protocol(connection_channel).await.expect("Error starting a single protocol client");
+        client.start_single_protocol(connection_channel).await.expect("Error starting a single protocol client");
         let wait_for_termination = client.termination_waiter();
         client.terminate().await.expect("Error on client Termination command");
         wait_for_termination().await.expect("Error waiting for client Termination");
@@ -871,7 +871,7 @@ mod tests {
                 Protocols::GoodbyeOptions             => Some(goodbye_options_processor.clone_sender()),
                 Protocols::Disconnect                 => None,
             };
-        client.start_with_routing_closure(Protocols::Handshake, connection_routing_closure).await?;
+        client.start_multi_protocol(Protocols::Handshake, connection_routing_closure).await?;
 
         let client_waiter = client.termination_waiter();
         // wait for the client to do its stuff
