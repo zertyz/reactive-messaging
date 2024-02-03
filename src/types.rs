@@ -45,10 +45,10 @@ pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMess
 /// IMPLEMENTATION NOTE: GAT traits (to reduce the number of generic parameters) couldn't be used here -- even after applying this compiler bug workaround https://github.com/rust-lang/rust/issues/102211#issuecomment-1513931928
 ///                      -- the "error: implementation of `std::marker::Send` is not general enough" bug kept on popping up in user provided closures that called other async functions.
 #[derive(Debug)]
-pub enum ConnectionEvent<const CONFIG:  u64,
-                         LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-                         SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-                         StateType:                                                                                   Send + Sync + Clone     + Debug + 'static = ()> {
+pub enum SingleProtocolEvent<const CONFIG:  u64,
+                             LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                             SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+                             StateType:                                                                                   Send + Sync + Clone     + Debug + 'static = ()> {
     /// Happens when the remote party acknowledges that a connection has been established
     PeerConnected            { peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>> },
     /// Happens when the remote party disconnects

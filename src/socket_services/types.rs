@@ -3,7 +3,7 @@
 use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use crate::prelude::Peer;
 use crate::socket_connection::connection_provider::ConnectionChannel;
-use crate::types::{ConnectionEvent, MessagingMutinyStream, ResponsiveMessages};
+use crate::types::{SingleProtocolEvent, MessagingMutinyStream, ResponsiveMessages};
 use crate::socket_connection::connection::SocketConnection;
 use std::fmt::Debug;
 use std::future::Future;
@@ -49,7 +49,7 @@ pub trait MessagingService<const CONFIG: u64> {
                                           OutputStreamItemsType:                                                                                                                                                                                                                                                    Send + Sync             + Debug + 'static,
                                           ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                      + Send                            + 'static,
                                           ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                       + Send                            + 'static,
-                                          ConnectionEventsCallback:       Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
+                                          ConnectionEventsCallback:       Fn(/*event: */SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
                                           ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                                          (&mut self,
@@ -89,7 +89,7 @@ pub trait MessagingService<const CONFIG: u64> {
                                         SenderChannel:                   FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                             + Send + Sync                     + 'static,
                                         ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                                              + Send                            + 'static,
                                         ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                       + Send                            + 'static,
-                                        ConnectionEventsCallback:        Fn(/*event: */ConnectionEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
+                                        ConnectionEventsCallback:        Fn(/*event: */SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
                                         ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                                        (&mut self,

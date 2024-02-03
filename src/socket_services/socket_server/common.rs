@@ -3,7 +3,7 @@
 
 use crate::prelude::{
     ReactiveMessagingSerializer,
-    ConnectionEvent,
+    SingleProtocolEvent,
 };
 use std::{
     fmt::Debug,
@@ -25,9 +25,9 @@ pub(crate) fn upgrade_to_termination_tracking<const CONFIG:                   u6
                                            StateType:                                                                                                    Send + Sync + Clone     + Debug + 'static>
 
                                           (shutdown_is_complete_signaler:            tokio::sync::oneshot::Sender<()>,
-                                           user_provided_connection_events_callback: impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                           user_provided_connection_events_callback: impl Fn(SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                                          -> impl Fn(ConnectionEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> Pin<Box<dyn Future<Output=()> + Send>> {
+                                          -> impl Fn(SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> Pin<Box<dyn Future<Output=()> + Send>> {
 
     let shutdown_is_complete_signaler = Arc::new(Mutex::new(Some(shutdown_is_complete_signaler)));
     let user_provided_connection_events_callback = Arc::new(user_provided_connection_events_callback);
@@ -35,7 +35,7 @@ pub(crate) fn upgrade_to_termination_tracking<const CONFIG:                   u6
         let shutdown_is_complete_signaler = Arc::clone(&shutdown_is_complete_signaler);
         let user_provided_connection_events_callback = Arc::clone(&user_provided_connection_events_callback);
         Box::pin(async move {
-            if let ConnectionEvent::LocalServiceTermination { } = connection_event {
+            if let SingleProtocolEvent::LocalServiceTermination { } = connection_event {
                 let Some(shutdown_is_complete_signaler) = shutdown_is_complete_signaler.lock().await.take()
                 else {
                     warn!("Socket Server: a shutdown was asked, but a previous shutdown seems to have already taken place. There is a bug in your shutdown logic. Ignoring the current shutdown request...");

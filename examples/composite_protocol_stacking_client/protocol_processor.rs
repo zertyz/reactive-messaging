@@ -8,7 +8,7 @@ use crate::composite_protocol_stacking_common::{
         protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault},
     }
 };
-use reactive_messaging::prelude::{ConnectionEvent, Peer};
+use reactive_messaging::prelude::{SingleProtocolEvent, Peer};
 use std::{
     sync::{
         Arc,
@@ -51,8 +51,8 @@ impl ClientProtocolProcessor {
     pub fn pre_game_connection_events_handler<const NETWORK_CONFIG: u64,
                                               SenderChannel:        FullDuplexUniChannel<ItemType=PreGameClientMessages, DerivedItemType=PreGameClientMessages> + Send + Sync>
                                              (self: &Arc<Self>,
-                                              connection_event: ConnectionEvent<NETWORK_CONFIG, PreGameClientMessages, SenderChannel, ProtocolStates>) {
-        if let ConnectionEvent::PeerConnected { peer } = connection_event {
+                                              connection_event: SingleProtocolEvent<NETWORK_CONFIG, PreGameClientMessages, SenderChannel, ProtocolStates>) {
+        if let SingleProtocolEvent::PeerConnected { peer } = connection_event {
             debug!("Connected: {:?}", peer);
             _ = peer.send(PreGameClientMessages::Config(MATCH_CONFIG));
         }
@@ -103,17 +103,17 @@ impl ClientProtocolProcessor {
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
                                           SenderChannel:        FullDuplexUniChannel<ItemType=GameClientMessages, DerivedItemType=GameClientMessages> + Send + Sync>
                                          (self: &Arc<Self>,
-                                          connection_event: ConnectionEvent<NETWORK_CONFIG, GameClientMessages, SenderChannel, ProtocolStates>) {
+                                          connection_event: SingleProtocolEvent<NETWORK_CONFIG, GameClientMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
-            ConnectionEvent::PeerConnected { peer: _ } => {},
-            ConnectionEvent::PeerDisconnected { peer, stream_stats } => {
+            SingleProtocolEvent::PeerConnected { peer: _ } => {},
+            SingleProtocolEvent::PeerDisconnected { peer, stream_stats } => {
                 let in_messages_count = self.in_messages_count.load(Relaxed);
                 info!("CLIENT Disconnected: {:?}; stats: {:?} -- with {} messages IN & OUT: {:.2}/s",
                       peer,
                       stream_stats,
                       in_messages_count, in_messages_count as f64 / self.start_instant.elapsed().as_secs_f64());
             }
-            ConnectionEvent::LocalServiceTermination => {
+            SingleProtocolEvent::LocalServiceTermination => {
                 info!("Ping-Pong client shutdown requested. Notifying the server...");
             }
         }

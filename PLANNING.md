@@ -20,9 +20,9 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 **(r10)** 2024-01-28: TECH DEBT followup for **(f6)**: Remodel "events", improve event firing tests, refactor duplicated code, simplify the API
 1) Remodel `ConnectionEvents`: with the introduction of the Composite Protocols (that allows using several processors), several event handlers
    are also allowed, making events such as "PeerDisconnected" not belonging to any of such handlers (as it is an event of a connection, and not
-   a protocol's). To solve: There is a need for a distinction between `ConnectionEvents` and `ProtocolEvents` (for instance, for situations like
-   the processor ends but the connection doesn't -- and vice-versa). Remember this distinction is only needed for the Composite Protocol use case;
-   for the single protocol use case, a third model may be created: `SingleProtocolEvents`.
+   a protocol's). To solve: There is a need for a distinction between `ConnectionEvent` and `ProtocolEvent` (for instance, for situations like
+   when the processor ends but the connection doesn't -- and vice-versa). Remember this distinction is only needed for the Composite Protocol
+   use case; for the single protocol use case, a third model may be created: `SingleProtocolEvent`.
 2) There were issues reported regarding the disconnection events not being fired for certain cases. This is alarming, as it causes memory
    leaks on the user application (e.g, a server when handling multiple connections that create a session on connection and drop them on disconnection).
    TO DO: a) write elaborated integration tests (on api.rs or functional_requisites.rs) for the most varying scenarios for the client and server

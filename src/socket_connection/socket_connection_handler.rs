@@ -66,7 +66,7 @@ impl<const CONFIG:        u64,
     pub async fn server_loop_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
                                                             OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
                                                             ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                                                            ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                                            ConnectionEventsCallback:       Fn(/*server_event: */SingleProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
                                                             ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync         + 'static>
 
                                                            (self,
@@ -108,7 +108,7 @@ impl<const CONFIG:        u64,
                 let peer_ref2 = Arc::clone(&peer);
 
                 // issue the connection event
-                connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
+                connection_events_callback(SingleProtocolEvent::PeerConnected {peer: peer.clone()}).await;
 
                 let connection_events_callback_ref = Arc::clone(&connection_events_callback);
                 let processor_sender = ProcessorUniType::new(format!("Server processor for remote client {addr} @ {listening_interface_and_port}"))
@@ -116,7 +116,7 @@ impl<const CONFIG:        u64,
                                                                |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
                                                                move |executor| async move {
                                                                    // issue the async disconnect event
-                                                                   connection_events_callback_ref(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
+                                                                   connection_events_callback_ref(SingleProtocolEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
                                                                });
                 let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>
                     (processor_sender);
@@ -142,7 +142,7 @@ impl<const CONFIG:        u64,
             }
             debug!("`reactive-messaging::SocketServer`: bailing out of network loop -- we should be undergoing a shutdown...");
             // issue the shutdown event
-            connection_events_callback(ConnectionEvent::LocalServiceTermination).await;
+            connection_events_callback(SingleProtocolEvent::LocalServiceTermination).await;
         });
 
         Ok(())
@@ -158,7 +158,7 @@ impl<const CONFIG:        u64,
     pub async fn client_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
                                                        OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
                                                        ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                                                       ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                                       ConnectionEventsCallback:       Fn(/*server_event: */SingleProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
                                                        ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                       (self,
@@ -177,7 +177,7 @@ impl<const CONFIG:        u64,
         let peer_ref3 = Arc::clone(&peer);
 
         // issue the connection event
-        connection_events_callback(ConnectionEvent::PeerConnected {peer: peer.clone()}).await;
+        connection_events_callback(SingleProtocolEvent::PeerConnected {peer: peer.clone()}).await;
 
         let connection_events_callback_ref1 = Arc::new(connection_events_callback);
         let connection_events_callback_ref2 = Arc::clone(&connection_events_callback_ref1);
@@ -186,7 +186,7 @@ impl<const CONFIG:        u64,
                                                     |in_stream| dialog_processor_builder_fn(addr.ip().to_string(), addr.port(), peer_ref1.clone(), in_stream),
                                                     move |executor| async move {
                                                         // issue the async disconnect event
-                                                        connection_events_callback_ref1(ConnectionEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
+                                                        connection_events_callback_ref1(SingleProtocolEvent::PeerDisconnected { peer: peer_ref2, stream_stats: executor }).await;
                                                     });
         let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>
                                                                                                (processor_sender);
@@ -199,7 +199,7 @@ impl<const CONFIG:        u64,
                 Err(err) => error!("reactive-messaging: PROBLEM in the `shutdown signaler` client connected to server @ {addr} (a client shutdown will be commanded now due to this occurrence): {err:?}"),
             };
             // issue the shutdown event
-            connection_events_callback_ref2(ConnectionEvent::LocalServiceTermination).await;
+            connection_events_callback_ref2(SingleProtocolEvent::LocalServiceTermination).await;
             // close the connection
             peer_ref3.flush_and_close(Duration::from_millis(100)).await;
         });
@@ -346,7 +346,7 @@ impl<const CONFIG:        u64,
     #[inline(always)]
     pub async fn server_loop_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                                        + Send        + 'static,
                                                           ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                                                          ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                          ConnectionEventsCallback:       Fn(/*server_event: */SingleProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                                           ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync + 'static>
 
                                                          (self,
@@ -377,7 +377,7 @@ impl<const CONFIG:        u64,
     #[inline(always)]
     pub async fn client_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                                        + Send +        'static,
                                                      ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                                                     ConnectionEventsCallback:       Fn(/*server_event: */ConnectionEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
+                                                     ConnectionEventsCallback:       Fn(/*server_event: */SingleProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
                                                      ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                                                     (self,
@@ -567,9 +567,9 @@ mod tests {
             "127.0.0.1", 8579, new_connections_source, returned_connections_sink,
             |connection_event| async move {
                 match connection_event {
-                    ConnectionEvent::PeerConnected { .. }       => tokio::time::sleep(Duration::from_millis(100)).await,
-                    ConnectionEvent::PeerDisconnected { .. }    => tokio::time::sleep(Duration::from_millis(100)).await,
-                    ConnectionEvent::LocalServiceTermination { .. } => tokio::time::sleep(Duration::from_millis(100)).await,
+                    SingleProtocolEvent::PeerConnected { .. }       => tokio::time::sleep(Duration::from_millis(100)).await,
+                    SingleProtocolEvent::PeerDisconnected { .. }    => tokio::time::sleep(Duration::from_millis(100)).await,
+                    SingleProtocolEvent::LocalServiceTermination { .. } => tokio::time::sleep(Duration::from_millis(100)).await,
                 }
             },
             move |_client_addr, _client_port, _peer, client_messages_stream|
@@ -603,11 +603,11 @@ mod tests {
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
             |connection_event| {
                  match connection_event {
-                     ConnectionEvent::PeerConnected { peer } => {
+                     SingleProtocolEvent::PeerConnected { peer } => {
                          assert!(peer.send(String::from("Welcome! State your business!")).is_ok(), "couldn't send");
                      },
-                     ConnectionEvent::PeerDisconnected { peer: _, stream_stats: _ } => {},
-                     ConnectionEvent::LocalServiceTermination => {
+                     SingleProtocolEvent::PeerDisconnected { peer: _, stream_stats: _ } => {},
+                     SingleProtocolEvent::LocalServiceTermination => {
                          println!("Test Server: shutdown was requested... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
                      }
                  }
@@ -641,13 +641,13 @@ mod tests {
                 socket_connection, client_shutdown_receiver,
                 move |connection_event| {
                     match connection_event {
-                        ConnectionEvent::PeerConnected { peer } => {
+                        SingleProtocolEvent::PeerConnected { peer } => {
                             assert!(peer.send(client_secret.clone()).is_ok(), "couldn't send");
                         },
-                        ConnectionEvent::PeerDisconnected { peer, stream_stats: _ } => {
+                        SingleProtocolEvent::PeerDisconnected { peer, stream_stats: _ } => {
                             println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
                         },
-                        ConnectionEvent::LocalServiceTermination => {}
+                        SingleProtocolEvent::LocalServiceTermination => {}
                     }
                     future::ready(())
                 },
@@ -724,12 +724,12 @@ mod tests {
                 socket_connection, client_shutdown_receiver,
                 |connection_event| {
                     match connection_event {
-                        ConnectionEvent::PeerConnected { peer } => {
+                        SingleProtocolEvent::PeerConnected { peer } => {
                             // conversation starter
                             assert!(peer.send(String::from("Ping(0)")).is_ok(), "couldn't send");
                         },
-                        ConnectionEvent::PeerDisconnected { .. } => {},
-                        ConnectionEvent::LocalServiceTermination { .. } => {},
+                        SingleProtocolEvent::PeerDisconnected { .. } => {},
+                        SingleProtocolEvent::LocalServiceTermination { .. } => {},
                     }
                     future::ready(())
                 },
@@ -826,7 +826,7 @@ mod tests {
                 move |connection_event| {
                     let sent_messages_count = Arc::clone(&sent_messages_count_ref);
                     match connection_event {
-                        ConnectionEvent::PeerConnected { peer } => {
+                        SingleProtocolEvent::PeerConnected { peer } => {
                             tokio::spawn(async move {
                                 let start = SystemTime::now();
                                 let mut n = 0;
@@ -844,8 +844,8 @@ mod tests {
                                 }
                             });
                         },
-                        ConnectionEvent::PeerDisconnected { .. } => {},
-                        ConnectionEvent::LocalServiceTermination { .. } => {},
+                        SingleProtocolEvent::PeerDisconnected { .. } => {},
+                        SingleProtocolEvent::LocalServiceTermination { .. } => {},
                     }
                     future::ready(())
                 },
@@ -983,7 +983,7 @@ mod tests {
             move |connection_event| {
                 let server_disconnected = Arc::clone(&server_disconnected_ref);
                 async move {
-                    if let ConnectionEvent::PeerDisconnected { .. } = connection_event {
+                    if let SingleProtocolEvent::PeerDisconnected { .. } = connection_event {
                         server_disconnected.store(true, Relaxed);
                     }
                 }
@@ -1004,7 +1004,7 @@ mod tests {
                 move |connection_event| {
                     let client_disconnected = Arc::clone(&client_disconnected_ref);
                     async move {
-                        if let ConnectionEvent::PeerDisconnected { .. } = connection_event {
+                        if let SingleProtocolEvent::PeerDisconnected { .. } = connection_event {
                             client_disconnected.store(true, Relaxed);
                         }
                     }
