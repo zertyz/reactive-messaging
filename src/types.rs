@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni, MutinyStream};
+use crate::prelude::SocketConnection;
 use crate::serde::ReactiveMessagingSerializer;
 
 
@@ -39,22 +40,34 @@ pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMess
 }
 
 
-/// The internal events a reactive processor (for a server or client) shares with the user code.\
-/// The user code may use those events to maintain a list of connected clients, be notified of stop/close/quit requests, init/de-init sessions, etc.
-/// Note that the `Peer` objects received in those events may be used, at any time, to send messages to the clients -- like "Shutting down. Goodbye".
-/// IMPLEMENTATION NOTE: GAT traits (to reduce the number of generic parameters) couldn't be used here -- even after applying this compiler bug workaround https://github.com/rust-lang/rust/issues/102211#issuecomment-1513931928
-///                      -- the "error: implementation of `std::marker::Send` is not general enough" bug kept on popping up in user provided closures that called other async functions.
+/// Event issued by Composite Protocol Clients & Servers when connections are made or dropped
 #[derive(Debug)]
-pub enum SingleProtocolEvent<const CONFIG:  u64,
-                             LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
-                             SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-                             StateType:                                                                                   Send + Sync + Clone     + Debug + 'static = ()> {
-    /// Happens when the remote party acknowledges that a connection has been established
-    PeerConnected            { peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>> },
-    /// Happens when the remote party disconnects
-    PeerDisconnected         { peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send> },
+pub enum ConnectionEvent<StateType: Send + Sync + Clone + Debug + 'static> {
+    /// Happens when a connection is established with a remote party
+    Connected(SocketConnection<StateType>),
+    /// Happens as soon as a disconnection is detected
+    Disconnected(SocketConnection<StateType>),
     /// Happens when the local code has commanded the service (and all opened connections) to stop
     LocalServiceTermination,
 }
 
 
+/// Event issued by Composite Protocol Clients & Servers to their Reactive Processors.\
+/// The user code may use those events to maintain a list of connected parties, be notified of stop/close/quit requests, init/de-init sessions, etc.
+/// Note that the `Peer` objects received in those events may be used, at any time, to send messages to the remote party -- like "Shutting down. Goodbye".
+/// IMPLEMENTATION NOTE: GAT traits (to reduce the number of generic parameters) couldn't be used here -- even after applying this compiler bug workaround https://github.com/rust-lang/rust/issues/102211#issuecomment-1513931928
+///                      -- the "error: implementation of `std::marker::Send` is not general enough" bug kept on popping up in user provided closures that called other async functions.
+#[derive(Debug)]
+pub enum ProtocolEvent<const CONFIG:  u64,
+    LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+    SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+    StateType:                                                                                   Send + Sync + Clone     + Debug + 'static = ()> {
+    /// Happens when a remote party is first made available to the reactive processor
+    /// (caused either by a new connection or by a reactive protocol transition)
+    PeerArrived { peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>> },
+    /// Happens when the remote party leaves the reactive processor
+    /// (caused either by a dropped connection or by a reactive protocol transition)
+    PeerLeft { peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send> },
+    /// Happens when the local code has commanded the service (and all opened connections) to stop
+    LocalServiceTermination,
+}

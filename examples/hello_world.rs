@@ -89,7 +89,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
         start_unresponsive_client_processor!(CONFIG, Atomic, client, ServerMessages, ClientMessages,
             |connection_event| async {
                 match connection_event {
-                    SingleProtocolEvent::PeerConnected { peer } => {
+                    ProtocolEvent::PeerArrived { peer } => {
                         // sends a message as soon as the connection is established
                         peer.send_async(ClientMessages::Hello).await
                             .expect("The client couldn't send a message");

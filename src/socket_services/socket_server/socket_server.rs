@@ -19,7 +19,7 @@
 use crate::{
     socket_services::socket_server::common::upgrade_to_termination_tracking,
     types::{
-        SingleProtocolEvent,
+        ProtocolEvent,
         MessagingMutinyStream,
         ResponsiveMessages,
     }, socket_connection::{
@@ -234,7 +234,7 @@ for CompositeSocketServer<CONFIG, StateType> {
                                           OutputStreamItemsType:                                                                                                                                                                                                                                              Send + Sync             + Debug + 'static,
                                           ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                + Send                            + 'static,
                                           ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                 + Send                            + 'static,
-                                          ConnectionEventsCallback:       Fn(/*event: */SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
+                                          ConnectionEventsCallback:       Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
                                           ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                                          (&mut self,
@@ -271,7 +271,7 @@ for CompositeSocketServer<CONFIG, StateType> {
                                         SenderChannel:                   FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                       + Send + Sync                     + 'static,
                                         ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                                        + Send                            + 'static,
                                         ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                 + Send                            + 'static,
-                                        ConnectionEventsCallback:        Fn(/*event: */SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
+                                        ConnectionEventsCallback:        Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
                                         ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                                        (&mut self,
@@ -501,7 +501,7 @@ mod tests {
         async fn connection_events_handler<const CONFIG:  u64,
                                            LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
                                            SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
-                                          (_event: SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel>) {
+                                          (_event: ProtocolEvent<CONFIG, LocalMessages, SenderChannel>) {
         }
         fn unresponsive_processor<const CONFIG:   u64,
                                   LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
@@ -628,16 +628,16 @@ mod tests {
                                                                        ProcessorUniType,
                                                                        SenderChannelType,
                                                                        _, _, _, _ > (
-                move |connection_event: SingleProtocolEvent<{TEST_CONFIG.into()}, DummyClientAndServerMessages, SenderChannelType>| {
+                move |connection_event: ProtocolEvent<{TEST_CONFIG.into()}, DummyClientAndServerMessages, SenderChannelType>| {
                 let client_peer = Arc::clone(&client_peer_ref1);
                 async move {
                     match connection_event {
-                        SingleProtocolEvent::PeerConnected { peer } => {
+                        ProtocolEvent::PeerArrived { peer } => {
                             // register the client -- which will initiate the server termination further down in this test
                             client_peer.lock().await.replace(peer);
                         },
-                        SingleProtocolEvent::PeerDisconnected { peer: _, stream_stats: _ } => (),
-                        SingleProtocolEvent::LocalServiceTermination => {
+                        ProtocolEvent::PeerLeft { peer: _, stream_stats: _ } => (),
+                        ProtocolEvent::LocalServiceTermination => {
                             // send a message to the client (the first message, actually... that will initiate a flood of back-and-forth messages)
                             // then try to close the connection (which would only be gracefully done once all messages were sent... which may never happen).
                             let client_peer = client_peer.lock().await;
@@ -752,7 +752,7 @@ mod tests {
         let welcome_authenticated_friend_processor = spawn_unresponsive_server_processor!(TEST_CONFIG, Atomic, server, String, String,
             |connection_event| async {
                 match connection_event {
-                    SingleProtocolEvent::PeerConnected { peer } =>
+                    ProtocolEvent::PeerArrived { peer } =>
                         peer.send_async(format!("`WelcomeAuthenticatedFriend`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'AccountSettings'")).await
                             .expect("Sending failed"),
                     _ => (),
@@ -777,7 +777,7 @@ mod tests {
         let account_settings_processor = spawn_unresponsive_server_processor!(TEST_CONFIG, Atomic, server, String, String,
             |connection_event| async {
                 match connection_event {
-                    SingleProtocolEvent::PeerConnected { peer } =>
+                    ProtocolEvent::PeerArrived { peer } =>
                         peer.send_async(format!("`AccountSettings`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'GoodbyeOptions'")).await
                             .expect("Sending failed"),
                     _ => (),
@@ -802,7 +802,7 @@ mod tests {
         let goodbye_options_processor = spawn_unresponsive_server_processor!(TEST_CONFIG, Atomic, server, String, String,
             |connection_event| async {
                 match connection_event {
-                    SingleProtocolEvent::PeerConnected { peer } =>
+                    ProtocolEvent::PeerArrived { peer } =>
                         peer.send_async(format!("`GoodbyeOptions`: Now dealing with client {peer:?}. SAY SOMETHING and you will be DISCONNECTED, as our talking is over. Thank you.")).await
                             .expect("Sending failed"),
                     _ => (),
@@ -843,9 +843,9 @@ mod tests {
         start_responsive_client_processor!(TEST_CONFIG, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
-                    SingleProtocolEvent::PeerConnected { peer }           => peer.send_async(String::from("Hello! Am I in?")).await.expect("Sending failed"),
-                    SingleProtocolEvent::PeerDisconnected { peer: _, stream_stats: _ } => (),
-                    SingleProtocolEvent::LocalServiceTermination                       => (),
+                    ProtocolEvent::PeerArrived { peer }           => peer.send_async(String::from("Hello! Am I in?")).await.expect("Sending failed"),
+                    ProtocolEvent::PeerLeft { peer: _, stream_stats: _ } => (),
+                    ProtocolEvent::LocalServiceTermination                       => (),
                 }
             },
             move |_, _, _, server_messages| server_messages.map(|msg| {

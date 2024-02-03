@@ -11,7 +11,7 @@ use std::{
     fmt::Debug,
     sync::Arc,
 };
-use reactive_messaging::prelude::{SingleProtocolEvent, Peer};
+use reactive_messaging::prelude::{ProtocolEvent, Peer};
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use dashmap::DashMap;
 use futures::stream::{self, Stream, StreamExt};
@@ -47,19 +47,19 @@ impl ServerProtocolProcessor {
     pub fn pre_game_connection_events_handler<const NETWORK_CONFIG: u64,
                                               SenderChannel:        FullDuplexUniChannel<ItemType=PreGameServerMessages, DerivedItemType=PreGameServerMessages> + Send + Sync>
                                              (&self,
-                                              connection_event: SingleProtocolEvent<NETWORK_CONFIG, PreGameServerMessages, SenderChannel, ProtocolStates>) {
+                                              connection_event: ProtocolEvent<NETWORK_CONFIG, PreGameServerMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
-            SingleProtocolEvent::PeerConnected { peer } => {
+            ProtocolEvent::PeerArrived { peer } => {
                 warn!("Connected: {:?}", peer);
                 self.sessions.insert(peer.peer_id, Arc::new(Session { umpire: UnsafeCell::new(None) }));
             },
-            SingleProtocolEvent::PeerDisconnected { peer, stream_stats } => {
+            ProtocolEvent::PeerLeft { peer, stream_stats } => {
                 // TODO 2024-01-27: add another state on ConnectionEvent to differentiate a "ProcessorEnded" from a "SocketDisconnected", or else memory leaks (for the session) will occur
                 // TODO 2024-01-27: also rename "is_disconnect_message" for "is_processor_ending_message"
                 // warn!("Pre-Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
                 // self.sessions.remove(&peer.peer_id);
             },
-            SingleProtocolEvent::LocalServiceTermination => {},
+            ProtocolEvent::LocalServiceTermination => {},
         }
     }
 
@@ -106,17 +106,17 @@ impl ServerProtocolProcessor {
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
                                           SenderChannel:        FullDuplexUniChannel<ItemType=GameServerMessages, DerivedItemType=GameServerMessages> + Send + Sync>
                                          (&self,
-                                          connection_event: SingleProtocolEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>) {
+                                          connection_event: ProtocolEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
-            SingleProtocolEvent::PeerConnected { peer } => {
+            ProtocolEvent::PeerArrived { peer } => {
                 warn!("Game Started: {:?}", peer);
                 _ = peer.send(GameServerMessages::GameStarted);
             },
-            SingleProtocolEvent::PeerDisconnected { peer, stream_stats } => {
+            ProtocolEvent::PeerLeft { peer, stream_stats } => {
                 warn!("Game Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
                 self.sessions.remove(&peer.peer_id);
             }
-            SingleProtocolEvent::LocalServiceTermination => {
+            ProtocolEvent::LocalServiceTermination => {
                 info!("Ping-Pong server shutdown requested. Notifying all peers...");
             }
         }

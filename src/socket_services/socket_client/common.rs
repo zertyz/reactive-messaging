@@ -2,7 +2,7 @@
 
 
 use std::fmt::Debug;
-use crate::types::SingleProtocolEvent;
+use crate::types::ProtocolEvent;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -24,9 +24,9 @@ pub fn upgrade_to_connection_event_tracking<const CONFIG:                   u64,
 
                                            (connected_state:                          &Arc<AtomicBool>,
                                             termination_is_complete_signaler:         tokio::sync::mpsc::Sender<()>,
-                                            user_provided_connection_events_callback: impl Fn(SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
+                                            user_provided_connection_events_callback: impl Fn(ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> ConnectionEventsCallbackFuture + Send + Sync + 'static)
 
-                                           -> impl Fn(SingleProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
+                                           -> impl Fn(ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) -> BoxFuture<'static, ()> + Send + Sync + 'static {
 
     let connected_state = Arc::clone(connected_state);
     let termination_is_complete_signaler = Arc::new(Mutex::new(Some(termination_is_complete_signaler)));
@@ -47,16 +47,16 @@ pub fn upgrade_to_connection_event_tracking<const CONFIG:                   u64,
         };
         Box::pin(async move {
             match connection_event {
-                SingleProtocolEvent::PeerConnected { .. } => {
+                ProtocolEvent::PeerArrived { .. } => {
                     connected_state.store(true, Relaxed);
                     user_provided_connection_events_callback(connection_event).await;
                 },
-                SingleProtocolEvent::PeerDisconnected { .. } => {
+                ProtocolEvent::PeerLeft { .. } => {
                     connected_state.store(false, Relaxed);
                     user_provided_connection_events_callback(connection_event).await;
                     report_service_termination("Socket Client: The remote party ended the connection, but a previous termination process seems to have already taken place. May this message be considered for elimination? Ignoring the current termination request...").await;
                 },
-                SingleProtocolEvent::LocalServiceTermination => {
+                ProtocolEvent::LocalServiceTermination => {
                     user_provided_connection_events_callback(connection_event).await;
                     report_service_termination("Socket Client: a local service termination was asked, but a previous termination process seems to have already taken place. This is suggestive of a bug in your shutdown logic. Ignoring the current termination request...").await;
                 }
