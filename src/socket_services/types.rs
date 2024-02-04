@@ -15,7 +15,7 @@ use futures::Stream;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 
 
-/// Base trait for services running servers and clients
+/// Base trait for server and client services functionalities
 pub trait MessagingService<const CONFIG: u64> {
     type StateType: Send + Sync + Clone + Debug + 'static;
 
@@ -23,24 +23,24 @@ pub trait MessagingService<const CONFIG: u64> {
     /// Spawns a task dedicated to the given "unresponsive protocol processor", returning immediately.\
     /// The given `dialog_processor_builder_fn` will be called for each new connection and should return a `Stream`
     /// that will produce non-futures & non-fallible items that **won't be sent to the client**:
-    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events (possibly to manage sessions). Sign it as:
+    ///   - `protocol_events_callback`: -- a generic function (or closure) to handle "new peer", "peer left" and "service termination" events (possibly to manage sessions). Sign it as:
     ///     ```nocompile
     ///     async fn connection_events_handler<const CONFIG:  u64,
     ///                                        LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
     ///                                        SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
-    ///                                       (_event: ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) {...}
+    ///                                       (_event: ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) {...}
     ///     ```
-    ///   - `dialog_processor_builder_fn` -- the generic function (or closure) that receives the `Stream` of client messages and returns another `Stream`, which won't
-    ///                                      be sent out to clients -- called once for each connection. Sign it as:
+    ///   - `dialog_processor_builder_fn` -- the generic function (or closure) that receives the `Stream` of remote messages and returns another `Stream`, which won't
+    ///                                      be sent out to peer(s) -- called once for each connection. Sign it as:
     ///     ```nocompile
     ///     fn unresponsive_processor<const CONFIG:   u64,
     ///                               LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
     ///                               SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
     ///                               StreamItemType: Deref<Target=[your type for messages produced by the CLIENT]>>
-    ///                              (client_addr:            String,
+    ///                              (peer_addr:              String,
     ///                               connected_port:         u16,
-    ///                               peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel>>,
-    ///                               client_messages_stream: impl Stream<Item=StreamItemType>)
+    ///                               peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>,
+    ///                               remote_messages_stream: impl Stream<Item=StreamItemType>)
     ///                              -> impl Stream<Item=()> {...}
     ///     ```
     /// -- if you want the processor to produce answer messages of type `LocalMessages` to be sent to clients, see [Self::spawn_responsive_processor()]:
@@ -51,8 +51,8 @@ pub trait MessagingService<const CONFIG: u64> {
                                           OutputStreamItemsType:                                                                                                                                                                                                                                                    Send + Sync             + Debug + 'static,
                                           ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                      + Send                            + 'static,
                                           ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                       + Send                            + 'static,
-                                          ConnectionEventsCallback:       Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
-                                          ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
+                                          ConnectionEventsCallback:       Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                       + 'static,
+                                          ProcessorBuilderFn:             Fn(/*peer_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                       + 'static>
 
                                          (&mut self,
                                           connection_events_callback:  ConnectionEventsCallback,

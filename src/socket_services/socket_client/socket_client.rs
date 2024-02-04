@@ -49,22 +49,25 @@ use tokio::io::AsyncWriteExt;
 use log::{trace, warn, error, debug};
 
 
-/// Instantiates & allocates resources for a stateless [GenericCompositeSocketClient] (suitable for single protocol communications),
-/// ready to be later started by [start_unresponsive_client_processor!()] or [start_responsive_client_processor!()]
-/// -- using the default "Atomic" channels (see [new_fullsync_client!()] & [new_crossbeam_client!()] for alternatives).\
+/// Instantiates & allocates resources for a stateless [CompositeSocketClient] (suitable for single protocol communications),
+/// ready to be later started by [`start_unresponsive_client_processor!()`] or [`start_responsive_client_processor!()`].
+///
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
 ///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
 ///   - `port: u16` -- the port to listen to incoming connections;
-///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the server;
-///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this client -- should, additionally, implement the `Default` trait.
-/// See [new_composite_socket_client!()] if you want to use the "Composite Protocol Stacking" pattern.
+///
+/// Example:
+/// ```nocompile
+///     let mut client = new_socket_client!(CONFIG, "google.com", 80);
+/// ```
+/// See [`new_composite_socket_client!()`] if you want to use the "Composite Protocol Stacking" pattern.
 #[macro_export]
 macro_rules! new_socket_client {
     ($const_config:    expr,
      $ip:              expr,
      $port:            expr) => {
-        crate::new_composite_socket_client!($const_config, $ip, $port, ())
+        new_composite_socket_client!($const_config, $ip, $port, ())
     }
 }
 pub use new_socket_client;
@@ -80,8 +83,11 @@ pub use new_socket_client;
 ///   - `port: u16` -- the tcp port to connect to;
 ///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the server;
 ///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this client -- should, additionally, implement the `Default` trait.
-///   - `state_type: Default` -- The state type used by the "connection routing closure" (to be provided) to promote the "Composite Protocol Stacking" pattern
-/// See [new_socket_client!()] if you want to use the "Composite Protocol Stacking" pattern.
+///   - `state_type: Default` -- The state type used by the "connection routing closure" (to be provided) to promote the "Composite Protocol Stacking" pattern.
+///
+/// See [new_socket_client!()] if you want to use the "Composite Protocol Stacking" pattern.\
+/// Example: ```nocompile
+///     let client = new_composite_socket_client!(CONFIG, "localhost", 1234);
 #[macro_export]
 macro_rules! new_composite_socket_client {
     ($const_config:    expr,
@@ -103,18 +109,52 @@ macro_rules! spawn_unresponsive_client_processor {
      $socket_client:                expr,
      $remote_messages:              ty,
      $local_messages:               ty,
-     $connection_events_handler_fn: expr,
+     $protocol_events_handler_fn:   expr,
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
-        $socket_client.spawn_unresponsive_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>($connection_events_handler_fn, $dialog_processor_builder_fn).await
+        $socket_client.spawn_unresponsive_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>($protocol_events_handler_fn, $dialog_processor_builder_fn).await
     }}
 }
 pub use spawn_unresponsive_client_processor;
 
 
-/// Starts a client (previously instantiated by [new_socket_client!()]) that will communicate with the server using a single protocol -- as defined by the given
+/// Starts a client (previously instantiated by [`new_socket_client!()`]) that will communicate with the server using a single protocol -- as defined by the given
 /// `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s as specified in [CompositeSocketClient::spawn_unresponsive_processor()].\
-/// If you want to follow the "Composite Protocol Stacking" pattern, see the [spawn_unresponsive_composite_client_processor!()] macro instead.
+/// If you want to follow the "Composite Protocol Stacking" pattern, see the [`spawn_unresponsive_composite_client_processor!()`] macro instead.\
+/// Params:
+///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
+///   - `channel_type`: One of the following `reactive-mutiny` channels to be used for message passing. Either `Atomic`, `FullSync` or `Crossbeam`;
+///   - `socket_client`: [CompositeSocketClient] -- The object returned by the call to [`new_socket_client!()`];
+///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the server;
+///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this client -- should, additionally, implement the `Default` trait;
+///   - `connection_events_handler_fn`: async [Fn] -- The callback that receives the connection/protocol events [ProtocolEvent];
+///   - `dialog_processor_builder_fn`: [FnOnce] -- The builder for the `Stream` that consumes server messages.
+///
+/// `connection_events_handler_fn` -- a generic function (or closure) to handle "new peer", "peer left" and "service termination" events (possibly to manage sessions). Sign it as:
+/// ```nocompile
+///     async fn connection_events_handler<const CONFIG:  u64,
+///                                        LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+///                                        SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
+///                                       (_event: ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) {...}
+/// ```
+///
+/// `dialog_processor_builder_fn` -- the generic function (or closure) that receives the `Stream` of remote messages and returns another `Stream`, which won't
+///                                  be sent out to peer(s) -- called once for each connection. Sign it as:
+/// ```nocompile
+///     fn unresponsive_processor<const CONFIG:   u64,
+///                               LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+///                               SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+///                               StreamItemType: Deref<Target=[your type for messages produced by the CLIENT]>>
+///                              (peer_addr:              String,
+///                               connected_port:         u16,
+///                               peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>,
+///                               remote_messages_stream: impl Stream<Item=StreamItemType>)
+///                              -> impl Stream<Item=()> {...}
+/// ```
+///
+/// Example:
+/// ```nocompile
+///
 #[macro_export]
 macro_rules! start_unresponsive_client_processor {
     ($const_config:                 expr,
