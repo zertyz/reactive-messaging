@@ -609,6 +609,7 @@ mod tests {
         let wait_for_termination = client.termination_waiter();
         client.terminate().await.expect("Error on client Termination command");
         wait_for_termination().await.expect("Error waiting for client Termination");
+        warn!("1st DONE");
 
         // demonstrates how to build a responsive client
         ////////////////////////////////////////////////
@@ -636,6 +637,7 @@ mod tests {
         let wait_for_termination = client.termination_waiter();
         client.terminate().await.expect("Error on client Termination command");
         wait_for_termination().await.expect("Error waiting for client Termination");
+        warn!("2nd DONE");
 
         // demonstrates how to use it with closures -- also allowing for any channel in the configs
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -652,6 +654,7 @@ mod tests {
         let wait_for_termination = client.termination_waiter();
         client.terminate().await.expect("Error on client Termination command");
         wait_for_termination().await.expect("Error waiting for client Termination");
+        warn!("3rd DONE");
 
         // demonstrates how to use the concrete type
         ////////////////////////////////////////////
@@ -681,6 +684,7 @@ mod tests {
         let wait_for_termination = client.termination_waiter();
         client.terminate().await.expect("Error on client Termination command");
         wait_for_termination().await.expect("Error waiting for client Termination");
+        warn!("4th DONE");
     }
 
     /// Ensures the termination of a client works according to the specification.\

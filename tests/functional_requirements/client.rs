@@ -39,38 +39,35 @@ async fn terminates_immediately_when_done() {
     let mut client = new_socket_client!(CONFIG, "google.com", 80);
 
     // probes
-    let client_reported_server_answer_time = Arc::new(AtomicU64::new(0));
-    let client_reported_server_answer_time_ref = Arc::clone(&client_reported_server_answer_time);
-    let peer_left_notification = Arc::new(AtomicBool::new(false));
-    let peer_left_notification_ref = Arc::clone(&peer_left_notification);
-    let local_service_termination_notification = Arc::new(AtomicBool::new(false));
-    let local_service_termination_notification_ref = Arc::clone(&local_service_termination_notification);
+
+    let (probed_protocol_events_handler,
+         _last_peer_arrived_notification_micros,
+         last_peer_left_notification_micros,
+         last_local_service_termination_notification_micros) = last_micros_probed_protocol_events_handler();
+
+    let (probed_protocol_processor_builder,
+         last_server_message_micros) = last_micros_probed_protocol_processor_builder();
 
     start_unresponsive_client_processor!(CONFIG, Atomic, client, TestString, TestString,
         move |event| {
-            match event {
-                ProtocolEvent::PeerArrived { peer } => {
-                    let result = peer.send(TestString(String::from("GET / HTTP/1.0\n\n")));
-                    assert!(result.is_ok(), "Unexpected error sending: {result:?}");
-                },
-                ProtocolEvent::PeerLeft{ peer: _, stream_stats: _ } => peer_left_notification_ref.store(true, Relaxed),
-                ProtocolEvent::LocalServiceTermination => local_service_termination_notification_ref.store(true, Relaxed),
+            if let ProtocolEvent::PeerArrived { peer } = &event {
+                let result = peer.send(TestString(String::from("GET / HTTP/1.0\n\n")));
+                assert!(result.is_ok(), "Unexpected error sending: {result:?}");
             }
-            future::ready(())
+            probed_protocol_events_handler(event)
         },
-        move |_peer_addr, _port, peer, server_messages_stream| {
-            let client_reported_server_answer_time_ref = Arc::clone(&client_reported_server_answer_time_ref);
-            server_messages_stream.inspect(move |_server_message| {
-                peer.cancel_and_close();
-                client_reported_server_answer_time_ref.store(now_as_micros(), Relaxed);
-            })
+        move |remote_addr, port, peer, server_messages_stream| {
+            probed_protocol_processor_builder(server_messages_stream)
+                .inspect(move |_server_message| {
+                    peer.cancel_and_close();
+                })
         }
     );
 
     client.termination_waiter()().await.expect("Error waiting for the client to finish");
-    let termination_reported_time_diff = client_reported_server_answer_time.load(Relaxed).abs_diff(now_as_micros());
+    let termination_reported_time_diff = last_server_message_micros.load(Relaxed).abs_diff(now_as_micros());
 
-    assert!(termination_reported_time_diff <= threshold_micros,    "Client code took too long to report it has terminated its duties -- {termination_reported_time_diff}µs, above the acceptable threshold of {threshold_micros}µs");
-    assert!(peer_left_notification.load(Relaxed),                  "`ProtocolEvent::PeerLeft` event wasn't fired");
-    assert!(!local_service_termination_notification.load(Relaxed), "`ProtocolEvent::LocalServiceTermination` event was wrongly fired: no local code commanded a service termination");
+    assert!(termination_reported_time_diff <= threshold_micros,                    "Client code took too long to report it has terminated its duties -- {termination_reported_time_diff}µs, above the acceptable threshold of {threshold_micros}µs");
+    assert!(last_peer_left_notification_micros.load(Relaxed) > 0,                  "`ProtocolEvent::PeerLeft` event wasn't fired");
+    assert!(last_local_service_termination_notification_micros.load(Relaxed) <= 0, "`ProtocolEvent::LocalServiceTermination` event was wrongly fired: no local code commanded a service termination");
 }
