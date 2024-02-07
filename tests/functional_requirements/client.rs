@@ -69,14 +69,14 @@ async fn distinct_connection_and_protocol_events() {
             let handle = spawn_unresponsive_client_processor!(CONFIG, Atomic, client, TestString, TestString,
                 move |event| future::ready(match event {
                     ProtocolEvent::PeerArrived { peer } => {
-                        println!("PROTOCOL EVENT: {peer:?} arrived");
+                        println!("PROTOCOL EVENT #{protocol_id}: arrived -- {peer:?}");
                         peer.send(TestString(format!("{protocol_id}"))).expect("Couldn't send");
                     },
                     ProtocolEvent::PeerLeft{ peer, stream_stats  } => {
-                        println!("PROTOCOL EVENT: {peer:?} left");
+                        println!("PROTOCOL EVENT #{protocol_id}: left -- {peer:?}");
                     },
                     ProtocolEvent::LocalServiceTermination => {
-                        println!("PROTOCOL EVENT: Local Service Termination request reported");
+                        println!("PROTOCOL EVENT #{protocol_id}: Local Service Termination request reported");
                     },
                 }),
 //                 move |_, _, peer, server_stream| {
@@ -94,12 +94,11 @@ async fn distinct_connection_and_protocol_events() {
 //                     })
 //                 }
                 move |_, _, peer, server_stream| server_stream
+                    // .take(1)
                     .map(move |message| {
 println!("  cc Client's protocol #{protocol_id} is reacting to the server message '{message}' and will progress to the suggested protocol");
                         let suggested_protocol = message.0.parse::<usize>().expect("Couldn't parse server response");
                         assert!(peer.try_set_state(suggested_protocol), "State was locked for setting it");
-                        peer.send(TestString(message.0.clone())).expect("Couldn't send");
-                        std::thread::sleep(Duration::from_millis(1));
                         peer.cancel_and_close();
                     })
             )?;
@@ -122,9 +121,9 @@ println!("  cc Client's protocol #{protocol_id} is reacting to the server messag
         // shutdown client & server
         let wait_for_client_termination = client.termination_waiter();
         let wait_for_server_termination = server.termination_waiter();
-        wait_for_client_termination();
+        wait_for_client_termination().await.expect("Couldn't wait for the client to finish");
         server.terminate().await.expect("Couldn't terminate the server");
-        wait_for_server_termination();
+        wait_for_server_termination().await.expect("Couldn't wait for the server to finish");
 
         // assert
         todo!();
