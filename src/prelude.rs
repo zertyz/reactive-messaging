@@ -9,6 +9,7 @@ pub use crate::socket_services::{
 };
 pub use crate::socket_connection::{
     connection::*,
+    connection_provider::*,
     peer::Peer,
 };
 pub use crate::serde::{

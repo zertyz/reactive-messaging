@@ -49,15 +49,18 @@ use log::{error, trace, warn};
 
 
 /// Instantiates & allocates resources for a stateless [CompositeSocketServer] (suitable for single protocol communications),
-/// ready to be later started by [start_unresponsive_server_processor!()] or [start_responsive_server_processor!()]
-/// -- using the default "Atomic" channels (see [new_fullsync_server!()] & [new_crossbeam_server!()] for alternatives).\
+/// ready to be later started by [`start_unresponsive_server_processor!()`] or [`start_responsive_server_processor!()`].
+///
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const/compile time optimizations;
-///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
-///   - `port: u16` -- the port to listen to incoming connections;
-///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the clients;
-///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.\
-/// See [new_composite_socket_server!()] if you want to use the "Composite Protocol Stacking" pattern.
+///   - `interface_ip`: IntoString -- the interface to listen to incoming connections;
+///   - `port`: u16 -- the port to listen to incoming connections;
+
+/// Example:
+/// ```nocompile
+///     let mut server = new_socket_server!(CONFIG, "127.0.0.1", 8768);
+/// ```
+/// See [`new_composite_socket_server!()`] if you want to use the "Composite Protocol Stacking" pattern.
 #[macro_export]
 macro_rules! new_socket_server {
     ($const_config:    expr,

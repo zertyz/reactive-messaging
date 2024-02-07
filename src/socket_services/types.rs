@@ -118,16 +118,15 @@ pub trait MessagingService<const CONFIG: u64> {
             } else {
                 Some(connection_channel.clone_sender())
             };
-        // tracking the connection events is not really necessary for the "single protocol" case here, as, for this specific case, the protocol events contain that information already
+        // tracking the connection events is not really necessary for the "single protocol" case here, as, for this specific case, the "protocol events" contain that information already
         let connection_events_callback = |_: ConnectionEvent<'_, Self::StateType>| future::ready(());
         self.start_multi_protocol(Self::StateType::default(), connection_routing_closure, connection_events_callback).await
     }
 
-    /// Starts the service using the provided `connection_routing_closure` to
-    /// distribute the connections among the configured processors -- previously fed in by [Self::spawn_responsive_processor()] &
-    /// [Self::spawn_unresponsive_processor()].
+    /// Starts the service using the provided `connection_routing_closure` to distribute the connections among the configured processors
+    /// -- previously fed in by [Self::spawn_responsive_processor()] & [Self::spawn_unresponsive_processor()].
     ///
-    /// `protocol_stacking_closure := FnMut(connection: &tokio::net::TcpStream, last_state: Option<StateType>) -> connection_receiver: Option<tokio::sync::mpsc::Sender<TcpStream>>`
+    /// `protocol_stacking_closure := FnMut(socket_connection: &SocketConnection<StateType>, is_reused: bool) -> connection_receiver: Option<tokio::sync::mpsc::Sender<TcpStream>>`
     ///
     /// -- this closure "decides what to do" with available connections, routing them to the appropriate processors:
     ///   - Newly received connections will have `last_state` set to `None` -- otherwise, this will either be set by the processor
