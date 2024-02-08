@@ -39,6 +39,14 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Backlog
 
+**(n11)** 2024-02-07: Simplify our API: REMOVE `ResponsiveMessages`, as it is completely not needed!! The reason is:
+  * `is_disconnect_message()` can be done on the processor logic with `stream.take_until(|outgoing_message| outgoing_message == DISCONNECT_MESSAGE)`
+  * `is_no_answer_message()` can be done with `stream.filter(...)`\
+Also, consider the feasibility of also removing all those responsive/unresponsive methods and macros in the client and server code!
+  * Can the same function be overloaded by a different generic parameter? If so, a `where` can be added to the responsive variant requiring the
+    item type on the output stream to implement the serialization. Anyway... this is too speculative at this point and, probably, impossible to do right now.
+  * Is it possible to add a `.to_responsive_stream()` to `Stream`? If so, that would be 100% cool!!
+
 **(f9)** 2024-01-17: Security -- support SSL/TSL + Client & Server fingerprinting for text & binary transmissions (depends on **(n8)**),
 where fingerprinting is not an alleged number, but one determined by investigating the TCP/IP layers and the security metadata.
 This is to be exposed on the connection event via a non-hashed, stable string containing the following:

@@ -106,6 +106,7 @@ impl<const CONFIG:        u64,
                 let peer = Arc::new(Peer::new(sender, addr, &socket_connection));//       THIS LINE IS HANGING!!
                 let peer_ref1 = Arc::clone(&peer);
                 let peer_ref2 = Arc::clone(&peer);
+                let peer_ref3 = Arc::clone(&peer);
 
                 // issue the connection event
                 connection_events_callback(ProtocolEvent::PeerArrived {peer: peer.clone()}).await;
@@ -115,8 +116,16 @@ impl<const CONFIG:        u64,
                     .spawn_non_futures_non_fallibles_executors(1,
                                                                |in_stream| dialog_processor_builder_fn(client_ip.clone(), client_port, peer_ref1.clone(), in_stream),
                                                                move |executor| async move {
-                                                                   // issue the async disconnect event
+                                                                   let execution_duration = Duration::from_nanos(executor.execution_finish_delta_nanos() - executor.execution_start_delta_nanos());
+                                                                   let executor_name = executor.executor_name().clone();
+                                                                   // issue the async disconnect event when the `Stream` ends
                                                                    connection_events_callback_ref(ProtocolEvent::PeerLeft { peer: peer_ref2, stream_stats: executor }).await;
+                                                                   // ensure the related peer is also closed
+                                                                   let flush_timeout_millis = Self::CONST_CONFIG.flush_timeout_millis as u64;
+                                                                   let unsent_messages = peer_ref3.flush_and_close(Duration::from_millis(flush_timeout_millis)).await;
+                                                                   if unsent_messages > 0 {
+                                                                       warn!("{executor_name} (in execution for {execution_duration:?}) left with {unsent_messages} unsent messages to {peer_ref3:?}, even after flushing with a timeout of {flush_timeout_millis}ms after, probably, its `Stream` being dropped. Consider increasing `CONST_CONFIG.flush_timeout_millis` or revisiting the processor logic.");
+                                                                   }
                                                                });
                 let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>
                     (processor_sender);
@@ -175,6 +184,7 @@ impl<const CONFIG:        u64,
         let peer_ref1 = Arc::clone(&peer);
         let peer_ref2 = Arc::clone(&peer);
         let peer_ref3 = Arc::clone(&peer);
+        let peer_ref4 = Arc::clone(&peer);
 
         // issue the connection event
         connection_events_callback(ProtocolEvent::PeerArrived {peer: peer.clone()}).await;
@@ -185,8 +195,16 @@ impl<const CONFIG:        u64,
             .spawn_non_futures_non_fallibles_executors(1,
                                                     |in_stream| dialog_processor_builder_fn(addr.ip().to_string(), addr.port(), peer_ref1.clone(), in_stream),
                                                     move |executor| async move {
-                                                        // issue the async disconnect event
+                                                        let execution_duration = Duration::from_nanos(executor.execution_finish_delta_nanos() - executor.execution_start_delta_nanos());
+                                                        let executor_name = executor.executor_name().clone();
+                                                        // issue the async disconnect event when the `Stream` ends
                                                         connection_events_callback_ref1(ProtocolEvent::PeerLeft { peer: peer_ref2, stream_stats: executor }).await;
+                                                        // ensure the related peer is also closed
+                                                        let flush_timeout_millis = Self::CONST_CONFIG.flush_timeout_millis as u64;
+                                                        let unsent_messages = peer_ref3.flush_and_close(Duration::from_millis(flush_timeout_millis)).await;
+                                                        if unsent_messages > 0 {
+                                                            warn!("{executor_name} (in execution for {execution_duration:?}) left with {unsent_messages} unsent messages to {peer_ref3:?}, even after flushing with a timeout of {flush_timeout_millis}ms after, probably, its `Stream` being dropped. Consider increasing `CONST_CONFIG.flush_timeout_millis` or revisiting the processor logic.");
+                                                        }
                                                     });
         let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>
                                                                                                (processor_sender);
@@ -201,7 +219,7 @@ impl<const CONFIG:        u64,
             // issue the shutdown event
             connection_events_callback_ref2(ProtocolEvent::LocalServiceTermination).await;
             // close the connection
-            peer_ref3.flush_and_close(Duration::from_millis(100)).await;
+            peer_ref4.flush_and_close(Duration::from_millis(100)).await;
         });
 
         // the processor
@@ -333,7 +351,7 @@ impl<const CONFIG:        u64,
             );
 
         }
-        _ = processor_sender.close(Duration::from_millis(Self::CONST_CONFIG.graceful_close_timeout_millis as u64)).await;
+        _ = processor_sender.close(Duration::from_millis(Self::CONST_CONFIG.flush_timeout_millis as u64)).await;
         peer.cancel_and_close();
         socket_connection.connection_mut().flush().await.map_err(|err| format!("error flushing the textual socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
         peer.take_state().await

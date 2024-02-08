@@ -93,13 +93,13 @@ async fn distinct_connection_and_protocol_events() {
 //                             }
 //                     })
 //                 }
-                move |_, _, peer, server_stream| server_stream
-                    // .take(1)
+                move |_, _, peer, mut server_stream| server_stream
+                    .take(1)
                     .map(move |message| {
 println!("  cc Client's protocol #{protocol_id} is reacting to the server message '{message}' and will progress to the suggested protocol");
                         let suggested_protocol = message.0.parse::<usize>().expect("Couldn't parse server response");
                         assert!(peer.try_set_state(suggested_protocol), "State was locked for setting it");
-                        peer.cancel_and_close();
+                        //peer.cancel_and_close();
                     })
             )?;
             handles.push(handle);
