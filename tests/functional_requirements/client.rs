@@ -3,6 +3,8 @@
 use std::error::Error;
 use std::future;
 use std::io::BufWriter;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize};
 use crate::utils::*;
 use reactive_messaging::prelude::*;
 use std::sync::atomic::Ordering::Relaxed;
@@ -59,62 +61,98 @@ async fn distinct_connection_and_protocol_events() {
 
     const PORT: u16 = 8768;
 
-    composite_protocol_client(26).await.expect("Couldn't call `composite_protocol_client(26)`");
+    composite_protocol_client(26).await.expect("Couldn't perform `composite_protocol_client(26)`");
 
     async fn composite_protocol_client(n_protocols: usize) -> Result<(), Box<dyn Error + Send + Sync>> {
+
+        /// When each Connection Event happens, the corresponding value will be `true`
+        struct ClientConnectionDatum {
+            connected: AtomicBool,
+            disconnected: AtomicBool,
+            termination: AtomicBool,
+        }
+
+        /// When each Protocol Event happens, the corresponding value will be incremented by `protocol_id`
+        struct ClientProtocolDatum {
+            arrived: AtomicUsize,
+            left: AtomicUsize,
+            termination: AtomicUsize,
+            message: AtomicUsize,
+        }
+
         let mut server = multi_protocol_server(PORT, None).await?;
         let mut client = new_composite_socket_client!(CONFIG, "127.0.0.1", PORT, usize);
         let mut handles = vec![];
+        let mut client_protocol_data = vec![];
+        let routing_count = Arc::new(AtomicUsize::new(0));
+        let routing_count_ref = Arc::clone(&routing_count);
+        let client_connection_datum = Arc::new(ClientConnectionDatum {
+            connected: AtomicBool::new(false),
+            disconnected: AtomicBool::new(false),
+            termination: AtomicBool::new(false),
+        });
+        let client_connection_datum_ref = Arc::clone(&client_connection_datum);
+
         for protocol_id in 0..n_protocols {
+            let client_protocol_datum_ref1 = Arc::new(ClientProtocolDatum {
+                arrived: AtomicUsize::new(0),
+                left: AtomicUsize::new(0),
+                termination: AtomicUsize::new(0),
+                message: AtomicUsize::new(0),
+            });
+            let client_protocol_datum_ref2 = Arc::clone(&client_protocol_datum_ref1);
+            client_protocol_data.push(Arc::clone(&client_protocol_datum_ref1));
             let handle = spawn_unresponsive_client_processor!(CONFIG, Atomic, client, TestString, TestString,
                 move |event| future::ready(match event {
                     ProtocolEvent::PeerArrived { peer } => {
+                        client_protocol_datum_ref1.arrived.fetch_add(protocol_id+1, Relaxed);
                         println!("PROTOCOL EVENT #{protocol_id}: arrived -- {peer:?}");
                         peer.send(TestString(format!("{protocol_id}"))).expect("Couldn't send");
                     },
                     ProtocolEvent::PeerLeft{ peer, stream_stats  } => {
+                        client_protocol_datum_ref1.left.fetch_add(protocol_id+1, Relaxed);
                         println!("PROTOCOL EVENT #{protocol_id}: left -- {peer:?}");
                     },
                     ProtocolEvent::LocalServiceTermination => {
+                        client_protocol_datum_ref1.termination.fetch_add(protocol_id+1, Relaxed);
                         println!("PROTOCOL EVENT #{protocol_id}: Local Service Termination request reported");
                     },
                 }),
-//                 move |_, _, peer, server_stream| {
-//                     server_stream
-//                         .then(move |message| {
-//                             let protocol_id = protocol_id.clone();
-//                             let peer = peer.clone();
-//                             async move {
-// println!("  cc Client's protocol #{protocol_id} is reacting to the server message '{message}' and will progress to the suggested protocol");
-//                                 let suggested_protocol = message.0.parse::<usize>().expect("Couldn't parse server response");
-//                                 peer.set_state(suggested_protocol).await;
-//                                 peer.send(TestString(message.0.clone())).expect("Couldn't send");
-//                                 assert_eq!(peer.flush_and_close(Duration::from_secs(1)).await, 0, "Couldn't flush peer for protocol #{protocol_id} within 1 sec");
-//                             }
-//                     })
-//                 }
-                move |_, _, peer, mut server_stream| server_stream
-                    .take(1)
-                    .map(move |message| {
-println!("  cc Client's protocol #{protocol_id} is reacting to the server message '{message}' and will progress to the suggested protocol");
-                        let suggested_protocol = message.0.parse::<usize>().expect("Couldn't parse server response");
-                        assert!(peer.try_set_state(suggested_protocol), "State was locked for setting it");
-                        //peer.cancel_and_close();
-                    })
+                move |_, _, peer, mut server_stream| {
+                    let client_protocol_datum_ref2 = Arc::clone(&client_protocol_datum_ref2);
+                    server_stream
+                        .take(1)
+                        .map(move |message| {
+                            client_protocol_datum_ref2.message.fetch_add(protocol_id+1, Relaxed);
+                            println!("  cc Client's protocol #{protocol_id} is reacting to the server message '{message}' and will progress to the suggested protocol");
+                            let suggested_protocol = message.0.parse::<usize>().expect("Couldn't parse server response");
+                            assert!(peer.try_set_state(suggested_protocol), "State was locked for setting it");
+                        })
+                    }
             )?;
             handles.push(handle);
         }
         client.start_multi_protocol(0,
                                     move |socket_connection, is_reused| {
+                                        routing_count_ref.fetch_add(1, Relaxed);
                                         let state = socket_connection.state();
                                         let handle = handles.get(*state).map(ConnectionChannel::clone_sender);
                                         println!("  .. <<routing closure>>: asked to route Connection for protocol #{state}. Is it present? {}", handle.is_some());
                                         handle
                                     },
-                                    |event| future::ready(match event {
-                                        ConnectionEvent::Connected(socket_connection) => println!("CONNECTION EVENT: Client is connected!"),
-                                        ConnectionEvent::Disconnected(socket_connection) => println!("CONNECTION EVENT: Client is disconnected!"),
-                                        ConnectionEvent::LocalServiceTermination => println!("CONNECTION EVENT: Local Service Termination request reported"),
+                                    move |event| future::ready(match event {
+                                        ConnectionEvent::Connected(socket_connection) => {
+                                            client_connection_datum_ref.connected.store(true, Relaxed);
+                                            println!("CONNECTION EVENT: Client is connected!");
+                                        },
+                                        ConnectionEvent::Disconnected(socket_connection) => {
+                                            client_connection_datum_ref.disconnected.store(true, Relaxed);
+                                            println!("CONNECTION EVENT: Client is disconnected!");
+                                        },
+                                        ConnectionEvent::LocalServiceTermination => {
+                                            client_connection_datum_ref.termination.store(true, Relaxed);
+                                            println!("CONNECTION EVENT: Local Service Termination request reported");
+                                        },
                                     })).await
             .expect("Couldn't start the composite client");
 
@@ -125,8 +163,18 @@ println!("  cc Client's protocol #{protocol_id} is reacting to the server messag
         server.terminate().await.expect("Couldn't terminate the server");
         wait_for_server_termination().await.expect("Couldn't wait for the server to finish");
 
-        // assert
-        todo!();
+        // connection routing assertions
+        assert_eq!(routing_count.load(Relaxed), n_protocols+1, "An incorrect number of routing took place -- `n_protocols+1` due to the first one");
+        // Connection event assertions
+        assert!(client_connection_datum.connected.load(Relaxed), "`ConnectionEvent::Connected` didn't happen");
+        assert!(client_connection_datum.disconnected.load(Relaxed), "`ConnectionEvent::Disconnected` didn't happen");
+        assert!(!client_connection_datum.termination.load(Relaxed), "`ConnectionEvent::LocalServiceTermination` shouldn't have happened");
+        for protocol_id in 0..n_protocols {
+            assert_eq!(client_protocol_data[protocol_id].arrived.load(Relaxed),     protocol_id+1, "protocol #{protocol_id}: `ProtocolEvent::PeerArrived` didn't happen as expected");
+            assert_eq!(client_protocol_data[protocol_id].left.load(Relaxed),        protocol_id+1, "protocol #{protocol_id}: `ProtocolEvent::PeerLeft` didn't happen as expected");
+            assert_eq!(client_protocol_data[protocol_id].termination.load(Relaxed), 0,             "protocol #{protocol_id}: `ProtocolEvent::LocalServiceTermination` did happen -- and this was unexpected");
+            assert_eq!(client_protocol_data[protocol_id].message.load(Relaxed),     protocol_id+1, "protocol #{protocol_id}: a message wasn't received (as expected)");
+        }
 
         Ok(())
     }

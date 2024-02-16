@@ -17,24 +17,6 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Being-Done
 
-**(r10)** 2024-01-28: TECH DEBT followup for **(f6)**: Remodel "events", improve event firing tests, refactor duplicated code, simplify the API
-1) Remodel `ConnectionEvents`: with the introduction of the Composite Protocols (that allows using several processors), several event handlers
-   are also allowed, making events such as "PeerDisconnected" not belonging to any of such handlers (as it is an event of a connection, and not
-   a protocol's). To solve: There is a need for a distinction between `ConnectionEvent` and `ProtocolEvent` (for instance, for situations like
-   when the processor ends but the connection doesn't -- and vice-versa). Remember this distinction is only needed for the Composite Protocol
-   use case; for the single protocol use case, a third model may be created: `SingleProtocolEvent`.
-2) There were issues reported regarding the disconnection events not being fired for certain cases. This is alarming, as it causes memory
-   leaks on the user application (e.g, a server when handling multiple connections that create a session on connection and drop them on disconnection).
-   TO DO: a) write elaborated integration tests (on api.rs or functional_requisites.rs) for the most varying scenarios for the client and server
-          -- dropped by the other party, timing out, etc.;
-          b) Write stress tests
-
-**(n8)** 2024-01-04: Introduce binary messages:
-1) Use RKYV for serialization (the fastest & more flexible among current options, after a ChatGPT & bard research)
-2) Formats will be textual (with \n separating messages) or binary (with a u16 payload size prefixing each message)
-3) Opting between binary or textual should be done easily via ConstConfig -- provided the protocol types implement the appropriate traits
-4) Build benchmarks comparing RON vs RKYV
-
 
 
 # Backlog
@@ -46,6 +28,8 @@ Also, consider the feasibility of also removing all those responsive/unresponsiv
   * Can the same function be overloaded by a different generic parameter? If so, a `where` can be added to the responsive variant requiring the
     item type on the output stream to implement the serialization. Anyway... this is too speculative at this point and, probably, impossible to do right now.
   * Is it possible to add a `.to_responsive_stream()` to `Stream`? If so, that would be 100% cool!!
+  * The proposed solution above has the benefit of restoring the possibility of "sending a disconnect message", not allowed after removing `ResponsiveMessages`:
+    for this, simply call `.map_to_responsive_stream(|item| (item.to_send, item.to_yield) )` or anything with a better name.
 
 **(f9)** 2024-01-17: Security -- support SSL/TSL + Client & Server fingerprinting for text & binary transmissions (depends on **(n8)**),
 where fingerprinting is not an alleged number, but one determined by investigating the TCP/IP layers and the security metadata.
@@ -62,6 +46,12 @@ This is to be exposed on the connection event via a non-hashed, stable string co
    - Source IP address.
    - TCP Timestamps.
    - Window size.
+
+**(n8)** 2024-01-04: Introduce binary messages:
+1) Use RKYV for serialization (the fastest & more flexible among current options, after a ChatGPT & bard research)
+2) Formats will be textual (with \n separating messages) or binary (with a u16 payload size prefixing each message)
+3) Opting between binary or textual should be done easily via ConstConfig -- provided the protocol types implement the appropriate traits
+4) Build benchmarks comparing RON vs RKYV
 
 **(f5)** 2023-09-04: Introduce "reconnection" on the client. For this:
   - a new pub method `reconnect()` is to be built: the old connection will be shutdown (if not already) and another one will be created
@@ -83,6 +73,18 @@ This is to be exposed on the connection event via a non-hashed, stable string co
 
 
 # Done
+
+**(r10)** 2024-01-28: TECH DEBT followup for **(f6)**: Remodel "events", improve event firing tests, refactor duplicated code, simplify the API
+1) Remodel `ConnectionEvents`: with the introduction of the Composite Protocols (that allows using several processors), several event handlers
+   are also allowed, making events such as "PeerDisconnected" not belonging to any of such handlers (as it is an event of a connection, and not
+   a protocol's). To solve: There is a need for a distinction between `ConnectionEvent` and `ProtocolEvent` (for instance, for situations like
+   when the processor ends but the connection doesn't -- and vice-versa). Remember this distinction is only needed for the Composite Protocol
+   use case; for the single protocol use case, a third model may be created: `SingleProtocolEvent`.
+2) There were issues reported regarding the disconnection events not being fired for certain cases. This is alarming, as it causes memory
+   leaks on the user application (e.g, a server when handling multiple connections that create a session on connection and drop them on disconnection).
+   TO DO: a) write elaborated integration tests (on api.rs or functional_requirements.rs) for the most varying scenarios for the client and server
+          -- dropped by the other party, timing out, etc.;
+          b) Write stress tests
 
 **(f6)** 2023-11-01: Support Composite Protocol Stacking -- Complex authenticated protocols as well as WebSockets would benefit from this feature, as the whole composite stack could be modeled by different `enums`, avoiding unrepresentable states:
 1) The `socket_connection_handler.rs` main logic should be upgraded to:
