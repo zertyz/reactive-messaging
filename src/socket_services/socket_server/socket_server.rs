@@ -346,7 +346,9 @@ for CompositeSocketServer<CONFIG, StateType> {
                     // process connections returned by the processors (after they ended processing them)
                     returned_connection_and_state = returned_connections_source.recv() => {
                         let Some(returned_socket_connection) = returned_connection_and_state else { break };
-                        let sender = connection_routing_closure(&returned_socket_connection, true);
+                        let sender = (!returned_socket_connection.closed())
+                            .then_some(())
+                            .and_then(|_| connection_routing_closure(&returned_socket_connection, true));
                         (returned_socket_connection, sender)
                     },
                 };

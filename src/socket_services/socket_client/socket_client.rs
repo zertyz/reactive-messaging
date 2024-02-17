@@ -363,9 +363,9 @@ for CompositeSocketClient<CONFIG, StateType> {
                 let client_termination_receiver = client_termination_signaler.expect("BUG! client_termination_signaler is NONE").subscribe();
                 let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
                 let result = socket_communications_handler.client_for_unresponsive_text_protocol(connection,
-                                                                                                                  client_termination_receiver,
-                                                                                                                  connection_events_callback,
-                                                                                                                  dialog_processor_builder_fn).await
+                                                                                                                                    client_termination_receiver,
+                                                                                                                                    connection_events_callback,
+                                                                                                                                    dialog_processor_builder_fn).await
                     .map_err(|err| format!("Error while executing the dialog processor: {err}"));
                 match result {
                     Ok(socket_connection) => {
@@ -482,7 +482,9 @@ for CompositeSocketClient<CONFIG, StateType> {
                     // process connections returned by the processors (after they ended processing them)
                     None => {
                         let Some(returned_socket_connection) = returned_connection_source.recv().await else { break };
-                        let sender = connection_routing_closure(&returned_socket_connection, true);
+                        let sender = (!returned_socket_connection.closed())
+                            .then_some(())
+                            .and_then(|_| connection_routing_closure(&returned_socket_connection, true));
                         (returned_socket_connection, sender)
                     },
                 };
@@ -502,7 +504,7 @@ for CompositeSocketClient<CONFIG, StateType> {
                             debug!("`reactive-messaging::CompositeSocketClient`: ERROR in the client connected to the server @ {ip}:{port} while shutting down the connection (after the processors ended): {err}");
                         }
                         break
-                    }
+                    },
                 }
             }
             // loop ended

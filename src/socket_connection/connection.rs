@@ -18,6 +18,8 @@ pub type ConnectionId = u32;
 pub struct SocketConnection<StateType: Debug> {
     /// The connection object
     connection: TcpStream,
+    /// `true` if a "connection is closed" is reported via [Self::set_closed()]
+    closed: bool,
     /// A unique ID for the connection, facilitating protocol processors that need to handle sessions
     id: ConnectionId,
     /// Any state that the protocol processors might attribute to the connection, when using the
@@ -30,8 +32,9 @@ impl<StateType: Debug> SocketConnection<StateType> {
     pub fn new(connection: TcpStream, initial_state: StateType) -> Self {
         Self {
             connection,
-            id:    CONNECTION_COUNTER.fetch_add(1, Relaxed),
-            state: initial_state,
+            closed: false,
+            id:     CONNECTION_COUNTER.fetch_add(1, Relaxed),
+            state:  initial_state,
         }
     }
 
@@ -53,6 +56,14 @@ impl<StateType: Debug> SocketConnection<StateType> {
 
     pub fn set_state(&mut self, new_state: StateType) {
         self.state = new_state;
+    }
+
+    pub fn closed(&self) -> bool {
+        self.closed
+    }
+
+    pub fn report_closed(&mut self) {
+        self.closed = true;
     }
 
 }

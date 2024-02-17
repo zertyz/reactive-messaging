@@ -219,7 +219,7 @@ impl<const CONFIG:        u64,
             // issue the shutdown event
             connection_events_callback_ref2(ProtocolEvent::LocalServiceTermination).await;
             // close the connection
-            peer_ref4.flush_and_close(Duration::from_millis(100)).await;
+            peer_ref4.flush_and_close(Duration::from_millis(Self::CONST_CONFIG.flush_timeout_millis as u64)).await;
         });
 
         // the processor
@@ -272,6 +272,7 @@ impl<const CONFIG:        u64,
                             serialization_buffer.push(b'\n');
                             if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
                                 warn!("`dialog_loop_for_textual_protocol`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
+                                socket_connection.report_closed();
                                 break 'connection
                             }
                         },
@@ -293,17 +294,19 @@ impl<const CONFIG:        u64,
                                     eol_pos += next_line_index+this_line_search_start;
                                     let line_bytes = &read_buffer[next_line_index..eol_pos];
                                     match RemoteMessagesType::deserialize(line_bytes) {
-                                        Ok(client_message) => {
-                                            if let Err((abort_processor, error_msg_processor)) = processor_sender.send(client_message).await {
+                                        Ok(remote_message) => {
+                                            if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
                                                 // log & send the error message to the remote peer
                                                 error!("`dialog_loop_for_textual_protocol`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
                                                 if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
                                                         warn!("reactive-messaging: {error_msg_sender} -- Slow reader {:?}", peer);
                                                     if abort_sender {
+                                                        socket_connection.report_closed();
                                                         break 'connection
                                                     }
                                                 }
                                                 if abort_processor {
+                                                    socket_connection.report_closed();
                                                     break 'connection
                                                 }
                                             }
@@ -318,6 +321,7 @@ impl<const CONFIG:        u64,
                                             if let Err((abort, error_msg)) = peer.send_async(outgoing_error).await {
                                                 if abort {
                                                     warn!("`dialog_loop_for_textual_protocol`:  {error_msg} -- Slow reader {:?}", peer);
+                                                    socket_connection.report_closed();
                                                     break 'connection
                                                 }
                                             }
@@ -338,12 +342,14 @@ impl<const CONFIG:        u64,
                             }
                         },
                         Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
-                            debug!("`dialog_loop_for_textual_protocol`: PROBLEM with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                            trace!("`dialog_loop_for_textual_protocol`: EOF with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                            socket_connection.report_closed();
                             break 'connection
                         },
                         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
                         Err(err) => {
                             error!("`dialog_loop_for_textual_protocol`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
+                            socket_connection.report_closed();
                             break 'connection
                         },
                     }
