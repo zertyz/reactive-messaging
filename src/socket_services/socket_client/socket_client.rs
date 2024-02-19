@@ -21,7 +21,6 @@ use crate::{
     types::{
         ProtocolEvent,
         MessagingMutinyStream,
-        ResponsiveMessages,
     },
     socket_connection::{
         peer::Peer,
@@ -142,7 +141,7 @@ pub use new_composite_socket_client;
 ///
 /// For examples, please consult the unit tests at the end of this module.
 #[macro_export]
-macro_rules! spawn_unresponsive_client_processor {
+macro_rules! spawn_client_processor {
     ($const_config:                 expr,
      $channel_type:                 tt,
      $socket_client:                expr,
@@ -151,10 +150,10 @@ macro_rules! spawn_unresponsive_client_processor {
      $protocol_events_handler_fn:   expr,
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
-        $socket_client.spawn_unresponsive_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>($protocol_events_handler_fn, $dialog_processor_builder_fn).await
+        $socket_client.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>($protocol_events_handler_fn, $dialog_processor_builder_fn).await
     }}
 }
-pub use spawn_unresponsive_client_processor;
+pub use spawn_client_processor;
 
 
 /// Starts a client (previously instantiated by [`new_socket_client!()`]) that will communicate with the server using a single protocol -- as defined by the given
@@ -195,7 +194,7 @@ pub use spawn_unresponsive_client_processor;
 ///
 /// For examples, please consult the unit tests at the end of this module.
 #[macro_export]
-macro_rules! start_unresponsive_client_processor {
+macro_rules! start_client_processor {
     ($const_config:                 expr,
      $channel_type:                 tt,
      $socket_client:                expr,
@@ -203,52 +202,13 @@ macro_rules! start_unresponsive_client_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        match spawn_unresponsive_client_processor!($const_config, $channel_type, $socket_client, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+        match spawn_client_processor!($const_config, $channel_type, $socket_client, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
             Ok(connection_channel) => $socket_client.start_single_protocol(connection_channel).await,
             Err(err) => Err(err),
         }
     }}
 }
-pub use start_unresponsive_client_processor;
-
-
-/// See [CompositeSocketClient::spawn_responsive_processor()].
-#[macro_export]
-macro_rules! spawn_responsive_client_processor {
-    ($const_config:                 expr,
-     $channel_type:                 tt,
-     $socket_client:                expr,
-     $remote_messages:              ty,
-     $local_messages:               ty,
-     $connection_events_handler_fn: expr,
-     $dialog_processor_builder_fn:  expr) => {{
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
-        $socket_client.spawn_responsive_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _>($connection_events_handler_fn, $dialog_processor_builder_fn).await
-    }}
-}
-pub use spawn_responsive_client_processor;
-
-
-/// Starts a client (previously instantiated by [new_socket_client!()]) that will communicate with the server using a single protocol -- as defined by the given
-/// `dialog_processor_builder_fn`, a builder of "responsive" `Stream`s as specified in [GenericCompositeSocketClient::spawn_responsive_processor()].\
-/// If you want to follow the "Composite Protocol Stacking" pattern, see the [spawn_responsive_composite_client_processor!()] macro instead.
-#[macro_export]
-macro_rules! start_responsive_client_processor {
-    ($const_config:                 expr,
-     $channel_type:                 tt,
-     $socket_client:                expr,
-     $remote_messages:              ty,
-     $local_messages:               ty,
-     $connection_events_handler_fn: expr,
-     $dialog_processor_builder_fn:  expr) => {{
-        match spawn_responsive_client_processor!($const_config, $channel_type, $socket_client, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
-            Ok(connection_channel) => $socket_client.start_single_protocol(connection_channel).await,
-            Err(err) => Err(err),
-        }
-
-    }}
-}
-pub use start_responsive_client_processor;
+pub use start_client_processor;
 
 
 /// Real definition & implementation for our Socket Client, full of generic parameters.\
@@ -328,21 +288,21 @@ for CompositeSocketClient<CONFIG, StateType> {
 
     // TODO 2024-01-03: make this able to process the same connection as many times as needed, for symmetry with the server -- practically, allowing connection reuse
     #[inline(always)]
-    async fn spawn_unresponsive_processor<RemoteMessages:                 ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                     + Send + Sync + PartialEq + Debug + 'static,
-                                          LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                        + Send + Sync + PartialEq + Debug + 'static,
-                                          ProcessorUniType:               GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                               + Send + Sync                     + 'static,
-                                          SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                       + Send + Sync                     + 'static,
-                                          OutputStreamItemsType:                                                                                                                                                                                                                                              Send + Sync             + Debug + 'static,
-                                          ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                + Send                            + 'static,
-                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                 + Send                            + 'static,
-                                          ConnectionEventsCallback:       Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
-                                          ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
+    async fn spawn_processor<RemoteMessages:                 ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                     + Send + Sync + PartialEq + Debug + 'static,
+                             LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                        + Send + Sync + PartialEq + Debug + 'static,
+                             ProcessorUniType:               GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                               + Send + Sync                     + 'static,
+                             SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                       + Send + Sync                     + 'static,
+                             OutputStreamItemsType:                                                                                                                                                                                                                                              Send + Sync             + Debug + 'static,
+                             ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                + Send                            + 'static,
+                             ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                 + Send                            + 'static,
+                             ConnectionEventsCallback:       Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
+                             ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
-                                         (&mut self,
-                                          connection_events_callback:  ConnectionEventsCallback,
-                                          dialog_processor_builder_fn: ProcessorBuilderFn)
+                            (&mut self,
+                             connection_events_callback:  ConnectionEventsCallback,
+                             dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                         -> Result<ConnectionChannel<StateType>, Box<dyn Error + Sync + Send>> {
+                            -> Result<ConnectionChannel<StateType>, Box<dyn Error + Sync + Send>> {
 
         let ip = self.ip.clone();
         let port = self.port;
@@ -362,10 +322,10 @@ for CompositeSocketClient<CONFIG, StateType> {
             /*while*/ if let Some(connection) = connection_source.recv().await {
                 let client_termination_receiver = client_termination_signaler.expect("BUG! client_termination_signaler is NONE").subscribe();
                 let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
-                let result = socket_communications_handler.client_for_unresponsive_text_protocol(connection,
-                                                                                                                                    client_termination_receiver,
-                                                                                                                                    connection_events_callback,
-                                                                                                                                    dialog_processor_builder_fn).await
+                let result = socket_communications_handler.client_for_text_protocol(connection,
+                                                                                                                       client_termination_receiver,
+                                                                                                                       connection_events_callback,
+                                                                                                                       dialog_processor_builder_fn).await
                     .map_err(|err| format!("Error while executing the dialog processor: {err}"));
                 match result {
                     Ok(socket_connection) => {
@@ -375,67 +335,6 @@ for CompositeSocketClient<CONFIG, StateType> {
                     }
                     Err(err) => {
                         error!("`reactive-messaging::CompositeGenericSocketClient`: ERROR in client (unresponsive & textual) @ {ip}:{port}: {err}");
-                    }
-                }
-            }
-        });
-        self.spawned_processors_count += 1;
-        Ok(connection_provider)
-    }
-
-    // TODO 2024-01-03: make this able to process the same connection as many times as needed, for symmetry with the server -- practically, allowing connection reuse
-    async fn spawn_responsive_processor<RemoteMessages:                  ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                     + Send + Sync + PartialEq + Debug + 'static,
-                                        LocalMessages:                   ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                        + Send + Sync + PartialEq + Debug + 'static,
-                                        ProcessorUniType:                GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                               + Send + Sync                     + 'static,
-                                        SenderChannel:                   FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                       + Send + Sync                     + 'static,
-                                        ServerStreamType:                Stream<Item=LocalMessages>                                                                                                                                                                                                        + Send                            + 'static,
-                                        ConnectionEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                 + Send                            + 'static,
-                                        ConnectionEventsCallback:        Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
-                                        ProcessorBuilderFn:              Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
-
-                                       (&mut self,
-                                        connection_events_callback:  ConnectionEventsCallback,
-                                        dialog_processor_builder_fn: ProcessorBuilderFn)
-
-                                       -> Result<ConnectionChannel<StateType>, Box<dyn Error + Sync + Send>>
-
-                                       where LocalMessages: ResponsiveMessages<LocalMessages> {
-
-        let ip = self.ip.clone();
-        let port = self.port;
-
-        let returned_connection_sink = self.returned_connection_sink.clone();
-        let local_termination_is_complete_sender = self.local_termination_is_complete_sender.clone();
-        let client_termination_signaler = self.client_termination_signaler.as_ref().expect("BUG! client_termination_signaler is NONE").clone();
-
-        let connection_events_callback = upgrade_to_connection_event_tracking(&self.connected, local_termination_is_complete_sender, connection_events_callback);
-
-        // the source of connections for this processor to start working on
-        let mut connection_provider = ConnectionChannel::new();
-        let mut connection_source = connection_provider.receiver()
-            .ok_or_else(|| String::from("couldn't move the Connection Receiver out of the Connection Provider"))?;
-
-
-
-
-        tokio::spawn(async move {
-            /*while*/ if let Some(connection) = connection_source.recv().await {
-                let client_termination_receiver = client_termination_signaler.subscribe();
-
-                let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
-                let result = socket_communications_handler.client_for_responsive_text_protocol(connection,
-                                                                                                               client_termination_receiver,
-                                                                                                               connection_events_callback,
-                                                                                                               dialog_processor_builder_fn).await
-                    .map_err(|err| format!("Error while executing the dialog processor: {err}"));
-                match result {
-                    Ok(socket_connection) => {
-                        if let Err(err) = returned_connection_sink.send(socket_connection).await {
-                            warn!("`reactive-messaging::CompositeGenericSocketClient`: ERROR returning the connection (after the responsive & textual processor ended) @ {ip}:{port}: {err}");
-                        }
-                    }
-                    Err(err) => {
-                        error!("`reactive-messaging::CompositeGenericSocketClient`: ERROR in client (responsive & textual) @ {ip}:{port}: {err}");
                     }
                 }
             }
@@ -560,7 +459,7 @@ mod tests {
     use std::time::Duration;
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
-    use crate::{new_socket_server, start_responsive_server_processor, start_unresponsive_server_processor};
+    use crate::{new_socket_server, start_server_processor};
     use crate::serde::{ron_deserializer, ron_serializer};
 
 
@@ -625,7 +524,7 @@ mod tests {
             TEST_CONFIG,
             REMOTE_SERVER,
             443);
-        start_unresponsive_client_processor!(TEST_CONFIG, Atomic, client,
+        start_client_processor!(TEST_CONFIG, Atomic, client,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             connection_events_handler,
@@ -659,7 +558,7 @@ mod tests {
             TEST_CONFIG,
             REMOTE_SERVER,
             443);
-        start_responsive_client_processor!(TEST_CONFIG, Atomic, client,
+        start_client_processor!(TEST_CONFIG, Atomic, client,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             connection_events_handler,
@@ -686,7 +585,7 @@ mod tests {
             TEST_CONFIG,
             REMOTE_SERVER,
             443);
-        start_unresponsive_client_processor!(TEST_CONFIG, Atomic, client,
+        start_client_processor!(TEST_CONFIG, Atomic, client,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             |_| future::ready(()),
@@ -713,11 +612,11 @@ mod tests {
                                                                       :: new(REMOTE_SERVER,443);
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.receiver_buffer as usize}, 1, {CUSTOM_CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.sender_buffer as usize}, 1>;
-        let connection_channel = client.spawn_unresponsive_processor::<DummyClientAndServerMessages,
-                                                                                       DummyClientAndServerMessages,
-                                                                                       ProcessorUniType,
-                                                                                       SenderChannelType,
-                                                                                       _, _, _, _, _ > (
+        let connection_channel = client.spawn_processor::<DummyClientAndServerMessages,
+                                                                             DummyClientAndServerMessages,
+                                                                             ProcessorUniType,
+                                                                             SenderChannelType,
+                                                                             _, _, _, _, _ > (
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await.expect("Error spawning a protocol processor");
@@ -741,7 +640,7 @@ mod tests {
         let connected_to_client = Arc::new(AtomicBool::new(false));
         let connected_to_client_ref = Arc::clone(&connected_to_client);
         let mut server = new_socket_server!(TEST_CONFIG, IP, PORT);
-        start_unresponsive_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Atomic, server, String, String,
             move |event| {
                 let connected_to_client_ref = Arc::clone(&connected_to_client_ref);
                 async move {
@@ -757,7 +656,7 @@ mod tests {
             |_, _, _, stream| stream
         ).expect("Error starting the server");
         let mut client = new_socket_client!(TEST_CONFIG, IP, PORT);
-        start_unresponsive_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        start_client_processor!(TEST_CONFIG, Atomic, client, String, String,
             |_| future::ready(()),
             |_, _, _, stream| stream
         ).expect("Error starting the client");
@@ -775,7 +674,7 @@ mod tests {
         let connected_to_client = Arc::new(AtomicBool::new(false));
         let connected_to_client_ref = Arc::clone(&connected_to_client);
         let mut server = new_socket_server!(TEST_CONFIG, IP, PORT);
-        start_unresponsive_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Atomic, server, String, String,
             move |event| {
                 let connected_to_client_ref = Arc::clone(&connected_to_client_ref);
                 async move {
@@ -792,7 +691,7 @@ mod tests {
             |_, _, _, stream| stream
         ).expect("Error starting the server");
         let mut client = new_socket_client!(TEST_CONFIG, IP, PORT);
-        start_unresponsive_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        start_client_processor!(TEST_CONFIG, Atomic, client, String, String,
             |_| future::ready(()),
             |_, _, peer, stream| stream.map(move |_msg| peer.cancel_and_close())     // close the connection when any message arrives
         ).expect("Error starting the client");
@@ -828,12 +727,15 @@ mod tests {
             TEST_CONFIG,
             IP,
             PORT);
-        start_responsive_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Atomic, server, String, String,
             |_| future::ready(()),
-            move |_, _, _, client_messages| client_messages.map(|msg| {
-                println!("SERVER RECEIVED: {msg} -- answering with 'OK'");
-                String::from("OK")
-            })
+            move |_, _, peer, client_messages| client_messages
+                .map(|msg| {
+                    println!("SERVER RECEIVED: {msg} -- answering with 'OK'");
+                    String::from("OK")
+                })
+                .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
+
         )?;
         let server_termination_waiter = server.termination_waiter();
 
@@ -855,7 +757,7 @@ mod tests {
         // first level processors shouldn't do anything until the client says something meaningful -- newcomers must know, a priori, who they are talking to (a security measure)
         let handshake_processor_greeted = Arc::new(AtomicBool::new(false));
         let handshake_processor_greeted_ref = Arc::clone(&handshake_processor_greeted);
-        let handshake_processor = spawn_unresponsive_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        let handshake_processor = spawn_client_processor!(TEST_CONFIG, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `Handshake`")).await
@@ -880,7 +782,7 @@ mod tests {
         // deeper processors should inform the server that they are now subjected to a new processor / protocol, so they may adjust accordingly
         let welcome_authenticated_friend_processor_greeted = Arc::new(AtomicBool::new(false));
         let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted);
-        let welcome_authenticated_friend_processor = spawn_unresponsive_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        let welcome_authenticated_friend_processor = spawn_client_processor!(TEST_CONFIG, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `WelcomeAuthenticatedFriend`")).await
@@ -904,7 +806,7 @@ mod tests {
 
         let account_settings_processor_greeted = Arc::new(AtomicBool::new(false));
         let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted);
-        let account_settings_processor = spawn_unresponsive_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        let account_settings_processor = spawn_client_processor!(TEST_CONFIG, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `AccountSettings`")).await
@@ -928,7 +830,7 @@ mod tests {
 
         let goodbye_options_processor_greeted = Arc::new(AtomicBool::new(false));
         let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted);
-        let goodbye_options_processor = spawn_unresponsive_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        let goodbye_options_processor = spawn_client_processor!(TEST_CONFIG, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `GoodbyeOptions`")).await
@@ -1002,16 +904,6 @@ mod tests {
         #[inline(always)]
         fn processor_error_message(err: String) -> DummyClientAndServerMessages {
             panic!("socket_client.rs unit tests: protocol error when none should have happened: {err}");
-        }
-    }
-    impl ResponsiveMessages<DummyClientAndServerMessages> for DummyClientAndServerMessages {
-        #[inline(always)]
-        fn is_disconnect_message(_processor_answer: &DummyClientAndServerMessages) -> bool {
-            false
-        }
-        #[inline(always)]
-        fn is_no_answer_message(_processor_answer: &DummyClientAndServerMessages) -> bool {
-            false
         }
     }
     impl ReactiveMessagingDeserializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {

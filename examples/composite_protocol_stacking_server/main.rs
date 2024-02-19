@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut socket_server = new_composite_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ProtocolStates);
     // pre-game protocol processor
-    let pre_game_processor = spawn_responsive_server_processor!(NETWORK_CONFIG, Atomic, socket_server, PreGameClientMessages, PreGameServerMessages,
+    let pre_game_processor = spawn_server_processor!(NETWORK_CONFIG, Atomic, socket_server, PreGameClientMessages, PreGameServerMessages,
         move |connection_event| {
             server_processor_ref1.pre_game_connection_events_handler(connection_event);
             future::ready(())
@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         move |client_addr, port, peer, client_messages_stream| server_processor_ref2.pre_game_dialog_processor(client_addr, port, peer, client_messages_stream)
     )?;
     // game protocol processor
-    let game_processor = spawn_responsive_server_processor!(NETWORK_CONFIG, Atomic, socket_server, GameClientMessages, GameServerMessages,
+    let game_processor = spawn_server_processor!(NETWORK_CONFIG, Atomic, socket_server, GameClientMessages, GameServerMessages,
         move |connection_event| {
             server_processor_ref3.game_connection_events_handler(connection_event);
             future::ready(())

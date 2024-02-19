@@ -5,7 +5,9 @@ use std::{
     fmt::Debug,
     sync::Arc,
 };
+use futures::Stream;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni, MutinyStream};
+use crate::config::ConstConfig;
 use crate::prelude::SocketConnection;
 use crate::serde::ReactiveMessagingSerializer;
 
@@ -21,23 +23,6 @@ use crate::serde::ReactiveMessagingSerializer;
 ///     fn dialog_processor<RemoteStreamType: Stream<Item=SocketProcessorDerivedType<RemoteMessages>>>
 ///                        (remote_messages_stream: RemoteStreamType) -> impl Stream<Item=LocalMessages> { ... }
 pub type MessagingMutinyStream<GenericUniType: GenericUni> = MutinyStream<'static, GenericUniType::ItemType, GenericUniType::UniChannelType, GenericUniType::DerivedItemType>;
-
-
-/// Adherents will, typically, also implement [ReactiveMessagingUnresponsiveSerializer].\
-/// By upgrading your type with this trait, it is possible to build a "Responsive Processor", where the returned `Stream`
-/// contains the messages to be sent as an answer to the remote peer.\
-/// This trait, therefore, specifies (to the internal sender) how to handle special response cases, like "no answer" and "disconnection" messages.
-pub trait ResponsiveMessages<LocalPeerMessages: ResponsiveMessages<LocalPeerMessages> + Send + PartialEq + Debug> {
-
-    /// Informs the internal sender if the given `processor_answer` is a "disconnect" message & command (issued by the messages processor logic)\
-    /// -- in which case, the network processor will send it and, immediately, close the connection.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn is_disconnect_message(processor_answer: &LocalPeerMessages) -> bool;
-
-    /// Tells if internal sender is the given `processor_answer` represents a "no message" -- a message that should produce no answer to the peer.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn is_no_answer_message(processor_answer: &LocalPeerMessages) -> bool;
-}
 
 
 /// Event issued by Composite Protocol Clients & Servers when connections are made or dropped
@@ -70,4 +55,25 @@ pub enum ProtocolEvent<const CONFIG:  u64,
     PeerLeft { peer: Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, stream_stats: Arc<dyn reactive_mutiny::stream_executor::StreamExecutorStats + Sync + Send> },
     /// Happens when the local code has commanded the service (and all opened connections) to stop
     LocalServiceTermination,
+}
+
+/// Implementers to add a new functionality to `Stream`s, allowing the yielded items to be sent back to the peer
+pub trait ResponsiveStream<const CONFIG:        u64,
+                           LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug,
+                           SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync,
+                           StateType:                                                                                                 Send + Sync + Clone     + Debug> {
+
+    /// upgrades the self `Stream` (of non-fallible & non-future input items of the `LocalMessagesType`) to another `Stream` that will send all input items to `peer`
+    fn to_responsive_stream<YieldedItemType>
+
+                           (self,
+                            peer: Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
+                            is_disconnect_message: impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> bool,
+                            is_no_answer_message:  impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> bool,
+                            item_map:              impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> YieldedItemType)
+
+                           -> impl Stream<Item = YieldedItemType>
+
+                           where Self: Sized + Stream<Item = LocalMessagesType>;
+
 }

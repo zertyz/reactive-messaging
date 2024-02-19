@@ -79,23 +79,22 @@ impl ClientProtocolProcessor {
                     if server_protocol_version == PROTOCOL_VERSION {
                         // Upgrade to the next protocol
                         peer.try_set_state(ProtocolStates::Game);
+                        PreGameClientMessages::Upgrade
                     } else {
                         let msg = format!("Client protocol version is '{PROTOCOL_VERSION}' while server is '{server_protocol_version}'");
                         error!("{}", msg);
                         _ = peer.try_set_state(ProtocolStates::Disconnect);
+                        PreGameClientMessages::Error(msg)
                     }
-                    peer.cancel_and_close();
-                    PreGameClientMessages::NoAnswer
                 }
 
                 PreGameServerMessages::Error(err) => {
-                    error!("Server (pre game) answered with error '{err}' -- closing the connection");
+                    let msg = format!("Server (pre game) answered with error '{err}' -- closing the connection");
+                    error!("{}", msg);
                     _ = peer.try_set_state(ProtocolStates::Disconnect);
-                    peer.cancel_and_close();
-                    PreGameClientMessages::NoAnswer
+                    PreGameClientMessages::Error(msg)
                 },
-
-                PreGameServerMessages::NoAnswer => PreGameClientMessages::NoAnswer,
+                PreGameServerMessages::Upgrade => {todo!()},
             }
         })
     }

@@ -11,7 +11,9 @@ use std::{
     fmt::Debug,
     sync::Arc,
 };
-use reactive_messaging::prelude::{ProtocolEvent, Peer};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::Relaxed;
+use reactive_messaging::prelude::{ProtocolEvent, Peer, ResponsiveStream};
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use dashmap::DashMap;
 use futures::stream::{self, Stream, StreamExt};
@@ -73,34 +75,39 @@ impl ServerProtocolProcessor {
                                      peer:                   Arc<Peer<NETWORK_CONFIG, PreGameServerMessages, SenderChannel, ProtocolStates>>,
                                      client_messages_stream: impl Stream<Item=StreamItemType>)
 
-                                    -> impl Stream<Item=PreGameServerMessages> {
+                                    -> impl Stream<Item=()> {
                             
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
                                                                            self.sessions.len()))
                                                  .value()
                                                  .clone();     // .clone() the Arc, so we are free to move it to the next closure (and drop it after the Stream closes)
-        client_messages_stream.map(move |client_message| {
-            // crate a umpire for the new game
-            match client_message.as_ref() {
-                PreGameClientMessages::Config(match_config) => {
-                    // instantiate the game
-                    let umpire_option = unsafe { &mut * (session.umpire.get()) };
-                    let umpire = Umpire::new(&match_config, Players::Opponent);
-                    umpire_option.replace(umpire);
-                    _ = peer.try_set_state(ProtocolStates::Game);
-                    peer.cancel_and_close();
-                    PreGameServerMessages::Version(String::from(PROTOCOL_VERSION))
-                },
-                PreGameClientMessages::Error(err) => {
-                    error!("Pre-game Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
-                    _ = peer.try_set_state(ProtocolStates::Disconnect);
-                    peer.cancel_and_close();
-                    PreGameServerMessages::NoAnswer
-                },
-                PreGameClientMessages::NoAnswer => PreGameServerMessages::NoAnswer,
-            }
-        })
+        let peer_ref = Arc::clone(&peer);
+        client_messages_stream
+            .map(move |client_message| {
+                // crate an umpire for the new game
+                match client_message.as_ref() {
+                    PreGameClientMessages::Config(match_config) => {
+                        // instantiate the game
+                        let umpire_option = unsafe { &mut * (session.umpire.get()) };
+                        let umpire = Umpire::new(&match_config, Players::Opponent);
+                        umpire_option.replace(umpire);
+                        _ = peer.try_set_state(ProtocolStates::Game);
+                        PreGameServerMessages::Version(String::from(PROTOCOL_VERSION))
+                    },
+                    PreGameClientMessages::Error(err) => {
+                        let msg = format!("Pre-game Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
+                        error!("{msg}");
+                        _ = peer.try_set_state(ProtocolStates::Disconnect);
+                        PreGameServerMessages::Error(msg)
+                    },
+                    PreGameClientMessages::Upgrade => {todo!()},
+                }
+            })
+            .to_responsive_stream(peer_ref,
+                |server_message,_peer| matches!(server_message, PreGameServerMessages::Version(..) | PreGameServerMessages::Error(..)),
+                |_server_message, _peer| false,
+                |_server_message, _peer| () )
     }
 
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,

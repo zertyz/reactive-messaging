@@ -1,6 +1,6 @@
 //! Types setup for tests
 
-use reactive_messaging::prelude::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer, ResponsiveMessages};
+use reactive_messaging::prelude::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use std::fmt::{Display, Formatter};
 
 
@@ -24,18 +24,6 @@ impl ReactiveMessagingSerializer<TestString> for TestString {
         let msg = format!("ServiceBug! Please, fix! Error: {}", err);
         panic!("ReactiveMessagingSerializer<TestString>::processor_error_message(): {}", msg);
         // msg
-    }
-}
-
-/// Our test text-only protocol's messages may also be used by "Responsive Processors"
-impl ResponsiveMessages<TestString> for TestString {
-    #[inline(always)]
-    fn is_disconnect_message(processor_answer: &TestString) -> bool {
-        processor_answer.0 == "."
-    }
-    #[inline(always)]
-    fn is_no_answer_message(processor_answer: &TestString) -> bool {
-        processor_answer.0.is_empty()
     }
 }
 

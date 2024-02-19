@@ -16,6 +16,7 @@ use reactive_mutiny::prelude::advanced::{
     FullDuplexUniChannel,
 };
 use tokio::sync::Mutex;
+use crate::config::ConstConfig;
 use crate::socket_connection::connection::{ConnectionId, SocketConnection};
 
 
@@ -47,6 +48,10 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
             state: Mutex::new(Some(connection.state().clone())),
             retryable_sender,
         }
+    }
+
+    pub fn config(&self) -> ConstConfig {
+        ConstConfig::from(CONFIG)
     }
 
     /// Asks the underlying channel to revert to Stream-mode (rather than Execution-mode), returning the `Stream`

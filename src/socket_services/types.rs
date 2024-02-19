@@ -4,7 +4,7 @@ use std::error::Error;
 use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use crate::prelude::Peer;
 use crate::socket_connection::connection_provider::ConnectionChannel;
-use crate::types::{ProtocolEvent, MessagingMutinyStream, ResponsiveMessages, ConnectionEvent};
+use crate::types::{ProtocolEvent, MessagingMutinyStream, ConnectionEvent};
 use crate::socket_connection::connection::SocketConnection;
 use std::fmt::Debug;
 use std::future;
@@ -44,63 +44,21 @@ pub trait MessagingService<const CONFIG: u64> {
     ///                              -> impl Stream<Item=()> {...}
     ///     ```
     /// -- if you want the processor to produce answer messages of type `LocalMessages` to be sent to clients, see [Self::spawn_responsive_processor()]:
-    async fn spawn_unresponsive_processor<RemoteMessages:                ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                         + Send + Sync + PartialEq + Debug + 'static,
-                                          LocalMessages:                 ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                            + Send + Sync + PartialEq + Debug + 'static,
-                                          ProcessorUniType:              GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                                   + Send + Sync                     + 'static,
-                                          SenderChannel:                 FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                           + Send + Sync                     + 'static,
-                                          OutputStreamItemsType:                                                                                                                                                                                                                                                 Send + Sync             + Debug + 'static,
-                                          RemoteStreamType:              Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                    + Send                            + 'static,
-                                          ProtocolEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                     + Send                            + 'static,
-                                          ProtocolEventsCallback:        Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                   -> ProtocolEventsCallbackFuture + Send + Sync                     + 'static,
-                                          ProcessorBuilderFn:            Fn(/*remote_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> RemoteStreamType             + Send + Sync                     + 'static>
+    async fn spawn_processor<RemoteMessages:                ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                         + Send + Sync + PartialEq + Debug + 'static,
+                             LocalMessages:                 ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                            + Send + Sync + PartialEq + Debug + 'static,
+                             ProcessorUniType:              GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                                   + Send + Sync                     + 'static,
+                             SenderChannel:                 FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                           + Send + Sync                     + 'static,
+                             OutputStreamItemsType:                                                                                                                                                                                                                                                 Send + Sync             + Debug + 'static,
+                             RemoteStreamType:              Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                    + Send                            + 'static,
+                             ProtocolEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                     + Send                            + 'static,
+                             ProtocolEventsCallback:        Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                   -> ProtocolEventsCallbackFuture + Send + Sync                     + 'static,
+                             ProcessorBuilderFn:            Fn(/*remote_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> RemoteStreamType             + Send + Sync                     + 'static>
 
-                                         (&mut self,
-                                          connection_events_callback:  ProtocolEventsCallback,
-                                          dialog_processor_builder_fn: ProcessorBuilderFn)
+                            (&mut self,
+                             connection_events_callback:  ProtocolEventsCallback,
+                             dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                         -> Result<ConnectionChannel<Self::StateType>, Box<dyn Error + Sync + Send>>;
-
-    /// Spawns a task dedicated to the given "responsive protocol processor", returning immediately,
-    /// The given `dialog_processor_builder_fn` will be called for each new connection and will return a `Stream`
-    /// that will produce non-futures & non-fallible items that *will be sent to the client*:
-    ///   - `connection_events_callback`: -- a generic function (or closure) to handle connected, disconnected and termination events (possibly to manage sessions). Sign it as:
-    ///     ```nocompile
-    ///     async fn connection_events_handler<const CONFIG:  u64,
-    ///                                        LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
-    ///                                        SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
-    ///                                       (_event: ConnectionEvent<CONFIG, LocalMessages, SenderChannel>) {...}
-    ///     ```
-    ///   - `dialog_processor_builder_fn` -- the generic function (or closure) that receives the `Stream` of remote messages and returns the `Stream` of local messages to
-    ///                                      be sent to the peer -- called once for each connection. Sign it as:
-    ///     ```nocompile
-    ///     fn responsive_processor<const CONFIG:   u64,
-    ///                             LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
-    ///                             SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-    ///                             StreamItemType: Deref<Target=[your type for messages produced by the CLIENT]>>
-    ///                            (remote_addr:            String,
-    ///                             connected_port:         u16,
-    ///                             peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel>>,
-    ///                             client_messages_stream: impl Stream<Item=StreamItemType>)
-    ///                            -> impl Stream<Item=LocalMessages> {...}
-    ///     ```
-    /// Notice that this method requires that `LocalMessages` implements, additionally, [ResponsiveMessages<>].\
-    /// -- if you don't want the processor to produce answer messages, see [Self::spawn_unresponsive_processor()].
-    async fn spawn_responsive_processor<RemoteMessages:                ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                         + Send + Sync + PartialEq + Debug + 'static,
-                                        LocalMessages:                 ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                            + Send + Sync + PartialEq + Debug + 'static,
-                                        ProcessorUniType:              GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                                   + Send + Sync                     + 'static,
-                                        SenderChannel:                 FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                           + Send + Sync                     + 'static,
-                                        RemoteStreamType:              Stream<Item=LocalMessages>                                                                                                                                                                                                            + Send                            + 'static,
-                                        ProtocolEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                     + Send                            + 'static,
-                                        ProtocolEventsCallback:        Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                   -> ProtocolEventsCallbackFuture + Send + Sync                     + 'static,
-                                        ProcessorBuilderFn:            Fn(/*remote_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> RemoteStreamType             + Send + Sync                     + 'static>
-
-                                       (&mut self,
-                                        connection_events_callback: ProtocolEventsCallback,
-                                        dialog_processor_builder_fn: ProcessorBuilderFn)
-
-                                        -> Result<ConnectionChannel<Self::StateType>, Box<dyn Error + Sync + Send>>
-
-                                       where LocalMessages: ResponsiveMessages<LocalMessages>;
+                            -> Result<ConnectionChannel<Self::StateType>, Box<dyn Error + Sync + Send>>;
 
     /// Start the service with a single processor (after calling either [Self::spawn_unresponsive_processor()]
     /// or [Self::spawn_responsive_processor()] once) -- A.K.A. "The Single Protocol Mode".\

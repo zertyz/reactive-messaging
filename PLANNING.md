@@ -17,10 +17,6 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Being-Done
 
-
-
-# Backlog
-
 **(n11)** 2024-02-07: Simplify our API: REMOVE `ResponsiveMessages`, as it is completely not needed!! The reason is:
   * `is_disconnect_message()` can be done on the processor logic with `stream.take_until(|outgoing_message| outgoing_message == DISCONNECT_MESSAGE)`
   * `is_no_answer_message()` can be done with `stream.filter(...)`\
@@ -30,6 +26,10 @@ Also, consider the feasibility of also removing all those responsive/unresponsiv
   * Is it possible to add a `.to_responsive_stream()` to `Stream`? If so, that would be 100% cool!!
   * The proposed solution above has the benefit of restoring the possibility of "sending a disconnect message", not allowed after removing `ResponsiveMessages`:
     for this, simply call `.map_to_responsive_stream(|item| (item.to_send, item.to_yield) )` or anything with a better name.
+
+
+
+# Backlog
 
 **(f9)** 2024-01-17: Security -- support SSL/TSL + Client & Server fingerprinting for text & binary transmissions (depends on **(n8)**),
 where fingerprinting is not an alleged number, but one determined by investigating the TCP/IP layers and the security metadata.

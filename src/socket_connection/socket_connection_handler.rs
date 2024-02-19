@@ -63,21 +63,21 @@ impl<const CONFIG:        u64,
     ///   - `shutdown_signaler` comes from a `tokio::sync::oneshot::channel`, which receives the maximum time, in
     ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
     #[inline(always)]
-    pub async fn server_loop_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
-                                                            OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
-                                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                                                            ConnectionEventsCallback:       Fn(/*server_event: */ProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                                            ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync         + 'static>
+    pub async fn server_loop_for_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
+                                               OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
+                                               ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
+                                               ConnectionEventsCallback:       Fn(/*server_event: */ProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                               ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync         + 'static>
 
-                                                           (self,
-                                                            listening_interface:         &str,
-                                                            listening_port:              u16,
-                                                            mut connection_source:       tokio::sync::mpsc::Receiver<SocketConnection<StateType>>,
-                                                            connection_sink:             tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
-                                                            connection_events_callback:  ConnectionEventsCallback,
-                                                            dialog_processor_builder_fn: ProcessorBuilderFn)
+                                              (self,
+                                               listening_interface:         &str,
+                                               listening_port:              u16,
+                                               mut connection_source:       tokio::sync::mpsc::Receiver<SocketConnection<StateType>>,
+                                               connection_sink:             tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
+                                               connection_events_callback:  ConnectionEventsCallback,
+                                               dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                            -> Result<(), Box<dyn Error + Sync + Send>> {
+                                              -> Result<(), Box<dyn Error + Sync + Send>> {
 
         let arc_self = Arc::new(self);
         let connection_events_callback = Arc::new(connection_events_callback);
@@ -164,19 +164,19 @@ impl<const CONFIG:        u64,
     ///     milliseconds: it will be passed to `connection_events_callback` and cause the server loop to exit.
     // TODO 2024-01-03: make this able to process the same connection as many times as needed, for symmetry with the server -- practically, allowing connection reuse
     #[inline(always)]
-    pub async fn client_for_unresponsive_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
-                                                       OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
-                                                       ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                                                       ConnectionEventsCallback:       Fn(/*server_event: */ProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
-                                                       ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
+    pub async fn client_for_text_protocol<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
+                                          OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
+                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
+                                          ConnectionEventsCallback:       Fn(/*server_event: */ProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
-                                                      (self,
-                                                       socket_connection:           SocketConnection<StateType>,
-                                                       mut shutdown_signaler:       tokio::sync::broadcast::Receiver<()>,
-                                                       connection_events_callback:  ConnectionEventsCallback,
-                                                       dialog_processor_builder_fn: ProcessorBuilderFn)
+                                         (self,
+                                          socket_connection:           SocketConnection<StateType>,
+                                          mut shutdown_signaler:       tokio::sync::broadcast::Receiver<()>,
+                                          connection_events_callback:  ConnectionEventsCallback,
+                                          dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                                                      -> Result<SocketConnection<StateType>, Box<dyn Error + Sync + Send>> {
+                                         -> Result<SocketConnection<StateType>, Box<dyn Error + Sync + Send>> {
 
         let addr = socket_connection.connection().peer_addr()?;
         let sender = ReactiveMessagingSender::<CONFIG, LocalMessagesType, SenderChannel>::new(format!("Sender for client {addr}"));
@@ -364,137 +364,6 @@ impl<const CONFIG:        u64,
             .map(|state| socket_connection.set_state(state));
         Ok(socket_connection)
     }
-
-    /// Similar to [UnresponsiveSocketConnectionHandle::server_loop_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
-    /// answers of type `ServerMessages`, which will be automatically routed to the clients.
-    #[inline(always)]
-    pub async fn server_loop_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                                        + Send        + 'static,
-                                                          ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                                                          ConnectionEventsCallback:       Fn(/*server_event: */ProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                          ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType               + Send + Sync + 'static>
-
-                                                         (self,
-                                                          listening_interface:         &str,
-                                                          listening_port:              u16,
-                                                          connection_source:           tokio::sync::mpsc::Receiver<SocketConnection<StateType>>,
-                                                          connection_sink:             tokio::sync::mpsc::Sender<SocketConnection<StateType>>,
-                                                          connection_events_callback:  ConnectionEventsCallback,
-                                                          dialog_processor_builder_fn: ProcessorBuilderFn)
-
-                                                         -> Result<(), Box<dyn Error + Sync + Send>>
-
-                                                         where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
-
-        // upgrade the "unresponsive" streams from `dialog_processor_builder_fn()` to "responsive" streams that will send the outcome to clients
-       let dialog_processor_builder_fn = move |client_addr, connected_port, peer, client_messages_stream| {
-           let dialog_processor_stream = dialog_processor_builder_fn(client_addr, connected_port, Arc::clone(&peer), client_messages_stream);
-           self.to_responsive_stream(peer, dialog_processor_stream)
-       };
-        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType>::new();
-        unresponsive_socket_connection_handler.server_loop_for_unresponsive_text_protocol(listening_interface, listening_port, connection_source, connection_sink, connection_events_callback, dialog_processor_builder_fn).await
-            .map_err(|err| Box::from(format!("error when starting server @ {listening_interface}:{listening_port} with `server_loop_for_unresponsive_text_protocol()`: {err}")))
-    }
-
-    /// Similar to [Self::client_for_unresponsive_text_protocol()], but for when the provided `dialog_processor_builder_fn()` produces
-    /// answers of type `ClientMessages`, which will be automatically routed to the server.
-    // TODO 2024-01-03: make this able to process the same connection as many times as needed, for symmetry with the server -- practically, allowing connection reuse
-    #[inline(always)]
-    pub async fn client_for_responsive_text_protocol<OutputStreamType:               Stream<Item=LocalMessagesType>                                                                                                                                                                                                        + Send +        'static,
-                                                     ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                                                     ConnectionEventsCallback:       Fn(/*server_event: */ProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync + 'static,
-                                                     ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
-
-                                                    (self,
-                                                     socket_connection:           SocketConnection<StateType>,
-                                                     shutdown_signaler:           tokio::sync::broadcast::Receiver<()>,
-                                                     connection_events_callback:  ConnectionEventsCallback,
-                                                     dialog_processor_builder_fn: ProcessorBuilderFn)
-
-                                                    -> Result<SocketConnection<StateType>, Box<dyn Error + Sync + Send>>
-
-                                                    where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
-
-        let addr = socket_connection.connection().peer_addr()?;
-        // upgrade the "unresponsive" streams from `dialog_processor_builder_fn()` to "responsive" streams that will send the outcome to clients
-        let dialog_processor_builder_fn = |server_addr, port, peer, server_messages_stream| {
-            let dialog_processor_stream = dialog_processor_builder_fn(server_addr, port, Arc::clone(&peer), server_messages_stream);
-            self.to_responsive_stream(peer, dialog_processor_stream)
-        };
-        let unresponsive_socket_connection_handler = SocketConnectionHandler::<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannel, StateType>::new();
-        unresponsive_socket_connection_handler.client_for_unresponsive_text_protocol(socket_connection, shutdown_signaler, connection_events_callback, dialog_processor_builder_fn).await
-            .map_err(|err| Box::from(format!("error when starting client for server @ {addr} with `client_for_unresponsive_text_protocol()`: {err}")))
-    }
-
-    /// upgrades the `request_processor_stream` (of non-fallible & non-future items) to a `Stream` which is also able to send answers back to the `peer`
-    #[inline(always)]
-    fn to_responsive_stream(&self,
-                            peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
-                            request_processor_stream: impl Stream<Item=LocalMessagesType>)
-
-                           -> impl Stream<Item = ()>
-
-                           where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
-
-        request_processor_stream
-            .map(move |outgoing| {
-                // wired `if`s ahead to try to get some branch prediction optimizations -- assuming Rust will see the first `if` branches as the "usual case"
-                let is_disconnect = LocalMessagesType::is_disconnect_message(&outgoing);
-                let is_no_answer = LocalMessagesType::is_no_answer_message(&outgoing);
-                // send the message, skipping messages that are programmed not to generate any response
-                if !is_disconnect && !is_no_answer {
-                    // send the answer
-                    trace!("`to_responsive_stream()`: Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
-                    if let Err((abort, error_msg)) = peer.send(outgoing) {
-                        // peer is slow-reading -- and, possibly, fast sending
-                        warn!("`to_responsive_stream()`: Slow reader detected while sending to {:?}: {error_msg}", peer);
-                        if abort {
-                            peer.cancel_and_close();
-                        }
-                    }
-                } else if is_disconnect {
-                    debug!("`to_responsive_stream()`: Processor choose to drop connection with {} (peer id {}) by answering with the DISCONNECT MESSAGE '{:?}'", peer.peer_address, peer.peer_id, outgoing);
-                    if !is_no_answer {
-                        if let Err((_abort, error_msg)) = peer.send(outgoing) {
-                            warn!("reactive-messaging: Slow reader detected while sending the closing message to {:?}: {error_msg}", peer);
-                        }
-                    }
-                    // TODO 2023-08-25: there should be a proper method to call out of async context (in Peer) that will allow us not to forcibly sleep here.
-                    std::thread::sleep(Duration::from_millis(100));
-                    peer.cancel_and_close();
-                }
-            })
-    }
-
-    /// upgrades the `request_processor_stream` (of fallible & non-future items) to a `Stream` which is also able to send answers back to the `peer`
-    #[inline(always)]
-    fn _to_responsive_stream_of_fallibles(&self,
-                                          peer:                     Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
-                                          request_processor_stream: impl Stream<Item = Result<LocalMessagesType, Box<dyn Error + Sync + Send>>>)
-
-                                         -> impl Stream<Item = ()>
-
-                                         where LocalMessagesType: ResponsiveMessages<LocalMessagesType> {
-
-        let peer_ref1 = peer;
-        let peer_ref2 = Arc::clone(&peer_ref1);
-        // treat any errors
-        let request_processor_stream = request_processor_stream
-            .map(move |processor_response| {
-                match processor_response {
-                    Ok(outgoing) => {
-                        outgoing
-                    },
-                    Err(err) => {
-                        let err_string = format!("{:?}", err);
-                        error!("SocketServer: processor connected with {} (peer id {}) yielded an error: {}", peer_ref1.peer_address, peer_ref1.peer_id, err_string);
-                        LocalMessagesType::processor_error_message(err_string)
-                    },
-                }
-            });
-        // process the answer
-        self.to_responsive_stream(peer_ref2, request_processor_stream)
-    }
-
 }
 
 
@@ -587,7 +456,7 @@ mod tests {
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
         let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        socket_communications_handler.server_loop_for_unresponsive_text_protocol(
+        socket_communications_handler.server_loop_for_text_protocol(
             "127.0.0.1", 8579, new_connections_source, returned_connections_sink,
             |connection_event| async move {
                 match connection_event {
@@ -623,7 +492,7 @@ mod tests {
             .expect("Sanity Check: couldn't move the Connection Receiver out of the Connection Provider");
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
-        socket_communications_handler.server_loop_for_unresponsive_text_protocol(
+        socket_communications_handler.server_loop_for_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
             |connection_event| {
                  match connection_event {
@@ -661,7 +530,7 @@ mod tests {
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let client_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         tokio::spawn(
-            client_communications_handler.client_for_unresponsive_text_protocol(
+            client_communications_handler.client_for_text_protocol(
                 socket_connection, client_shutdown_receiver,
                 move |connection_event| {
                     match connection_event {
@@ -720,7 +589,7 @@ mod tests {
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
         let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        socket_communications_handler.server_loop_for_unresponsive_text_protocol(
+        socket_communications_handler.server_loop_for_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
             |_connection_event| async {},
             |_listening_interface, _listening_port, peer, client_messages| {
@@ -744,7 +613,7 @@ mod tests {
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         tokio::spawn(
-            socket_communications_handler.client_for_unresponsive_text_protocol(
+            socket_communications_handler.client_for_text_protocol(
                 socket_connection, client_shutdown_receiver,
                 |connection_event| {
                     match connection_event {
@@ -816,7 +685,7 @@ mod tests {
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
         let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
-        socket_communications_handler.server_loop_for_unresponsive_text_protocol(
+        socket_communications_handler.server_loop_for_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
             |_connection_event| async {},
             move |_listening_interface, _listening_port, _peer, client_messages| {
@@ -844,7 +713,7 @@ mod tests {
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_connection_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni<String>, SenderChannel<String>>::new();
         tokio::spawn(
-            socket_connection_handler.client_for_unresponsive_text_protocol(
+            socket_connection_handler.client_for_text_protocol(
                 socket_connection,
                 client_shutdown_receiver,
                 move |connection_event| {
@@ -926,21 +795,23 @@ mod tests {
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
         let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        socket_communications_handler.server_loop_for_responsive_text_protocol(LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
-                                                                               |_connection_event| future::ready(()),
-                                                                               move |_client_addr, _client_port, peer, client_messages_stream| {
+        socket_communications_handler.server_loop_for_text_protocol(LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
+                                                                    |_connection_event| future::ready(()),
+                                                                    move |_client_addr, _client_port, peer, client_messages_stream| {
                let client_secret_ref = client_secret_ref.clone();
                let server_secret_ref = server_secret_ref.clone();
                 assert!(peer.send(String::from("Welcome! State your business!")).is_ok(), "couldn't send");
-                client_messages_stream.flat_map(move |client_message| {
-                   stream::iter([
-                       format!("Client just sent '{}'", client_message),
-                       if *client_message == client_secret_ref {
-                           server_secret_ref.clone()
-                       } else {
-                           panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
-                       }])
-               })
+                client_messages_stream
+                    .flat_map(move |client_message| {
+                       stream::iter([
+                           format!("Client just sent '{}'", client_message),
+                           if *client_message == client_secret_ref {
+                               server_secret_ref.clone()
+                           } else {
+                               panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
+                           }])
+                    })
+                    .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
             }
         ).await.expect("ERROR starting the server");
 
@@ -954,9 +825,9 @@ mod tests {
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
         tokio::spawn(
-            socket_communications_handler.client_for_responsive_text_protocol(socket_connection, client_shutdown_receiver,
-                                                                              move |_connection_event| future::ready(()),
-                                                                              move |_client_addr, _client_port, peer, server_messages_stream| {
+            socket_communications_handler.client_for_text_protocol(socket_connection, client_shutdown_receiver,
+                                                                   move |_connection_event| future::ready(()),
+                                                                   move |_client_addr, _client_port, peer, server_messages_stream| {
                     let observed_secret_ref = Arc::clone(&observed_secret_ref);
                     assert!(peer.send(client_secret.clone()).is_ok(), "couldn't send");
                     server_messages_stream
@@ -1002,7 +873,7 @@ mod tests {
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
         let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
-        socket_communications_handler.server_loop_for_unresponsive_text_protocol(
+        socket_communications_handler.server_loop_for_text_protocol(
             LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
             move |connection_event| {
                 let server_disconnected = Arc::clone(&server_disconnected_ref);
@@ -1023,7 +894,7 @@ mod tests {
         let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel>::new();
 
         tokio::spawn(
-            socket_communications_handler.client_for_unresponsive_text_protocol(
+            socket_communications_handler.client_for_text_protocol(
                 socket_connection, client_shutdown_receiver,
                 move |connection_event| {
                     let client_disconnected = Arc::clone(&client_disconnected_ref);

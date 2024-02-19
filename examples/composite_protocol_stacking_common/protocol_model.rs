@@ -57,7 +57,7 @@
 
 use std::error::Error;
 use super::logic::ping_pong_models::*;
-use reactive_messaging::prelude::{ResponsiveMessages, ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use reactive_messaging::prelude::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use serde::{Serialize, Deserialize};
 
 
@@ -90,10 +90,10 @@ pub enum PreGameClientMessages {
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
     Error(/*explanation: */String),
-    /// Issued by the client's local processor when no answer should be sent back to the server\
-    /// -- we don't use this, as our processor is no longer a 1->1 map, but a 1->* flat_map
+    /// Issued by the client's local processor when it says we are all right for a protocol upgrade
+    /// -- the next messages to be received will be [GameClientMessages]
     #[default]
-    NoAnswer,
+    Upgrade,
 }
 
 /// Messages coming from the clients after [PreGameClientMessages] protocol was performed, suitable to be deserialized by the server
@@ -143,9 +143,10 @@ pub enum PreGameServerMessages {
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
     Error(/*explanation: */String),
-    /// Issued by the server's local processor when no answer should be sent back to the client
+    /// Issued by the server's local processor when it says we are all right for a protocol upgrade
+    /// -- the next messages to be received will be [GameServerMessages]
     #[default]
-    NoAnswer,
+    Upgrade,
 }
 
 /// Messages coming from the server, suitable to be deserialized by the clients
@@ -228,27 +229,6 @@ impl ReactiveMessagingDeserializer<GameClientMessages> for GameClientMessages {
     }
 }
 
-impl ResponsiveMessages<PreGameClientMessages> for PreGameClientMessages {
-    #[inline(always)]
-    fn is_disconnect_message(_processor_answer: &PreGameClientMessages) -> bool {
-        false
-    }
-    #[inline(always)]
-    fn is_no_answer_message(processor_answer: &PreGameClientMessages) -> bool {
-        matches!(processor_answer, PreGameClientMessages::NoAnswer)
-    }
-}
-impl ResponsiveMessages<GameClientMessages> for GameClientMessages {
-    #[inline(always)]
-    fn is_disconnect_message(processor_answer: &GameClientMessages) -> bool {
-        matches!(processor_answer, GameClientMessages::Quit)
-    }
-    #[inline(always)]
-    fn is_no_answer_message(_processor_answer: &GameClientMessages) -> bool {
-        false
-    }
-}
-
 impl AsRef<PreGameServerMessages> for PreGameServerMessages {
     #[inline(always)]
     fn as_ref(&self) -> &PreGameServerMessages {
@@ -292,28 +272,5 @@ impl ReactiveMessagingDeserializer<PreGameServerMessages> for PreGameServerMessa
 }impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
     fn deserialize(local_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
         ron_deserializer(local_message)
-    }
-}
-
-impl ResponsiveMessages<PreGameServerMessages> for PreGameServerMessages {
-    /// Disconnects when our processor issues either of "GoodBye" or "GameCancelled"
-    #[inline(always)]
-    fn is_disconnect_message(processor_answer: &PreGameServerMessages) -> bool {
-        matches!(processor_answer, PreGameServerMessages::Error(..))
-    }
-    #[inline(always)]
-    fn is_no_answer_message(processor_answer: &PreGameServerMessages) -> bool {
-        matches!(processor_answer, PreGameServerMessages::NoAnswer)
-    }
-}
-impl ResponsiveMessages<GameServerMessages> for GameServerMessages {
-    /// Disconnects when our processor issues either of "GoodBye" or "GameCancelled"
-    #[inline(always)]
-    fn is_disconnect_message(processor_answer: &GameServerMessages) -> bool {
-        matches!(processor_answer, GameServerMessages::GoodBye | GameServerMessages::PingPongEvent(PingPongEvent::GameOver(GameOverStates::GameCancelled { .. })))
-    }
-    #[inline(always)]
-    fn is_no_answer_message(processor_answer: &GameServerMessages) -> bool {
-        matches!(processor_answer, GameServerMessages::NoAnswer)
     }
 }

@@ -71,14 +71,15 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
     if start_server {
         println!("==> starting the server");
         let server = server.insert(new_socket_server!(CONFIG, LISTENING_INTERFACE, PORT));
-        let server_processor_handler = spawn_responsive_server_processor!(CONFIG, Atomic, server, ClientMessages, ServerMessages,
+        let server_processor_handler = spawn_server_processor!(CONFIG, Atomic, server, ClientMessages, ServerMessages,
             |_| future::ready(()),
-            |_, _, _, client_stream| client_stream
+            |_, _, peer, client_stream| client_stream
                 .inspect(|client_message| println!(">>> {:?}", client_message.deref()))
                 .map(|client_message| match *client_message {
                     ClientMessages::Hello => ServerMessages::World(WORLD.to_string()),
                     _ => ServerMessages::NoAnswer,
                 })
+                .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
         )?;
         server.start_single_protocol(server_processor_handler).await?;
     }
@@ -86,7 +87,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
     if start_client {
         println!("==> starting the client");
         let mut client = new_socket_client!(CONFIG, LISTENING_INTERFACE, PORT);
-        start_unresponsive_client_processor!(CONFIG, Atomic, client, ServerMessages, ClientMessages,
+        start_client_processor!(CONFIG, Atomic, client, ServerMessages, ClientMessages,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer } => {
@@ -157,13 +158,5 @@ impl ReactiveMessagingSerializer<ServerMessages> for ServerMessages {
 impl ReactiveMessagingDeserializer<ServerMessages> for ServerMessages {
     fn deserialize(remote_message: &[u8]) -> Result<ServerMessages, Box<dyn Error + Sync + Send>> {
         ron_deserializer(remote_message)
-    }
-}
-impl ResponsiveMessages<ServerMessages> for ServerMessages {
-    fn is_disconnect_message(_processor_answer: &ServerMessages) -> bool {
-        false
-    }
-    fn is_no_answer_message(_processor_answer: &ServerMessages) -> bool {
-        false
     }
 }

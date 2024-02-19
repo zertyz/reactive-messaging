@@ -14,8 +14,12 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
+use futures::{Stream, StreamExt};
 use keen_retry::ExponentialJitter;
+use log::{trace, warn};
+use crate::prelude::Peer;
 use crate::serde::ReactiveMessagingSerializer;
+use crate::types::ResponsiveStream;
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `CONFIG`
 pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
@@ -355,11 +359,65 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 
 }
 
+impl<const CONFIG:        u64,
+     T:                   ?Sized,
+     LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug,
+     SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync,
+     StateType:                                                                                                 Send + Sync + Clone     + Debug>
+ResponsiveStream<CONFIG, LocalMessagesType, SenderChannel, StateType>
+for T where T: Stream<Item=LocalMessagesType> {
+
+    #[inline(always)]
+    fn to_responsive_stream<YieldedItemType>
+
+                           (self,
+                            peer: Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
+                            mut is_disconnect_message: impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> bool,
+                            mut is_no_answer_message:  impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> bool,
+                            mut item_map:              impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> YieldedItemType)
+
+                           -> impl Stream<Item = YieldedItemType>
+
+                           where Self: Sized + Stream<Item = LocalMessagesType> {
+
+        let flush_timeout_millis = peer.config().flush_timeout_millis;
+
+        // send back each message
+        self.map(move |outgoing| {
+            // wired `if`s ahead to try to get some branch prediction optimizations -- assuming Rust will see the first `if` branches as the "usual case"
+            let is_disconnect = is_disconnect_message(&outgoing, &peer);
+            let is_no_answer = is_no_answer_message(&outgoing, &peer);
+            let ret = item_map(&outgoing, &peer);
+            // send the message, skipping messages that are programmed not to generate any response
+            if !is_disconnect && !is_no_answer {
+                // send the answer
+                trace!("`Stream::to_responsive_stream()`: Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
+                if let Err((abort, error_msg)) = peer.send(outgoing) {
+                    // peer is slow-reading -- and, possibly, fast sending
+                    warn!("`Stream::to_responsive_stream()`: Slow reader detected while sending to {:?}: {error_msg}", peer);
+                    if abort {
+                        peer.cancel_and_close();
+                    }
+                }
+            } else if is_disconnect {
+                trace!("`Stream::to_responsive_stream()`: Processor choose to drop connection with {} (peer id {}) by answering with the DISCONNECT MESSAGE '{:?}'", peer.peer_address, peer.peer_id, outgoing);
+                if !is_no_answer {
+                    if let Err((_abort, error_msg)) = peer.send(outgoing) {
+                        warn!("Stream::to_responsive_stream(): Slow reader detected while sending the closing message to {:?}: {error_msg}", peer);
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(flush_timeout_millis as u64));
+                peer.cancel_and_close();
+            }
+            ret
+        })
+    }
+}
+
 /// Common test code for this module
 #[cfg(any(test,doc))]
 mod tests {
     use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
-    use crate::types::ResponsiveMessages;
 
     /// Test implementation for our text-only protocol as used across this module
     impl ReactiveMessagingSerializer<String> for String {
@@ -373,19 +431,6 @@ mod tests {
             let msg = format!("ServerBug! Please, fix! Error: {}", err);
             panic!("SocketServerSerializer<String>::processor_error_message(): {}", msg);
             // msg
-        }
-    }
-
-    /// Our test text-only protocol's messages may also be used by "Responsive Processors"
-    impl ResponsiveMessages<String> for String {
-        #[inline(always)]
-        fn is_disconnect_message(processor_answer: &String) -> bool {
-            // for String communications, an empty line sent by the messages processor signals that the connection should be closed
-            processor_answer.is_empty()
-        }
-        #[inline(always)]
-        fn is_no_answer_message(processor_answer: &String) -> bool {
-            processor_answer == "."
         }
     }
 
