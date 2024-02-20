@@ -8,7 +8,7 @@ use crate::composite_protocol_stacking_common::{
         protocol_processor::{react_to_hard_fault, react_to_rally_event, react_to_score, react_to_service_soft_fault},
     }
 };
-use reactive_messaging::prelude::{ProtocolEvent, Peer};
+use reactive_messaging::prelude::{ProtocolEvent, Peer, ResponsiveStream};
 use std::{
     sync::{
         Arc,
@@ -16,8 +16,9 @@ use std::{
     },
     time::Instant,
 };
+use std::fmt::Debug;
 use reactive_mutiny::prelude::FullDuplexUniChannel;
-use futures::{Stream, stream, StreamExt};
+use futures::{future, Stream, stream, StreamExt};
 use log::{debug,info,error};
 use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
 
@@ -54,13 +55,12 @@ impl ClientProtocolProcessor {
                                               connection_event: ProtocolEvent<NETWORK_CONFIG, PreGameClientMessages, SenderChannel, ProtocolStates>) {
         if let ProtocolEvent::PeerArrived { peer } = connection_event {
             debug!("Connected: {:?}", peer);
-            _ = peer.send(PreGameClientMessages::Config(MATCH_CONFIG));
         }
     }
 
     pub fn pre_game_dialog_processor<const NETWORK_CONFIG: u64,
                                      SenderChannel:        FullDuplexUniChannel<ItemType=PreGameClientMessages, DerivedItemType=PreGameClientMessages> + Send + Sync,
-                                     StreamItemType:       AsRef<PreGameServerMessages>>
+                                     StreamItemType:       AsRef<PreGameServerMessages> + Debug>
 
                                     (self:                   &Arc<Self>,
                                      _server_addr:           String,
@@ -68,35 +68,39 @@ impl ClientProtocolProcessor {
                                      peer:                   Arc<Peer<NETWORK_CONFIG, PreGameClientMessages, SenderChannel, ProtocolStates>>,
                                      server_messages_stream: impl Stream<Item=StreamItemType>)
 
-                                    -> impl Stream<Item=PreGameClientMessages> {
+                                    -> impl Stream<Item=bool> {
                             
         let cloned_self = Arc::clone(self);
-        server_messages_stream.map(move |server_message| {
-            cloned_self.in_messages_count.fetch_add(1, Relaxed);
-            match server_message.as_ref() {
-
-                PreGameServerMessages::Version(server_protocol_version) => {
-                    if server_protocol_version == PROTOCOL_VERSION {
-                        // Upgrade to the next protocol
-                        peer.try_set_state(ProtocolStates::Game);
-                        PreGameClientMessages::Upgrade
-                    } else {
-                        let msg = format!("Client protocol version is '{PROTOCOL_VERSION}' while server is '{server_protocol_version}'");
+        let peer_ref = Arc::clone(&peer);
+        _ = peer.send(PreGameClientMessages::Config(MATCH_CONFIG));
+        server_messages_stream
+            .map(move |server_message| {
+                cloned_self.in_messages_count.fetch_add(1, Relaxed);
+                match server_message.as_ref() {
+                    PreGameServerMessages::Version(server_protocol_version) => {
+                        if server_protocol_version == &*PROTOCOL_VERSION {
+                            // Upgrade to the next protocol
+                            peer.try_set_state(ProtocolStates::Game);
+                            None
+                        } else {
+                            let msg = format!("Client protocol version is {PROTOCOL_VERSION:?} while server is {server_protocol_version:?}");
+                            error!("{}", msg);
+                            _ = peer.try_set_state(ProtocolStates::Disconnect);
+                            Some(PreGameClientMessages::Error(msg))
+                        }
+                    },
+                    PreGameServerMessages::Error(err) => {
+                        let msg = format!("Server (pre game) answered with error '{err}' -- closing the connection");
                         error!("{}", msg);
                         _ = peer.try_set_state(ProtocolStates::Disconnect);
-                        PreGameClientMessages::Error(msg)
-                    }
+                        Some(PreGameClientMessages::Error(msg))
+                    },
                 }
-
-                PreGameServerMessages::Error(err) => {
-                    let msg = format!("Server (pre game) answered with error '{err}' -- closing the connection");
-                    error!("{}", msg);
-                    _ = peer.try_set_state(ProtocolStates::Disconnect);
-                    PreGameClientMessages::Error(msg)
-                },
-                PreGameServerMessages::Upgrade => {todo!()},
-            }
-        })
+            })
+            .take_while(|server_message| future::ready(server_message.is_some()))    // stop if the protocol was upgraded
+            .map(|server_message| server_message.unwrap())
+            .to_responsive_stream(peer_ref, |server_message, _peer| !matches!(server_message, PreGameClientMessages::Error(..)) )
+            .take_while(|keep_running| future::ready(*keep_running))    // stop if an error happened
     }
 
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
@@ -128,11 +132,12 @@ impl ClientProtocolProcessor {
                                  peer:                   Arc<Peer<NETWORK_CONFIG, GameClientMessages, SenderChannel, ProtocolStates>>,
                                  server_messages_stream: impl Stream<Item=StreamItemType>)
 
-                                -> impl Stream<Item=GameClientMessages> {
+                                -> impl Stream<Item=bool> {
 
         _ = peer.try_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
                                                                 // TODO 2024-01-27: this may be moved to the connection event handler after the new state is added
         let cloned_self = Arc::clone(self);
+        let peer_ref = Arc::clone(&peer);
         let mut umpire = Umpire::new(&MATCH_CONFIG, Players::Ourself);
         server_messages_stream.map(move |server_message| {
             cloned_self.in_messages_count.fetch_add(1, Relaxed);
@@ -217,10 +222,6 @@ impl ClientProtocolProcessor {
                     vec![GameClientMessages::Quit]
                 },
 
-                GameServerMessages::NoAnswer => {
-                    vec![/* no answer */]
-                },
-
                 GameServerMessages::GoodBye | GameServerMessages::ServerShutdown => {
                     peer.cancel_and_close();
                     vec![/* no answer */]
@@ -228,6 +229,8 @@ impl ClientProtocolProcessor {
             }
         })
         .flat_map(stream::iter)
+        .to_responsive_stream(peer_ref, |client_message, _peer| !matches!(client_message, GameClientMessages::Quit | GameClientMessages::Error(..)))
+        .take_while(|client_message| future::ready(*client_message))
     }
 }
 

@@ -371,10 +371,8 @@ for T where T: Stream<Item=LocalMessagesType> {
     fn to_responsive_stream<YieldedItemType>
 
                            (self,
-                            peer: Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
-                            mut is_disconnect_message: impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> bool,
-                            mut is_no_answer_message:  impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> bool,
-                            mut item_map:              impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> YieldedItemType)
+                            peer:            Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
+                            mut item_mapper: impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> YieldedItemType)
 
                            -> impl Stream<Item = YieldedItemType>
 
@@ -384,33 +382,19 @@ for T where T: Stream<Item=LocalMessagesType> {
 
         // send back each message
         self.map(move |outgoing| {
-            // wired `if`s ahead to try to get some branch prediction optimizations -- assuming Rust will see the first `if` branches as the "usual case"
-            let is_disconnect = is_disconnect_message(&outgoing, &peer);
-            let is_no_answer = is_no_answer_message(&outgoing, &peer);
-            let ret = item_map(&outgoing, &peer);
-            // send the message, skipping messages that are programmed not to generate any response
-            if !is_disconnect && !is_no_answer {
-                // send the answer
-                trace!("`Stream::to_responsive_stream()`: Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
-                if let Err((abort, error_msg)) = peer.send(outgoing) {
-                    // peer is slow-reading -- and, possibly, fast sending
-                    warn!("`Stream::to_responsive_stream()`: Slow reader detected while sending to {:?}: {error_msg}", peer);
-                    if abort {
-                        peer.cancel_and_close();
-                    }
+            trace!("`to_responsive_stream()`: Sending Answer `{:?}` to {:?} (peer id {})", outgoing, peer.peer_address, peer.peer_id);
+            let remapped_item = item_mapper(&outgoing, &peer);
+            if let Err((abort, error_msg)) = peer.send(outgoing) {
+                // peer is slow-reading -- and, possibly, fast sending
+                warn!("`to_responsive_stream()`: Slow reader detected while sending to {peer:?}: {error_msg}");
+                if abort {
+                    std::thread::sleep(Duration::from_millis(flush_timeout_millis as u64));
+                    peer.cancel_and_close();
                 }
-            } else if is_disconnect {
-                trace!("`Stream::to_responsive_stream()`: Processor choose to drop connection with {} (peer id {}) by answering with the DISCONNECT MESSAGE '{:?}'", peer.peer_address, peer.peer_id, outgoing);
-                if !is_no_answer {
-                    if let Err((_abort, error_msg)) = peer.send(outgoing) {
-                        warn!("Stream::to_responsive_stream(): Slow reader detected while sending the closing message to {:?}: {error_msg}", peer);
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(flush_timeout_millis as u64));
-                peer.cancel_and_close();
             }
-            ret
+            remapped_item
         })
+
     }
 }
 

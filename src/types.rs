@@ -67,10 +67,8 @@ pub trait ResponsiveStream<const CONFIG:        u64,
     fn to_responsive_stream<YieldedItemType>
 
                            (self,
-                            peer: Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
-                            is_disconnect_message: impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> bool,
-                            is_no_answer_message:  impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> bool,
-                            item_map:              impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> YieldedItemType)
+                            peer:        Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
+                            item_mapper: impl FnMut(&LocalMessagesType, &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>) -> YieldedItemType)
 
                            -> impl Stream<Item = YieldedItemType>
 

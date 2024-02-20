@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use reactive_messaging::prelude::{ProtocolEvent, Peer, ResponsiveStream};
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use dashmap::DashMap;
+use futures::future;
 use futures::stream::{self, Stream, StreamExt};
 use log::{info, warn, error};
 use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
@@ -75,7 +76,7 @@ impl ServerProtocolProcessor {
                                      peer:                   Arc<Peer<NETWORK_CONFIG, PreGameServerMessages, SenderChannel, ProtocolStates>>,
                                      client_messages_stream: impl Stream<Item=StreamItemType>)
 
-                                    -> impl Stream<Item=()> {
+                                    -> impl Stream<Item=bool> {
                             
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
@@ -93,7 +94,7 @@ impl ServerProtocolProcessor {
                         let umpire = Umpire::new(&match_config, Players::Opponent);
                         umpire_option.replace(umpire);
                         _ = peer.try_set_state(ProtocolStates::Game);
-                        PreGameServerMessages::Version(String::from(PROTOCOL_VERSION))
+                        PreGameServerMessages::Version(PROTOCOL_VERSION.clone())
                     },
                     PreGameClientMessages::Error(err) => {
                         let msg = format!("Pre-game Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
@@ -101,13 +102,10 @@ impl ServerProtocolProcessor {
                         _ = peer.try_set_state(ProtocolStates::Disconnect);
                         PreGameServerMessages::Error(msg)
                     },
-                    PreGameClientMessages::Upgrade => {todo!()},
                 }
             })
-            .to_responsive_stream(peer_ref,
-                |server_message,_peer| matches!(server_message, PreGameServerMessages::Version(..) | PreGameServerMessages::Error(..)),
-                |_server_message, _peer| false,
-                |_server_message, _peer| () )
+            .to_responsive_stream(peer_ref, |server_message, _peer| !matches!(server_message, PreGameServerMessages::Version(..) | PreGameServerMessages::Error(..)) )
+            .take_while(|keep_running| future::ready(*keep_running))
     }
 
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
@@ -117,7 +115,6 @@ impl ServerProtocolProcessor {
         match connection_event {
             ProtocolEvent::PeerArrived { peer } => {
                 warn!("Game Started: {:?}", peer);
-                _ = peer.send(GameServerMessages::GameStarted);
             },
             ProtocolEvent::PeerLeft { peer, stream_stats } => {
                 warn!("Game Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
@@ -139,10 +136,11 @@ impl ServerProtocolProcessor {
                                  peer:                   Arc<Peer<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>>,
                                  client_messages_stream: impl Stream<Item=StreamItemType>)
 
-                                 -> impl Stream<Item=GameServerMessages> {
+                                 -> impl Stream<Item=bool> {
 
         _ = peer.try_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
-                                                                // TODO 2024-01-27: this may be moved to the connection event handler after the new state is added
+        _ = peer.send(GameServerMessages::GameStarted);
+        let peer_ref = Arc::clone(&peer);
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
                                                                            self.sessions.len()))
@@ -242,6 +240,8 @@ impl ServerProtocolProcessor {
             }
         })
         .flat_map(stream::iter)
+        .to_responsive_stream(peer_ref, |server_message, _peer| !matches!(server_message, GameServerMessages::GoodBye))
+        .take_while(|client_message| future::ready(*client_message))
     }
 
 }

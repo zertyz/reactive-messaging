@@ -811,7 +811,7 @@ mod tests {
                                panic!("Client sent the wrong secret: '{}' -- I was expecting '{}'", client_message, client_secret_ref);
                            }])
                     })
-                    .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
+                    .to_responsive_stream(peer, |_, _| ())
             }
         ).await.expect("ERROR starting the server");
 

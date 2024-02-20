@@ -589,7 +589,7 @@ mod tests {
                         server_received_messages_count.fetch_add(1, Relaxed);
                         DummyClientAndServerMessages::FloodPing
                     })
-                    .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
+                    .to_responsive_stream(peer, |_, _| ())
             }
         ).await.expect("Spawning a server processor");
         server.start_single_protocol(connection_channel).await.expect("Starting the server");
@@ -611,7 +611,7 @@ mod tests {
                         client_received_messages_count.fetch_add(1, Relaxed);
                         DummyClientAndServerMessages::FloodPing
                     })
-                    .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
+                    .to_responsive_stream(peer, |_, _| ())
             }
         ).expect("Starting the client");
 
@@ -789,7 +789,7 @@ mod tests {
                     println!("RECEIVED: {msg} -- answering with 'OK'");
                     String::from("OK")
                 })
-                .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
+                .to_responsive_stream(peer, |_, _| ())
         )?;
 
         let client_waiter = client.termination_waiter();

@@ -268,7 +268,7 @@ async fn multi_protocol_server(port: u16, mut disconnect_at: Option<u16>) -> Res
                                                                                             if input_number != &disconnect_at { format!("answer '{server_answer}'") } else { String::from("disconnect") } ))
                 .take_while(move |(input_number, _server_answer)| future::ready(input_number != &disconnect_at))
                 .map(|(input_number, server_answer)| TestString(server_answer))
-                .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
+                .to_responsive_stream(peer, |_, _| ())
         }
     )?;
     Ok(server)

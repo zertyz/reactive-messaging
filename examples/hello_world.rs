@@ -79,7 +79,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
                     ClientMessages::Hello => ServerMessages::World(WORLD.to_string()),
                     _ => ServerMessages::NoAnswer,
                 })
-                .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
+                .to_responsive_stream(peer, |_, _| ())
         )?;
         server.start_single_protocol(server_processor_handler).await?;
     }

@@ -734,7 +734,7 @@ mod tests {
                     println!("SERVER RECEIVED: {msg} -- answering with 'OK'");
                     String::from("OK")
                 })
-                .to_responsive_stream(peer, |_, _| false, |_, _| false, |_, _| ())
+                .to_responsive_stream(peer, |_, _| ())
 
         )?;
         let server_termination_waiter = server.termination_waiter();

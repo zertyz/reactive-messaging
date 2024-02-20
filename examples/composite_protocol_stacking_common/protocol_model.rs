@@ -56,12 +56,13 @@
 //! for the triggered reason.
 
 use std::error::Error;
+use once_cell::sync::Lazy;
 use super::logic::ping_pong_models::*;
 use reactive_messaging::prelude::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use serde::{Serialize, Deserialize};
 
 
-pub const PROTOCOL_VERSION: &str = "2024-01-08";
+pub static PROTOCOL_VERSION: Lazy<String> = Lazy::new(|| String::from("2024-02-19"));
 
 
 /// The states the dialog between client and server may be into
@@ -77,7 +78,7 @@ pub enum ProtocolStates {
 }
 
 /// Client messages to set up the game in the server
-#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum PreGameClientMessages {
 
     /// First message that the client must send, upon establishing a connection
@@ -90,10 +91,11 @@ pub enum PreGameClientMessages {
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
     Error(/*explanation: */String),
-    /// Issued by the client's local processor when it says we are all right for a protocol upgrade
-    /// -- the next messages to be received will be [GameClientMessages]
-    #[default]
-    Upgrade,
+}
+impl Default for PreGameClientMessages {
+    fn default() -> Self {
+        Self::Config(MatchConfig::default())
+    }
 }
 
 /// Messages coming from the clients after [PreGameClientMessages] protocol was performed, suitable to be deserialized by the server
@@ -128,7 +130,7 @@ pub enum GameClientMessages {
 }
 
 /// Messages coming from the server, suitable to be deserialized by the clients
-#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum PreGameServerMessages {
 
     /// After taking notice of a new client -- after it sent [PreGameClientMessages::Config] --
@@ -143,10 +145,11 @@ pub enum PreGameServerMessages {
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
     Error(/*explanation: */String),
-    /// Issued by the server's local processor when it says we are all right for a protocol upgrade
-    /// -- the next messages to be received will be [GameServerMessages]
-    #[default]
-    Upgrade,
+}
+impl Default for PreGameServerMessages {
+    fn default() -> Self {
+        Self::Version(PROTOCOL_VERSION.clone())
+    }
 }
 
 /// Messages coming from the server, suitable to be deserialized by the clients
@@ -167,10 +170,8 @@ pub enum GameServerMessages {
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
     Error(/*explanation: */String),
-    /// Issued by the server's local processor when no answer should be sent back to the client
-    #[default]
-    NoAnswer,
     /// Issued when the server is ending the connection due to gracefully completing the communications
+    #[default]
     GoodBye,
     /// Issued when the server was asked to gracefully shutdown: all connected clients will be informed, data will be persisted and pretty much nothing else will be done.
     ServerShutdown,
