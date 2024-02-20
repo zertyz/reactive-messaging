@@ -20,9 +20,9 @@ pub trait MessagingService<const CONFIG: u64> {
     type StateType: Send + Sync + Clone + Debug + 'static;
 
 
-    /// Spawns a task dedicated to the given "unresponsive protocol processor", returning immediately.\
+    /// Spawns a task dedicated to the given "protocol processor", returning immediately.\
     /// The given `dialog_processor_builder_fn` will be called for each new connection and should return a `Stream`
-    /// that will produce non-futures & non-fallible items that **won't be sent to the client**:
+    /// that will produce non-futures & non-fallible items that **may be, optionally, sent to the remote party** (see [crate::prelude::ResponsiveStream]):
     ///   - `protocol_events_callback`: -- a generic function (or closure) to handle "new peer", "peer left" and "service termination" events (possibly to manage sessions). Sign it as:
     ///     ```nocompile
     ///     async fn protocol_events_handler<const CONFIG:  u64,
@@ -30,18 +30,18 @@ pub trait MessagingService<const CONFIG: u64> {
     ///                                      SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
     ///                                     (_event: ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) {...}
     ///     ```
-    ///   - `dialog_processor_builder_fn` -- the generic function (or closure) that receives the `Stream` of remote messages and returns another `Stream`, which won't
-    ///                                      be sent out to peer(s) -- called once for each connection. Sign it as:
+    ///   - `dialog_processor_builder_fn` -- the generic function (or closure) that receives the `Stream` of remote messages and returns another `Stream`, possibly yielding
+    ///                                      messages of the "local" type to be sent to the remote party -- see [crate::prelude::ResponsiveStream]. Sign the processor as:
     ///     ```nocompile
-    ///     fn unresponsive_processor<const CONFIG:   u64,
-    ///                               LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
-    ///                               SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-    ///                               StreamItemType: Deref<Target=[your type for messages produced by the CLIENT]>>
-    ///                              (remote_addr:            String,
-    ///                               connected_port:         u16,
-    ///                               peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>,
-    ///                               remote_messages_stream: impl Stream<Item=StreamItemType>)
-    ///                              -> impl Stream<Item=()> {...}
+    ///     fn processor<const CONFIG:   u64,
+    ///                  LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+    ///                  SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+    ///                  StreamItemType: Deref<Target=[your type for messages produced by the REMOTE party]>>
+    ///                 (remote_addr:            String,
+    ///                  connected_port:         u16,
+    ///                  peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>,
+    ///                  remote_messages_stream: impl Stream<Item=StreamItemType>)
+    ///                 -> impl Stream<Item=ANY_TYPE> {...}
     ///     ```
     /// -- if you want the processor to produce answer messages of type `LocalMessages` to be sent to clients, see [Self::spawn_responsive_processor()]:
     async fn spawn_processor<RemoteMessages:                ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                         + Send + Sync + PartialEq + Debug + 'static,

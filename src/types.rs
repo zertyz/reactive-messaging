@@ -57,13 +57,14 @@ pub enum ProtocolEvent<const CONFIG:  u64,
     LocalServiceTermination,
 }
 
-/// Implementers to add a new functionality to `Stream`s, allowing the yielded items to be sent back to the peer
+/// The implementor of this trait adds a new functionality to `Stream`s, allowing the yielded items to be sent out to the peer
 pub trait ResponsiveStream<const CONFIG:        u64,
                            LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug,
                            SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync,
                            StateType:                                                                                                 Send + Sync + Clone     + Debug> {
 
-    /// upgrades the self `Stream` (of non-fallible & non-future input items of the `LocalMessagesType`) to another `Stream` that will send all input items to `peer`
+    /// Causes the `Stream` elements to be sent to `peer`, applying the `item_mapper` closure for elements downstream --
+    /// upgrades the self `Stream` (of non-fallible & non-future input items of the `LocalMessagesType`) to another `Stream` that will consume & send all input items to `peer`
     fn to_responsive_stream<YieldedItemType>
 
                            (self,

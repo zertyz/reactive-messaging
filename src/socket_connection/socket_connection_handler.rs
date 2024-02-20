@@ -838,7 +838,6 @@ mod tests {
                                 let _ = observed_secret_ref.lock().await.insert(server_message);
                             }
                         })
-                        .map(|_server_message| ".".to_string())
                 }
             )
         );

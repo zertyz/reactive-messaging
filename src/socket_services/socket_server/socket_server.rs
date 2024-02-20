@@ -115,8 +115,8 @@ pub use spawn_server_processor;
 
 
 /// Starts a server (previously instantiated by [new_socket_server!()]) that will communicate with clients using a single protocol -- as defined by the given
-/// `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s as specified in [CompositeSocketServer::spawn_unresponsive_processor()].\
-/// If you want to follow the "Composite Protocol Stacking" pattern, see the [spawn_unresponsive_composite_server_processor!()] macro instead.
+/// `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s as specified in [CompositeSocketServer::spawn_processor()].\
+/// If you want to follow the "Composite Protocol Stacking" pattern, see the [spawn_composite_server_processor!()] macro instead.
 #[macro_export]
 macro_rules! start_server_processor {
     ($const_config:                 expr,
@@ -468,10 +468,12 @@ mod tests {
                                 StreamItemType: Deref<Target=DummyClientAndServerMessages>>
                                (_client_addr:           String,
                                 _connected_port:        u16,
-                                _peer:                  Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
+                                peer:                   Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
                                 client_messages_stream: impl Stream<Item=StreamItemType>)
-                               -> impl Stream<Item=DummyClientAndServerMessages> {
-            client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
+                               -> impl Stream<Item=()> {
+            client_messages_stream
+                .map(|_payload| DummyClientAndServerMessages::FloodPing)
+                .to_responsive_stream(peer, |_, _| ())
         }
 
         let termination_waiter = server.termination_waiter();

@@ -80,7 +80,7 @@ impl ClientProtocolProcessor {
                     PreGameServerMessages::Version(server_protocol_version) => {
                         if server_protocol_version == &*PROTOCOL_VERSION {
                             // Upgrade to the next protocol
-                            peer.try_set_state(ProtocolStates::Game);
+                            _ = peer.try_set_state(ProtocolStates::Game);
                             None
                         } else {
                             let msg = format!("Client protocol version is {PROTOCOL_VERSION:?} while server is {server_protocol_version:?}");
@@ -99,8 +99,8 @@ impl ClientProtocolProcessor {
             })
             .take_while(|server_message| future::ready(server_message.is_some()))    // stop if the protocol was upgraded
             .map(|server_message| server_message.unwrap())
-            .to_responsive_stream(peer_ref, |server_message, _peer| !matches!(server_message, PreGameClientMessages::Error(..)) )
-            .take_while(|keep_running| future::ready(*keep_running))    // stop if an error happened
+            .to_responsive_stream(peer_ref, |server_message, _peer| matches!(server_message, PreGameClientMessages::Error(..)) )
+            .take_while(|stop| future::ready(!stop))    // stop if an error happened (after sending the error message)
     }
 
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
@@ -229,8 +229,8 @@ impl ClientProtocolProcessor {
             }
         })
         .flat_map(stream::iter)
-        .to_responsive_stream(peer_ref, |client_message, _peer| !matches!(client_message, GameClientMessages::Quit | GameClientMessages::Error(..)))
-        .take_while(|client_message| future::ready(*client_message))
+        .to_responsive_stream(peer_ref, |client_message, _peer| matches!(client_message, GameClientMessages::Quit | GameClientMessages::Error(..)))
+        .take_while(|stop| future::ready(!stop))
     }
 }
 

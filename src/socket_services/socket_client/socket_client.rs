@@ -1,15 +1,14 @@
 //! Provides the [new_socket_client!()] & [new_composite_socket_client!()] macros for instantiating clients, which may then be started by
-//! [start_unresponsive_client_processor!()] & [start_responsive_client_processor!()] -- with each taking different variants of the reactive processor logic --
-//! or have the composite processors spawned by [spawn_unresponsive_composite_client_processor!()] & [spawn_responsive_composite_client_processor!()].
+//! [start_client_processor!()], or have the composite processors spawned by [spawn_composite_client_processor!()].
 //!
-//! Both reactive processing logic variants will take in a `Stream` as parameter and should return another `Stream` as output:
-//!   * Responsive: the reactive processor's output `Stream` yields items that are messages to be sent back to the server;
-//!   * Unresponsive the reactive processor's output `Stream` won't be sent to the server, allowing the `Stream`s to return items from any type.
+//! The reactive processing logic will take in a `Stream` as parameter and may return another `Stream` as output,
+//! which can be configured to automatically send yielded items to the remote party by composing it with the functions defined in
+//! [crate::prelude::ResponsiveStream].
 //!
-//! The Unresponsive processors still allow you to send messages to the server and should be preferred (as far as performance is concerned)
-//! for protocols where the count of messages IN don't nearly map 1/1 with the count of messages OUT.
+//! Even if the `Stream` isn't upgraded to a "responsive stream", processors still allow you to send messages to the server and should be
+//! preferred (as far as performance is concerned) for protocols where the count of messages IN don't nearly map 1/1 with the count of messages OUT.
 //!
-//! For every client variant, the `Stream` items may be a combination of fallible/non-fallible (using `Result<>` or not) & future/non-future.
+//! For every client processor, the `Stream` items may be a combination of fallible/non-fallible (using `Result<>` or not) & future/non-future.
 //!
 //! Instead of using the mentioned macros, you might want to take a look at [CompositeSocketClient] to access the inner implementation directly
 //! -- both ways have the same flexibility, but the macro version takes in all parameters in the conveniently packed and documented [ConstConfig]
@@ -49,7 +48,7 @@ use log::{trace, warn, error, debug};
 
 
 /// Instantiates & allocates resources for a stateless [CompositeSocketClient] (suitable for single protocol communications),
-/// ready to be later started by [`start_unresponsive_client_processor!()`] or [`start_responsive_client_processor!()`].
+/// ready to be later started by [`start_client_processor!()`].
 ///
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
@@ -73,7 +72,7 @@ pub use new_socket_client;
 
 
 /// Instantiates & allocates resources for a stateful [CompositeSocketClient] (suitable for the "Composite Protocol Stacking" pattern),
-/// ready to have processors added by [spawn_unresponsive_client_processor!()] or [spawn_responsive_client_processor!()].
+/// ready to have processors added by [spawn_client_processor!()].
 ///
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
@@ -101,10 +100,10 @@ pub use new_composite_socket_client;
 
 
 /// Spawns a processor for a client (previously instantiated by [`new_composite_socket_client!()`]) that may communicate with the server using multiple protocols / multiple calls
-/// to this macro with different parameters (or to its "responsive" variant) -- finally calling [CompositeSocketClient::start_multi_protocol()] when the "Composite Protocol Stacking" is complete.
+/// to this macro with different parameters -- and finally calling [CompositeSocketClient::start_multi_protocol()] when the "Composite Protocol Stacking" is complete.
 ///
-/// The given `dialog_processor_builder_fn` is a builder of "unresponsive" `Stream`s, as specified in [CompositeSocketClient::spawn_unresponsive_processor()].\
-/// If you don't need multiple protocols and don't want to follow the "Composite Protocol Stacking" pattern, see the [`start_unresponsive_client_processor!()`] macro instead.
+/// The given `dialog_processor_builder_fn` is a builder of `Stream`s, as specified in [CompositeSocketClient::spawn_processor()].\
+/// If you don't need multiple protocols and don't want to follow the "Composite Protocol Stacking" pattern, see the [`start_client_processor!()`] macro instead.
 ///
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
@@ -123,18 +122,18 @@ pub use new_composite_socket_client;
 ///                                     (_event: ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) {...}
 /// ```
 ///
-/// `dialog_processor_builder_fn` -- the generic function (or closure) that receives the `Stream` of remote messages and returns another `Stream`, which won't
-///                                  be sent out to peer(s) -- called once for each connection. Sign it as:
+/// `dialog_processor_builder_fn` -- the generic function (or closure) -- called once for each connection -- that receives the `Stream` of remote messages and returns
+///                                  another `Stream`, that may be, optionally, sent out to the `peer` (see [crate::prelude::ResponsiveStream]). Sign it as:
 /// ```nocompile
-///     fn unresponsive_processor<const CONFIG:   u64,
-///                               LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
-///                               SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-///                               StreamItemType: Deref<Target=[your type for messages produced by the CLIENT]>>
-///                              (peer_addr:              String,
-///                               connected_port:         u16,
-///                               peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>,
-///                               remote_messages_stream: impl Stream<Item=StreamItemType>)
-///                              -> impl Stream<Item=()> {...}
+///     fn processor<const CONFIG:   u64,
+///                  LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+///                  SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
+///                  StreamItemType: Deref<Target=[your type for messages produced by the SERVER]>>
+///                 (peer_addr:              String,
+///                  connected_port:         u16,
+///                  peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>,
+///                  remote_messages_stream: impl Stream<Item=StreamItemType>)
+///                 -> impl Stream<Item=()> {...}
 /// ```
 ///
 /// Returns the `handle` that should be used by the closure given to [[CompositeSocketClient::start_multi_protocol()]] to refer to this processor / protocol.
@@ -157,9 +156,9 @@ pub use spawn_client_processor;
 
 
 /// Starts a client (previously instantiated by [`new_socket_client!()`]) that will communicate with the server using a single protocol -- as defined by the given
-/// `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s as specified in [CompositeSocketClient::spawn_unresponsive_processor()].
+/// `dialog_processor_builder_fn`, a builder of `Stream`s as specified in [CompositeSocketClient::spawn_processor()].
 ///
-/// If you want to follow the "Composite Protocol Stacking" pattern, see the [`spawn_unresponsive_composite_client_processor!()`] macro instead.
+/// If you want to follow the "Composite Protocol Stacking" pattern, see the [`spawn_composite_client_processor!()`] macro instead.
 ///
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
@@ -178,18 +177,18 @@ pub use spawn_client_processor;
 ///                                       (_event: ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>) {...}
 /// ```
 ///
-/// `dialog_processor_builder_fn` -- the generic function (or closure) that receives the `Stream` of remote messages and returns another `Stream`, which won't
-///                                  be sent out to peer(s) -- called once for each connection. Sign it as:
+/// `dialog_processor_builder_fn` -- the generic function (or closure) -- called once for each connection -- that receives the `Stream` of remote messages and returns
+///                                  another `Stream`, that may be, optionally, sent out to the `peer` (see [crate::prelude::ResponsiveStream]). Sign it as:
 /// ```nocompile
 ///     fn unresponsive_processor<const CONFIG:   u64,
 ///                               LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
 ///                               SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
-///                               StreamItemType: Deref<Target=[your type for messages produced by the CLIENT]>>
+///                               StreamItemType: Deref<Target=[your type for messages produced by the SERVER]>>
 ///                              (peer_addr:              String,
 ///                               connected_port:         u16,
 ///                               peer:                   Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>,
 ///                               remote_messages_stream: impl Stream<Item=StreamItemType>)
-///                              -> impl Stream<Item=()> {...}
+///                              -> impl Stream<Item=ANY_TYPE> {...}
 /// ```
 ///
 /// For examples, please consult the unit tests at the end of this module.
@@ -569,10 +568,12 @@ mod tests {
                                 StreamItemType: Deref<Target=DummyClientAndServerMessages>>
                                (_client_addr:           String,
                                 _connected_port:        u16,
-                                _peer:                  Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
+                                peer:                   Arc<Peer<CONFIG, DummyClientAndServerMessages, SenderChannel>>,
                                 client_messages_stream: impl Stream<Item=StreamItemType>)
-                               -> impl Stream<Item=DummyClientAndServerMessages> {
-            client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
+                               -> impl Stream<Item=()> {
+            client_messages_stream
+                .map(|_payload| DummyClientAndServerMessages::FloodPing)
+                .to_responsive_stream(peer, |_, _| ())
         }
         let wait_for_termination = client.termination_waiter();
         client.terminate().await.expect("Error on client Termination command");

@@ -17,16 +17,6 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Being-Done
 
-**(n11)** 2024-02-07: Simplify our API: REMOVE `ResponsiveMessages`, as it is completely not needed!! The reason is:
-  * `is_disconnect_message()` can be done on the processor logic with `stream.take_until(|outgoing_message| outgoing_message == DISCONNECT_MESSAGE)`
-  * `is_no_answer_message()` can be done with `stream.filter(...)`\
-Also, consider the feasibility of also removing all those responsive/unresponsive methods and macros in the client and server code!
-  * Can the same function be overloaded by a different generic parameter? If so, a `where` can be added to the responsive variant requiring the
-    item type on the output stream to implement the serialization. Anyway... this is too speculative at this point and, probably, impossible to do right now.
-  * Is it possible to add a `.to_responsive_stream()` to `Stream`? If so, that would be 100% cool!!
-  * The proposed solution above has the benefit of restoring the possibility of "sending a disconnect message", not allowed after removing `ResponsiveMessages`:
-    for this, simply call `.map_to_responsive_stream(|item| (item.to_send, item.to_yield) )` or anything with a better name.
-
 
 
 # Backlog
@@ -73,6 +63,16 @@ This is to be exposed on the connection event via a non-hashed, stable string co
 
 
 # Done
+
+**(n11)** 2024-02-07: Simplify our API: REMOVE `ResponsiveMessages`, as it is completely not needed!! The reason is:
+  * `is_disconnect_message()` can be done on the processor logic with `stream.take_until(|outgoing_message| outgoing_message == DISCONNECT_MESSAGE)`
+  * `is_no_answer_message()` can be done with `stream.filter(...)`\
+Also, consider the feasibility of also removing all those responsive/unresponsive methods and macros in the client and server code!
+  * Can the same function be overloaded by a different generic parameter? If so, a `where` can be added to the responsive variant requiring the
+    item type on the output stream to implement the serialization. Anyway... this is too speculative at this point and, probably, impossible to do right now.
+  * Is it possible to add a `.to_responsive_stream()` to `Stream`? If so, that would be 100% cool!!
+  * The proposed solution above has the benefit of restoring the possibility of "sending a disconnect message", not allowed after removing `ResponsiveMessages`:
+    for this, simply call `.map_to_responsive_stream(|item| (item.to_send, item.to_yield) )` or anything with a better name.
 
 **(r10)** 2024-01-28: TECH DEBT followup for **(f6)**: Remodel "events", improve event firing tests, refactor duplicated code, simplify the API
 1) Remodel `ConnectionEvents`: with the introduction of the Composite Protocols (that allows using several processors), several event handlers

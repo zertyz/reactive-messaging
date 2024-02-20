@@ -76,7 +76,7 @@ impl ServerProtocolProcessor {
                                      peer:                   Arc<Peer<NETWORK_CONFIG, PreGameServerMessages, SenderChannel, ProtocolStates>>,
                                      client_messages_stream: impl Stream<Item=StreamItemType>)
 
-                                    -> impl Stream<Item=bool> {
+                                    -> impl Stream<Item=()> {
                             
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
@@ -104,8 +104,8 @@ impl ServerProtocolProcessor {
                     },
                 }
             })
-            .to_responsive_stream(peer_ref, |server_message, _peer| !matches!(server_message, PreGameServerMessages::Version(..) | PreGameServerMessages::Error(..)) )
-            .take_while(|keep_running| future::ready(*keep_running))
+            .to_responsive_stream(peer_ref, |_, _| ())
+            .take(1)
     }
 
     pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
@@ -240,8 +240,8 @@ impl ServerProtocolProcessor {
             }
         })
         .flat_map(stream::iter)
-        .to_responsive_stream(peer_ref, |server_message, _peer| !matches!(server_message, GameServerMessages::GoodBye))
-        .take_while(|client_message| future::ready(*client_message))
+        .to_responsive_stream(peer_ref, |server_message, _peer| matches!(server_message, GameServerMessages::GoodBye))
+        .take_while(|stop| future::ready(!stop))
     }
 
 }

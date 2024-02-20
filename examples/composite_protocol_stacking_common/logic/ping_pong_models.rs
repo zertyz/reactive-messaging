@@ -93,7 +93,7 @@ pub enum GameOverStates {
 }
 
 /// The configuration used for our Ping-Pong matches
-#[derive(Debug, PartialEq, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub struct MatchConfig {
     /// ping-pong matches end when this score is reached
     pub score_limit: u32,

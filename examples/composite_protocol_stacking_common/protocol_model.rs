@@ -94,7 +94,7 @@ pub enum PreGameClientMessages {
 }
 impl Default for PreGameClientMessages {
     fn default() -> Self {
-        Self::Config(MatchConfig::default())
+        Self::Error(String::from("`PreGameClientMessages` SLOT NOT INITIALIZED"))
     }
 }
 
