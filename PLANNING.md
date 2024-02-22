@@ -19,11 +19,18 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 **(n8)** 2024-01-04: Introduce binary messages:
 1) Use RKYV for serialization (the fastest & more flexible among current options, after a ChatGPT & bard research)
-2) Formats will be textual (with \n separating messages) or binary (with a `u8`, `u16` or `u32` payload size prefixing each message)
-3) Opting between binary or textual should be done easily via `ConstConfig` -- provided the protocol types implement the appropriate traits.
-   A field is to be introduced to discern among TEXTUAL or BINARY(max_size_bits) where `max_size_bits` is the number of bits that will represent the payload size.
-   -- notice we can encode this new field using only 2 bits: 0: TEXTUAL; 1: BINARY(8); 2: BINARY(16); 3: BINARY(32)
-4) Build benchmarks comparing RON vs RKYV
+2) Formats will be textual (with \n separating messages) or binary (fixed or variable -- in the last case, a u32 will prefix each message)
+3) Opting between binary or textual should be done easily via `ConstConfig` -- provided the protocol / model types implement the appropriate trait.
+  - A field should be introduced with the enum for `MessageForm`: Textual(READ_BUFFER_SIZE, WRITE_BUFFER_SIZE), VarBinary, FixedBinary(size)
+  - The previous READ & WRITE buffer sizes in `ConstConfig` can be dropped
+  - The `VarBinary` format will have a `u32` -- with the payload size -- preceeding the payload
+  - For Docs: Fixed binary works better for enums with primitive types (or sub-types containing primitive types only) and do not require RKYV;
+              On the other hand, RKYV allows Strings, vectors, hash maps, hashsets, etc.
+  - `FixedBinary` allows zero-copy for both serialization & deserialization, if the machines involved share the same Endian -- and RKYV is not needed in this case
+4) Adjust the traits
+  - the binary form may require an allocator (when deserializing, to viabilize zero-copy)
+  - the serializer may return a reference to internal data (or a pointer? whatever reactive-mutiny does) -- allowing zero-copy (or not) serializing patterns
+5) Build benchmarks comparing RON vs var size RKYV vs fixed size bin
 
 
 
