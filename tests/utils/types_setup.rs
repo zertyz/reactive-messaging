@@ -15,7 +15,7 @@ impl Display for TestString {
 /// Test implementation for text-only protocols as used across all integration tests
 impl ReactiveMessagingSerializer<TestString> for TestString {
     #[inline(always)]
-    fn serialize(message: &TestString, buffer: &mut Vec<u8>) {
+    fn serialize_textual(message: &TestString, buffer: &mut Vec<u8>) {
         buffer.clear();
         buffer.extend_from_slice(message.0.as_bytes());
     }
@@ -30,7 +30,7 @@ impl ReactiveMessagingSerializer<TestString> for TestString {
 /// Test implementation for our text-only protocols as used across all integration tests
 impl ReactiveMessagingDeserializer<TestString> for TestString {
     #[inline(always)]
-    fn deserialize(message: &[u8]) -> Result<TestString, Box<dyn std::error::Error + Sync + Send + 'static>> {
+    fn deserialize_textual(message: &[u8]) -> Result<TestString, Box<dyn std::error::Error + Sync + Send + 'static>> {
         Ok(TestString(String::from_utf8_lossy(message).to_string()))
     }
 }

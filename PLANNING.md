@@ -17,6 +17,14 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Being-Done
 
+**(n8)** 2024-01-04: Introduce binary messages:
+1) Use RKYV for serialization (the fastest & more flexible among current options, after a ChatGPT & bard research)
+2) Formats will be textual (with \n separating messages) or binary (with a `u8`, `u16` or `u32` payload size prefixing each message)
+3) Opting between binary or textual should be done easily via `ConstConfig` -- provided the protocol types implement the appropriate traits.
+   A field is to be introduced to discern among TEXTUAL or BINARY(max_size_bits) where `max_size_bits` is the number of bits that will represent the payload size.
+   -- notice we can encode this new field using only 2 bits: 0: TEXTUAL; 1: BINARY(8); 2: BINARY(16); 3: BINARY(32)
+4) Build benchmarks comparing RON vs RKYV
+
 
 
 # Backlog
@@ -36,12 +44,6 @@ This is to be exposed on the connection event via a non-hashed, stable string co
    - Source IP address.
    - TCP Timestamps.
    - Window size.
-
-**(n8)** 2024-01-04: Introduce binary messages:
-1) Use RKYV for serialization (the fastest & more flexible among current options, after a ChatGPT & bard research)
-2) Formats will be textual (with \n separating messages) or binary (with a u16 payload size prefixing each message)
-3) Opting between binary or textual should be done easily via ConstConfig -- provided the protocol types implement the appropriate traits
-4) Build benchmarks comparing RON vs RKYV
 
 **(f5)** 2023-09-04: Introduce "reconnection" on the client. For this:
   - a new pub method `reconnect()` is to be built: the old connection will be shutdown (if not already) and another one will be created

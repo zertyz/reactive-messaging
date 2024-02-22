@@ -268,7 +268,7 @@ impl<const CONFIG:        u64,
                 to_send = sender_stream.next() => {
                     match to_send {
                         Some(to_send) => {
-                            LocalMessagesType::serialize(&to_send, &mut serialization_buffer);
+                            LocalMessagesType::serialize_textual(&to_send, &mut serialization_buffer);
                             serialization_buffer.push(b'\n');
                             if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
                                 warn!("`dialog_loop_for_textual_protocol`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
@@ -293,7 +293,7 @@ impl<const CONFIG:        u64,
                                 if let Some(mut eol_pos) = read_buffer[next_line_index+this_line_search_start..].iter().position(|&b| b == b'\n') {
                                     eol_pos += next_line_index+this_line_search_start;
                                     let line_bytes = &read_buffer[next_line_index..eol_pos];
-                                    match RemoteMessagesType::deserialize(line_bytes) {
+                                    match RemoteMessagesType::deserialize_textual(line_bytes) {
                                         Ok(remote_message) => {
                                             if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
                                                 // log & send the error message to the remote peer

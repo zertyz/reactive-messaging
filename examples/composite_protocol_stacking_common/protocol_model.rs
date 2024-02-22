@@ -196,7 +196,7 @@ impl AsRef<PreGameClientMessages> for PreGameClientMessages {
 
 impl ReactiveMessagingSerializer<PreGameClientMessages> for PreGameClientMessages {
     #[inline(always)]
-    fn serialize(remote_message: &PreGameClientMessages, buffer: &mut Vec<u8>) {
+    fn serialize_textual(remote_message: &PreGameClientMessages, buffer: &mut Vec<u8>) {
         ron_serializer(remote_message, buffer)
             .expect("BUG in `ReactiveMessagingSerializer<PreGameClientMessages>`. Is the buffer too small?");
     }
@@ -207,7 +207,7 @@ impl ReactiveMessagingSerializer<PreGameClientMessages> for PreGameClientMessage
 }
 impl ReactiveMessagingSerializer<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn serialize(remote_message: &GameClientMessages, buffer: &mut Vec<u8>) {
+    fn serialize_textual(remote_message: &GameClientMessages, buffer: &mut Vec<u8>) {
         ron_serializer(remote_message, buffer)
             .expect("BUG in `ReactiveMessagingSerializer<GameClientMessages>`. Is the buffer too small?");
     }
@@ -219,13 +219,13 @@ impl ReactiveMessagingSerializer<GameClientMessages> for GameClientMessages {
 
 impl ReactiveMessagingDeserializer<PreGameClientMessages> for PreGameClientMessages {
     #[inline(always)]
-    fn deserialize(local_message: &[u8]) -> Result<PreGameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+    fn deserialize_textual(local_message: &[u8]) -> Result<PreGameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
         ron_deserializer(local_message)
     }
 }
 impl ReactiveMessagingDeserializer<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn deserialize(local_message: &[u8]) -> Result<GameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+    fn deserialize_textual(local_message: &[u8]) -> Result<GameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
         ron_deserializer(local_message)
     }
 }
@@ -245,7 +245,7 @@ impl AsRef<GameServerMessages> for GameServerMessages {
 
 impl ReactiveMessagingSerializer<PreGameServerMessages> for PreGameServerMessages {
     #[inline(always)]
-    fn serialize(local_message: &PreGameServerMessages, buffer: &mut Vec<u8>) {
+    fn serialize_textual(local_message: &PreGameServerMessages, buffer: &mut Vec<u8>) {
         ron_serializer(local_message, buffer)
             .expect("BUG in `ReactiveMessagingSerializer<PreServerMessages>`. Is the buffer too small?");
     }
@@ -256,7 +256,7 @@ impl ReactiveMessagingSerializer<PreGameServerMessages> for PreGameServerMessage
 }
 impl ReactiveMessagingSerializer<GameServerMessages> for GameServerMessages {
     #[inline(always)]
-    fn serialize(local_message: &GameServerMessages, buffer: &mut Vec<u8>) {
+    fn serialize_textual(local_message: &GameServerMessages, buffer: &mut Vec<u8>) {
         ron_serializer(local_message, buffer)
             .expect("BUG in `ReactiveMessagingSerializer<ServerMessages>`. Is the buffer too small?");
     }
@@ -267,11 +267,11 @@ impl ReactiveMessagingSerializer<GameServerMessages> for GameServerMessages {
 }
 
 impl ReactiveMessagingDeserializer<PreGameServerMessages> for PreGameServerMessages {
-    fn deserialize(local_message: &[u8]) -> Result<PreGameServerMessages, Box<dyn Error + Sync + Send>> {
+    fn deserialize_textual(local_message: &[u8]) -> Result<PreGameServerMessages, Box<dyn Error + Sync + Send>> {
         ron_deserializer(local_message)
     }
 }impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
-    fn deserialize(local_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
+    fn deserialize_textual(local_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
         ron_deserializer(local_message)
     }
 }

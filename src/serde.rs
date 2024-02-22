@@ -1,6 +1,7 @@
 //! SERializers & DEserializers (traits & implementations) for our [SocketServer]
 
 
+use std::any::type_name;
 use serde::{Serialize, Deserialize};
 use once_cell::sync::Lazy;
 
@@ -10,26 +11,39 @@ use once_cell::sync::Lazy;
 /// This trait, therefore, specifies how to:
 ///   * `serialize()` enum variants into a String (like RON, for textual protocols) to be sent to the remote peer
 ///   * inform the peer if any wrong input was sent -- the network processor will handle that special case.
-pub trait ReactiveMessagingSerializer<LocalPeerMessages> {
+pub trait ReactiveMessagingSerializer<LocalMessages> {
 
-    /// Local messages serializer: transforms a strong typed `message` into a sequence of bytes, put in `buffer`\
-    /// -- not appending any '\n'.
+    /// Local messages serializer: transforms a strong typed `local_message` into a sequence of bytes, putting it in `buffer`.\
     /// IMPLEMENTORS: #[inline(always)]
-    fn serialize(local_message: &LocalPeerMessages, buffer: &mut Vec<u8>);
+    fn serialize_textual(local_message: &LocalMessages, buffer: &mut Vec<u8>);
 
-    /// Called whenever the local processor found an error -- the returned message should be as descriptive as possible.\
+    /// Local messages serializer: transforms a strong typed `local_message` into a sequence of bytes, putting it in `buffer`.\
     /// IMPLEMENTORS: #[inline(always)]
-    fn processor_error_message(err: String) -> LocalPeerMessages;
+    fn serialize_binary(local_message: &LocalMessages, buffer: &mut Vec<u8>) {
+        unreachable!("`ReactiveMessagingSerializer<{}>::serialize_binary()` is not implemented yet", type_name::<LocalMessages>())
+    }
+
+    /// Called whenever the local processor found an error -- the returned message (enum variant) should be as descriptive as possible,
+    /// as it will be sent in response to the remote party.\
+    /// IMPLEMENTORS: #[inline(always)]
+    fn processor_error_message(err: String) -> LocalMessages;
 }
 
 /// Trait that should be implemented by enums that model the "remote messages" to be consumed by a "Responsive Processor" --
 /// "remote messages" may either be messages produced by the remote server or by the remote client (when we are implementing the opposite peer).\
-/// This trait, therefore, specifies how to `deserialize()` enum variants received by the remote peer (like RON, for textual protocols)
-pub trait ReactiveMessagingDeserializer<T> {
+/// This trait, therefore, specifies how to `deserialize()` enum variants received by the remote peer (like RON, for textual protocols).
+pub trait ReactiveMessagingDeserializer<RemoteMessages> {
 
-    /// Local messages deserializer: transform a textual `message` into a string typed value.\
+    /// Remote messages deserializer: transform the textual-serialized `remote_message` into a `RemoteMessages` value.\
     /// IMPLEMENTORS: #[inline(always)]
-    fn deserialize(remote_message: &[u8]) -> Result<T, Box<dyn std::error::Error + Sync + Send>>;
+    fn deserialize_textual(remote_message: &[u8]) -> Result<RemoteMessages, Box<dyn std::error::Error + Sync + Send>>;
+
+    /// Remote messages deserializer: transform the textual-serialized `remote_message` into a `RemoteMessages` value.\
+    /// IMPLEMENTORS: #[inline(always)]
+    fn deserialize_binary(remote_message: &[u8]) -> Result<RemoteMessages, Box<dyn std::error::Error + Sync + Send>> {
+        unreachable!("`ReactiveMessagingDeserializer<{}>::deserialize_binary()` is not implemented yet", type_name::<RemoteMessages>())
+    }
+
 }
 
 

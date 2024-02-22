@@ -827,7 +827,7 @@ mod tests {
 
     impl ReactiveMessagingSerializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {
         #[inline(always)]
-        fn serialize(remote_message: &DummyClientAndServerMessages, buffer: &mut Vec<u8>) {
+        fn serialize_textual(remote_message: &DummyClientAndServerMessages, buffer: &mut Vec<u8>) {
             ron_serializer(remote_message, buffer)
                 .expect("composite_socket_server.rs unit tests: No errors should have happened here!")
         }
@@ -838,7 +838,7 @@ mod tests {
     }
     impl ReactiveMessagingDeserializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {
         #[inline(always)]
-        fn deserialize(local_message: &[u8]) -> Result<DummyClientAndServerMessages, Box<dyn std::error::Error + Sync + Send>> {
+        fn deserialize_textual(local_message: &[u8]) -> Result<DummyClientAndServerMessages, Box<dyn std::error::Error + Sync + Send>> {
             ron_deserializer(local_message)
         }
     }

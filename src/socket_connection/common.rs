@@ -406,7 +406,7 @@ mod tests {
     /// Test implementation for our text-only protocol as used across this module
     impl ReactiveMessagingSerializer<String> for String {
         #[inline(always)]
-        fn serialize(message: &String, buffer: &mut Vec<u8>) {
+        fn serialize_textual(message: &String, buffer: &mut Vec<u8>) {
             buffer.clear();
             buffer.extend_from_slice(message.as_bytes());
         }
@@ -421,7 +421,7 @@ mod tests {
     /// Testable implementation for our text-only protocol as used across this module
     impl ReactiveMessagingDeserializer<String> for String {
         #[inline(always)]
-        fn deserialize(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send + 'static>> {
+        fn deserialize_textual(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send + 'static>> {
             Ok(String::from_utf8_lossy(message).to_string())
         }
     }

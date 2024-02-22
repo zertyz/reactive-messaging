@@ -28,7 +28,6 @@ pub struct Peer<const CONFIG:     u64,
                 LocalMessages:    ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                 SenderChannel:    FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
                 StateType:                                                                                      Send + Sync + Clone     + Debug + 'static = ()> {
-    // TODO rename to `id`
     pub peer_id:          ConnectionId,
     pub peer_address:     SocketAddr,
     pub state:            Mutex<Option<StateType>>,
