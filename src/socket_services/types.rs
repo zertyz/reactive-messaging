@@ -125,25 +125,25 @@ pub trait MessagingService<const CONFIG: u64> {
 macro_rules! _define_processor_uni_and_sender_channel_types {
     ($const_config: expr, Atomic, $remote_messages: ty, $local_messages: ty) => {
         const _CONST_CONFIG:              ConstConfig  = $const_config;
-        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_buffer as usize;
+        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
-        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_buffer   as usize;
+        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
         type ProcessorUniType = UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
         type SenderChannel = ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>;
     };
     ($const_config: expr, FullSync, $remote_messages: ty, $local_messages: ty) => {
         const _CONST_CONFIG:              ConstConfig  = $const_config;
-        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_buffer as usize;
+        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
-        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_buffer   as usize;
+        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
         type ProcessorUniType = UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
         type SenderChannel = ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>;
     };
     ($const_config: expr, Crossbeam, $remote_messages: ty, $local_messages: ty) => {
         const _CONST_CONFIG:              ConstConfig  = $const_config;
-        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_buffer as usize;
+        const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
-        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_buffer   as usize;
+        const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
         type ProcessorUniType = UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
         type SenderChannel = ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>;
     };

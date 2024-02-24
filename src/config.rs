@@ -7,39 +7,49 @@ use reactive_mutiny::prelude::Instruments;
 
 /// Specifies the message form to use for communications:
 ///   - Textual messages end in '\n';
-///   - Binary messages are prefixed by 1, 2 or 4 bytes specifying the payload size
+///   - Binary messages are prefixed 4 bytes specifying the payload size
+///   - Binary messages may, optionally, have a fixed size -- avoiding the 4 bytes prefix
 #[derive(Debug,PartialEq)]
 pub enum MessageForms {
-    /// Textual messages require model types to implement the [ReactiveMessagingSerializer] &
-    /// [ReactiveMessagingDeserializer] traits, using `false` for their `BINARY` generic param.
-    Textual,
-    /// Specifies a binary message format -- indicated for the production phase.\
-    /// Binary messages are prefixed by 1, 2 or 4 bytes specifying the payload size,
-    /// therefore, `max_payload_size` may only be `u8::MAX`, `u16::MAX` or `u32::MAX`.\
-    /// Model types must implement both [ReactiveMessagingSerializer] &
-    /// [ReactiveMessagingDeserializer] traits, using `true` for their `BINARY` generic param.
-    Binary { max_payload_size: u32 },
+    /// Specifies that messages will be sent & received in the textual form -- model types should
+    /// implement [ReactiveMessagingSerializer] & [ReactiveMessagingDeserializer] traits appropriately.\
+    /// The given `max_size` value is used to pre-allocate the sender/receiver buffers (must be a power of 2).
+    /// Set it wisely: if too small, an error will be issued and the connection will be closed; if too big, RAM
+    /// will be wasted & processing times may increase slightly.
+    Textual { max_size: u32 },
+    /// Specifies that messages will be sent in the binary form with a variable size -- possibly serialized by `rkyv`, which enables
+    /// zero-copy deserialization while still allowing strings, hashmaps, hashsets, vectors, etc.\
+    /// Each payload will be preceded by a `u32` indicating its exact size.\
+    /// The given `max_size`, if non-zero, will deny messages above the specified value -- which must be a power of 2
+    /// -- sending a feedback and closing the connection.\
+    /// Models are required to override the appropriate functions of the [ReactiveMessagingSerializer] &
+    /// [ReactiveMessagingDeserializer] traits.
+    VariableBinary { max_size: u32 },
+    /// Specifies that messages will be sent in the binary form -- and that each message will have the same
+    /// `size` -- enabling zero-copy serialization/deserialization.\
+    /// Notice that this form avoids having the payload preceded by an `u32` indicating its size, making it optimal for
+    /// models containing small raw types & subtypes containing raw types themselves.\
+    /// `size` must be a power of 2 and models are required to override the appropriate functions of the
+    /// [ReactiveMessagingSerializer] & [ReactiveMessagingDeserializer] traits.
+    FixedBinary { size: u32 },
 }
 impl MessageForms {
-    /// requires 2 bits to represent the data; reverse of [Self::from_repr()]
+    /// requires 2+5=7 bits to represent the data; reverse of [Self::from_repr()]
     const fn as_repr(&self) -> u8 {
-        match self {
-            Self::Textual => 0,
-            Self::Binary { max_payload_size} if *max_payload_size        == u32::MAX => 1,
-            Self::Binary { max_payload_size} if *max_payload_size as u16 == u16::MAX => 2,
-            Self::Binary { max_payload_size} if *max_payload_size as u8  ==  u8::MAX => 3,
-            _ => unreachable!()     // Binary { max_payload_size } should be either `u8::MAX`, `u16::MAX` or `u32::MAX`
-        }
+        (match self {
+            Self::Textual { max_size }        => set_bits_from_power_of_2_u32(0, 2..=6, *max_size),
+            Self::VariableBinary { max_size } => set_bits_from_power_of_2_u32(1, 2..=6, *max_size),
+            Self::FixedBinary { size }        => set_bits_from_power_of_2_u32(2, 2..=6, *size),
+        }) as u8
     }
     /// reverse of [Self::as_repr()]
     const fn from_repr(repr: u8) -> Self {
-        let variant = repr;
+        let (variant, n) = (repr & 0x03, get_power_of_2_u32_bits(repr as u64, 2..=6));
         match variant {
-            0 => Self::Textual,
-            1 => Self::Binary { max_payload_size: u32::MAX },
-            2 => Self::Binary { max_payload_size: u16::MAX as u32 },
-            3 => Self::Binary { max_payload_size:  u8::MAX as u32 },
-            _ => unreachable!(),    // If this errors out, did a new enum member was added?
+            0 => Self::Textual        { max_size: n  },
+            1 => Self::VariableBinary { max_size: n },
+            2 => Self::FixedBinary    { size: n },
+            _ => unreachable!(),    // If this errors out, was a new enum member added?
         }
     }
 }
@@ -87,14 +97,14 @@ impl RetryingStrategies {
     }
     /// reverse of [Self::as_repr()]
     const fn from_repr(repr: u16) -> Self {
-        let (variant, n) = (repr & 7, repr >> 3);
+        let (variant, n) = (repr & 0x07, repr >> 3);
         match variant {
             0 => Self::DoNotRetry,
             1 => Self::EndCommunications,
             2 => Self::RetryWithBackoffUpTo(n as u8),
             3 => Self::RetryYieldingForUpToMillis(n as u8),
             4 => Self::RetrySpinningForUpToMillis(n as u8),
-            _ => unreachable!(),    // If this errors out, did a new enum member was added?
+            _ => unreachable!(),    // If this errors out, was a new enum member added?
         }
     }
 }
@@ -161,15 +171,10 @@ impl SocketOptions {
 ///     see bellow
 #[derive(Debug,PartialEq)]
 pub struct ConstConfig {
-    /// Pre-allocates the sender/receiver buffers to this value (power of 2).
-    /// Setting it wisely may economize some `realloc` calls
-    pub msg_size_hint: u32,
-    /// How many messages (per peer) may be enqueued for output (power of 2)
-    /// before operations start to fail
-    pub sender_buffer: u32,
-    /// How many messages (per peer) may be enqueued for processing (power of 2)
-    /// before operations start to fail
-    pub receiver_buffer: u32,
+    /// How many local messages (per peer) may be enqueued while awaiting delivery to the remote party (power of 2)
+    pub sender_channel_size: u32,
+    /// How many remote messages (per peer) may be enqueued while awaiting processing by the local processor (power of 2)
+    pub receiver_channel_size: u32,
     /// How many milliseconds to wait when flushing messages out to a to-be-closed connection.
     pub flush_timeout_millis: u16,
     /// Specifies what to do when operations fail (full buffers / connection droppings)
@@ -191,19 +196,17 @@ impl ConstConfig {
     // and may also specify ranges for store data (rather than just flags)
 
     /// u32_value = 2^n
-    const MSG_SIZE_HINT: RangeInclusive<usize> = 0..=4;
+    const SENDER_CHANNEL_SIZE: RangeInclusive<usize> = 0..=4;
     /// u32_value = 2^n
-    const SENDER_BUFFER: RangeInclusive<usize> = 5..=9;
-    /// u32_value = 2^n
-    const RECEIVER_BUFFER: RangeInclusive<usize> = 10..=14;
+    const RECEIVER_CHANNEL_SIZE: RangeInclusive<usize> = 5..=9;
     /// u16_value = 2^n
-    const FLUSH_TIMEOUT_MILLIS: RangeInclusive<usize> = 15..=18;
+    const FLUSH_TIMEOUT_MILLIS: RangeInclusive<usize> = 10..=13;
     /// One of [RetryingStrategies], converted by [RetryingStrategies::as_repr()]
-    const RETRYING_STRATEGY: RangeInclusive<usize> = 19..=29;
+    const RETRYING_STRATEGY: RangeInclusive<usize> = 14..=24;
     /// One of [SocketOptions], converted by [SocketOptions::as_repr()]
-    const SOCKET_OPTIONS: RangeInclusive<usize> = 30..=45;
+    const SOCKET_OPTIONS: RangeInclusive<usize> = 25..=40;
     /// One of [MessageForms], converted by [MessageForms::as_repr()]
-    const MESSAGE_FORM: RangeInclusive<usize> = 46..=47;
+    const MESSAGE_FORM: RangeInclusive<usize> = 41..=47;
     /// The 8 bits from `reactive-mutiny`
     const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 48..=56;
 
@@ -217,14 +220,13 @@ impl ConstConfig {
     /// };
     pub const fn default() -> ConstConfig {
         ConstConfig {
-            msg_size_hint:                  1024,
-            sender_buffer:                  1024,
-            receiver_buffer:                1024,
-            flush_timeout_millis:           256,
-            retrying_strategy:              RetryingStrategies::RetryWithBackoffUpTo(20),
-            socket_options:                 SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
-            message_form:                   MessageForms::Textual,
-            executor_instruments:           Instruments::from(Instruments::NoInstruments.into()),
+            sender_channel_size:    1024,
+            receiver_channel_size:  1024,
+            flush_timeout_millis:   256,
+            retrying_strategy:      RetryingStrategies::RetryWithBackoffUpTo(20),
+            socket_options:         SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
+            message_form:           MessageForms::Textual { max_size: 1024 },
+            executor_instruments:   Instruments::from(Instruments::NoInstruments.into()),
         }
     }
 
@@ -236,9 +238,8 @@ impl ConstConfig {
     ///     see bellow
     pub const fn into(self) -> u64 {
         let mut config = 0u64;
-        config = set_bits_from_power_of_2_u32(config, Self::MSG_SIZE_HINT,         self.msg_size_hint);
-        config = set_bits_from_power_of_2_u32(config, Self::SENDER_BUFFER,         self.sender_buffer);
-        config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_BUFFER,       self.receiver_buffer);
+        config = set_bits_from_power_of_2_u32(config, Self::SENDER_CHANNEL_SIZE,   self.sender_channel_size);
+        config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_CHANNEL_SIZE, self.receiver_channel_size);
         config = set_bits_from_power_of_2_u16(config, Self::FLUSH_TIMEOUT_MILLIS,  self.flush_timeout_millis);
         let retrying_strategy_repr = self.retrying_strategy.as_repr();
         config = set_bits(config, Self::RETRYING_STRATEGY, retrying_strategy_repr as u64);
@@ -254,23 +255,21 @@ impl ConstConfig {
     /// Builds [Self] from the generic `const CONFIGS: usize` parameter used in structs
     /// by the "Const Config Pattern"
     pub const fn from(config: u64) -> Self {
-        let msg_size_hint              = get_power_of_2_u32_bits(config, Self::MSG_SIZE_HINT);
-        let sender_buffer              = get_power_of_2_u32_bits(config, Self::SENDER_BUFFER);
-        let receiver_buffer            = get_power_of_2_u32_bits(config, Self::RECEIVER_BUFFER);
+        let sender_buffer              = get_power_of_2_u32_bits(config, Self::SENDER_CHANNEL_SIZE);
+        let receiver_buffer            = get_power_of_2_u32_bits(config, Self::RECEIVER_CHANNEL_SIZE);
         let flush_timeout_millis       = get_power_of_2_u16_bits(config, Self::FLUSH_TIMEOUT_MILLIS);
         let retrying_strategy_repr     = get_bits(config, Self::RETRYING_STRATEGY);
         let socket_options_repr        = get_bits(config, Self::SOCKET_OPTIONS);
         let message_form_repr          = get_bits(config, Self::MESSAGE_FORM);
         let executor_instruments_repr  = get_bits(config, Self::EXECUTOR_INSTRUMENTS);
         Self {
-            msg_size_hint,
             flush_timeout_millis,
-            sender_buffer,
-            receiver_buffer,
-            retrying_strategy:    RetryingStrategies::from_repr(retrying_strategy_repr as u16),
-            socket_options:       SocketOptions::from_repr(socket_options_repr as u32),
-            message_form:         MessageForms::from_repr(message_form_repr as u8),
-            executor_instruments: Instruments::from(executor_instruments_repr as usize),
+            sender_channel_size:   sender_buffer,
+            receiver_channel_size: receiver_buffer,
+            retrying_strategy:     RetryingStrategies::from_repr(retrying_strategy_repr as u16),
+            socket_options:        SocketOptions::from_repr(socket_options_repr as u32),
+            message_form:          MessageForms::from_repr(message_form_repr as u8),
+            executor_instruments:  Instruments::from(executor_instruments_repr as usize),
         }
     }
 
@@ -278,17 +277,17 @@ impl ConstConfig {
     //////////////////////////////////////////////////////////////
     // to be used by the struct in which the generic `const CONFIGS: usize` resides
 
-    pub const fn extract_receiver_buffer(config: u64) -> u32 {
+    pub const fn extract_sender_channel_size(config: u64) -> u32 {
         let config = Self::from(config);
-        config.receiver_buffer
+        config.sender_channel_size
     }
 
-    pub const fn extract_msg_size_hint(config: u64) -> u32 {
+    pub const fn extract_receiver_channel_size(config: u64) -> u32 {
         let config = Self::from(config);
-        config.msg_size_hint
+        config.receiver_channel_size
     }
 
-    pub const fn extract_graceful_close_timeout(config: u64) -> Duration {
+    pub const fn extract_flush_timeout(config: u64) -> Duration {
         let config = Self::from(config);
         Duration::from_millis(config.flush_timeout_millis as u64)
     }
@@ -482,13 +481,12 @@ mod tests {
     #[cfg_attr(not(doc),test)]
     fn const_config() {
         let expected = || ConstConfig {
-            msg_size_hint:         1024,
-            sender_buffer:         2048,
-            receiver_buffer:       2048,
+            sender_channel_size:   2048,
+            receiver_channel_size: 2048,
             flush_timeout_millis:  256,
             retrying_strategy:     RetryingStrategies::RetryWithBackoffUpTo(14),
             socket_options:        SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
-            message_form:          MessageForms::Textual,
+            message_form:          MessageForms::Textual { max_size: 65536 },
             executor_instruments:  Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
         };
         let converted = ConstConfig::into(expected());

@@ -501,16 +501,16 @@ mod tests {
         // notice there may be a discrepancy in the `ConstConfig` you provide and the actual concrete types
         // you also provide for `UniProcessor` and `SenderChannel` -- therefore, this usage is not recommended
         const CUSTOM_CONFIG: ConstConfig = ConstConfig {
-            receiver_buffer:      2048,
-            sender_buffer:        1024,
-            executor_instruments: reactive_mutiny::prelude::Instruments::LogsWithExpensiveMetrics,
+            receiver_channel_size: 2048,
+            sender_channel_size:   1024,
+            executor_instruments:  reactive_mutiny::prelude::Instruments::LogsWithExpensiveMetrics,
             ..ConstConfig::default()
         };
         let mut server = CompositeSocketServer :: <{CUSTOM_CONFIG.into()},
                                                                            ()>
                                                                        :: new(LISTENING_INTERFACE, PORT);
-        type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.receiver_buffer as usize}, 1, {CUSTOM_CONFIG.executor_instruments.into()}>;
-        type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.sender_buffer as usize}, 1>;
+        type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.receiver_channel_size as usize}, 1, {CUSTOM_CONFIG.executor_instruments.into()}>;
+        type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.sender_channel_size as usize}, 1>;
         let connection_channel = server.spawn_processor::<DummyClientAndServerMessages,
                                                                              DummyClientAndServerMessages,
                                                                              ProcessorUniType,
@@ -555,8 +555,8 @@ mod tests {
         let mut server = CompositeSocketServer :: <{TEST_CONFIG.into()},
                                                                             () >
                                                                        :: new(LISTENING_INTERFACE, PORT);
-        type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {TEST_CONFIG.receiver_buffer as usize}, 1, {TEST_CONFIG.executor_instruments.into()}>;
-        type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {TEST_CONFIG.sender_buffer as usize}, 1>;
+        type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {TEST_CONFIG.receiver_channel_size as usize}, 1, {TEST_CONFIG.executor_instruments.into()}>;
+        type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {TEST_CONFIG.sender_channel_size as usize}, 1>;
         let connection_channel = server.spawn_processor :: <DummyClientAndServerMessages,
                                                                                DummyClientAndServerMessages,
                                                                                ProcessorUniType,
