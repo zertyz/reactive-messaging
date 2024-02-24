@@ -220,12 +220,12 @@ for CompositeSocketServer<CONFIG, StateType> {
 
         // start the server
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
-        socket_communications_handler.server_loop_for_text_protocol(&self.interface_ip,
-                                                                    self.port,
-                                                                    new_connections_source,
-                                                                    self.returned_connections_sink.clone(),
-                                                                    connection_events_callback,
-                                                                    dialog_processor_builder_fn).await
+        socket_communications_handler.server_loop(&self.interface_ip,
+                                                  self.port,
+                                                  new_connections_source,
+                                                  self.returned_connections_sink.clone(),
+                                                  connection_events_callback,
+                                                  dialog_processor_builder_fn).await
             .map_err(|err| format!("Error starting an unresponsive GenericCompositeSocketServer @ {}:{}: {:?}", self.interface_ip, self.port, err))?;
         Ok(connection_provider)
     }

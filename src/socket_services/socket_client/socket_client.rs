@@ -321,10 +321,10 @@ for CompositeSocketClient<CONFIG, StateType> {
             /*while*/ if let Some(connection) = connection_source.recv().await {
                 let client_termination_receiver = client_termination_signaler.expect("BUG! client_termination_signaler is NONE").subscribe();
                 let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
-                let result = socket_communications_handler.client_for_text_protocol(connection,
-                                                                                                                       client_termination_receiver,
-                                                                                                                       connection_events_callback,
-                                                                                                                       dialog_processor_builder_fn).await
+                let result = socket_communications_handler.client(connection,
+                                                                                                     client_termination_receiver,
+                                                                                                     connection_events_callback,
+                                                                                                     dialog_processor_builder_fn).await
                     .map_err(|err| format!("Error while executing the dialog processor: {err}"));
                 match result {
                     Ok(socket_connection) => {
