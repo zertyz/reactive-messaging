@@ -23,6 +23,7 @@ use std::{
 };
 use reactive_mutiny::prelude::advanced::{GenericUni, FullDuplexUniChannel};
 use futures::{StreamExt, Stream};
+use futures::io::ReadToString;
 use tokio::io::{self,AsyncReadExt,AsyncWriteExt};
 use log::{trace, debug, warn, error};
 use crate::socket_connection::connection::SocketConnection;
@@ -167,7 +168,7 @@ impl<const CONFIG:        u64,
     pub async fn client<PipelineOutputType:                                                                                                                                                                                                                                                     Send + Sync + Debug + 'static,
                         OutputStreamType:               Stream<Item=PipelineOutputType>                                                                                                                                                                                                       + Send                + 'static,
                         ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                     + Send,
-                        ConnectionEventsCallback:       Fn(/*server_event: */ProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                          -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
+                        ConnectionEventsCallback:       Fn(/*server_event: */ProtocolEvent<CONFIG, LocalMessagesType, SenderChannel, StateType>)                                                                                                            -> ConnectionEventsCallbackFuture + Send + Sync         + 'static,
                         ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> OutputStreamType>
 
                        (self,
@@ -227,13 +228,12 @@ impl<const CONFIG:        u64,
         arc_self.dialog_loop(socket_connection, peer.clone(), processor_sender).await
     }
 
-    /// Handles the "local" side of the peers dialog that is to take place once the connection is established -- provided the communications are done through a textual chat
-    /// in which each event/command/sentence ends in '\n'.\
+    /// Handles the "local" side of the peers dialog that is to take place once the connection is ready.\
     /// The protocol is determined by `LocalMessages` & `RemoteMessages`, where and each one may either be the client messages or server messages, depending on who is the "local peer":
     ///   - `peer` represents the remote end of the connection;
     ///   - `processor_sender` is a [reactive_mutiny::Uni], to which incoming messages will be sent;
     ///   - conversely, `peer.sender` is the [reactive_mutiny::Uni] to receive outgoing messages.
-    ///   - after the processor is done with the `textual_socket`, the method returns it back to the caller if no errors had happened.
+    /// After the processor is done with the `socket_connection`, the method returns it back to the caller if no errors had happen.
     #[inline(always)]
     async fn dialog_loop(self: Arc<Self>,
                          mut socket_connection: SocketConnection<StateType>,
@@ -241,6 +241,7 @@ impl<const CONFIG:        u64,
                          processor_sender:      ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>)
 
                         -> Result<SocketConnection<StateType>, Box<dyn Error + Sync + Send>> {
+
         // socket configs
         if let Some(no_delay) = Self::CONST_CONFIG.socket_options.no_delay {
             socket_connection.connection_mut().set_nodelay(no_delay).map_err(|err| format!("error setting nodelay({no_delay}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
@@ -253,22 +254,29 @@ impl<const CONFIG:        u64,
             socket_connection.connection_mut().set_linger(Some(Duration::from_millis(millis as u64))).map_err(|err| format!("error setting linger({millis}ms) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
         }
 
+        // delegate the dialog loop to the specialized message form specialist
         let result = match Self::CONST_CONFIG.message_form {
             MessageForms::Textual { max_size }        => self.dialog_loop_for_textual_form(&mut socket_connection, &peer, &processor_sender, max_size).await,
             MessageForms::VariableBinary { max_size } => self.dialog_loop_for_variable_binary_form(&mut socket_connection, &peer, &processor_sender, max_size).await,
             MessageForms::FixedBinary { size }        => self.dialog_loop_for_fixed_binary_form(&mut socket_connection, &peer, &processor_sender, size).await,
         };
+
+        // processor closing procedures
         if let Ok(()) = result {
-            let flush_timeout = Duration::from_millis(Self::CONST_CONFIG.flush_timeout_millis as u64);
-            _ = processor_sender.close(flush_timeout).await;
-            peer.flush_and_close(flush_timeout).await;
+            _ = processor_sender.close(Duration::from_millis(Self::CONST_CONFIG.flush_timeout_millis as u64)).await;
+            peer.cancel_and_close();
             socket_connection.connection_mut().flush().await.map_err(|err| format!("error flushing the socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
             peer.take_state().await
                 .map(|state| socket_connection.set_state(state));
         }
+
+        // return the connection
         result.map(|_| socket_connection)
     }
 
+    /// Dialog loop specialist for text-based message forms, where each in & out event/command/sentence ends in '\n'.\
+    /// `max_line_size` is the limit length of the lines that can be parsed (including the '\n' delimiter): if bigger
+    /// lines come in, the dialog will end in error.
     #[inline(always)]
     async fn dialog_loop_for_textual_form(self: Arc<Self>,
                                           socket_connection:     &mut SocketConnection<StateType>,
@@ -298,13 +306,13 @@ impl<const CONFIG:        u64,
                             serialization_buffer.push(b'\n');
                             // send
                             if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
-                                warn!("`dialog_loop_for_textual_protocol`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
+                                warn!("`dialog_loop_for_textual_form()`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
                                 socket_connection.report_closed();
                                 break 'connection
                             }
                         },
                         None => {
-                            debug!("`dialog_loop_for_textual_protocol`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer` by the unresponsive processor OR a disconnection message was previously answered by the responsive processor)");
+                            debug!("`dialog_loop_for_textual_form()`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer`)");
                             break 'connection
                         }
                     }
@@ -325,9 +333,9 @@ impl<const CONFIG:        u64,
                                         Ok(remote_message) => {
                                             if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
                                                 // log & send the error message to the remote peer
-                                                error!("`dialog_loop_for_textual_protocol`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
+                                                error!("`dialog_loop_for_textual_form()`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
                                                 if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
-                                                        warn!("reactive-messaging: {error_msg_sender} -- Slow reader {:?}", peer);
+                                                        warn!("dialog_loop_for_textual_form(): {error_msg_sender} -- Slow reader {:?}", peer);
                                                     if abort_sender {
                                                         socket_connection.report_closed();
                                                         break 'connection
@@ -344,11 +352,11 @@ impl<const CONFIG:        u64,
                                             let error_message = format!("Unknown command received from {:?} (peer id {}): '{}': {}",
                                                                             peer.peer_address, peer.peer_id, stripped_line, err);
                                             // log & send the error message to the remote peer
-                                            warn!("`dialog_loop_for_textual_protocol`:  {error_message}");
+                                            warn!("`dialog_loop_for_textual_form()`:  {error_message}");
                                             let outgoing_error = LocalMessagesType::processor_error_message(error_message);
                                             if let Err((abort, error_msg)) = peer.send_async(outgoing_error).await {
                                                 if abort {
-                                                    warn!("`dialog_loop_for_textual_protocol`:  {error_msg} -- Slow reader {:?}", peer);
+                                                    warn!("`dialog_loop_for_textual_form()`:  {error_msg} -- Slow reader {:?}", peer);
                                                     socket_connection.report_closed();
                                                     break 'connection
                                                 }
@@ -365,18 +373,19 @@ impl<const CONFIG:        u64,
                                     if next_line_index > 0 {
                                         read_buffer.drain(0..next_line_index);
                                     }
+                                    // TODO: can we break the server (or client) if the message is too big / don't have a '\n'? TEST IT!
                                     break
                                 }
                             }
                         },
                         Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
-                            trace!("`dialog_loop_for_textual_protocol`: EOF with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                            trace!("`dialog_loop_for_textual_form()`: EOF while reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
                             socket_connection.report_closed();
                             break 'connection
                         },
                         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
                         Err(err) => {
-                            error!("`dialog_loop_for_textual_protocol`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
+                            error!("`dialog_loop_for_textual_form()`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
                             socket_connection.report_closed();
                             break 'connection
                         },
@@ -394,170 +403,165 @@ impl<const CONFIG:        u64,
                                                   processor_sender:      &ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>,
                                                   max_payload_size:      u32)
 
-                                                 -> Result<(), Box<dyn Error + Sync + Send>> {
-        // message form
-        //let MESSAGE_FORM: MessageForms = Self::CONST_CONFIG.message_form;     /* NOT NEEDED ANYMORE? // TODO: fix this performance hit by splitting the following code into 2 distinct functions, after all tests are passing */
+                                                 -> Result<(), Box<dyn Error + Sync + Send>>
+
+                                                 /* TODO: 2024-02-26: the blocker on this method is that we need to use a particular channel type that allows us to allocate the elements in this function -- via Box or Arc,  */
+                                                 /*       in opposition to publishing the raw `RemoteMessagesType` as done in the textual or fixed binary versions. To circumvent this, our macros might not only receive the Channel */
+                                                 /*       type, but the message form as well (which would be moved out of ConstConfig) and, here, we may publish the element as `processor_sender.send_derived(arc_version)` */
+                                                 /*       provided that the caller of this method, if using RKYV, will use `ArchivedMyRemoteMessages` for the `RemoteMessagesType`. */
+                                                 /*       Anyway, we may have to rework `reactive-mutiny` for that, as .send_derived() seems not to be, currently, available for `Uni`s */
+                                                 /*where Box<RemoteMessagesType>: Deref -- provided the caller needs to use the RKYV's `ArchiveRemoteMessages` on all invocations */  {
         const SIZE_OF_MAX_LEN: usize = 4; // use Self::CONST_CONFIG.message_form.size_of_max_len() everywhere
-        let max_line_size = if let MessageForms::Textual { max_size } = Self::CONST_CONFIG.message_form {
-            max_size
-        } else {
-            0
-        };
-        // buffers
-        let mut read_buffer = Vec::with_capacity(max_line_size as usize);
-        let mut serialization_buffer = Vec::with_capacity(max_line_size as usize);
-        // socket
-        if let Some(no_delay) = Self::CONST_CONFIG.socket_options.no_delay {
-            socket_connection.connection_mut().set_nodelay(no_delay).map_err(|err| format!("error setting nodelay({no_delay}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
+
+        const SERIALIZATION_BUFFER_SIZE_HINT: u32 = 1024;
+        let mut serialization_buffer = Vec::<u8>::with_capacity(max_payload_size.min(SERIALIZATION_BUFFER_SIZE_HINT) as usize);
+
+        /// Controls the read state machine -- a full read message consists of two reads: the payload size (u32) followed by the payload itself.\
+        /// Using a state machine allows we to prioritise writes without having to duplicate the `select!()` expression
+        enum ReadState {
+            ExpectingSize,
+            ExpectingPayload,
         }
-        if let Some(hops_to_live) = Self::CONST_CONFIG.socket_options.hops_to_live {
-            let hops_to_live = hops_to_live.get() as u32;
-            socket_connection.connection_mut().set_ttl(hops_to_live).map_err(|err| format!("error setting ttl({hops_to_live}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
-        }
-        if let Some(millis) = Self::CONST_CONFIG.socket_options.linger_millis {
-            socket_connection.connection_mut().set_linger(Some(Duration::from_millis(millis as u64))).map_err(|err| format!("error setting linger({millis}ms) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
-        }
+        let mut read_state = ReadState::ExpectingSize;
+        let mut payload_size_buff: [u8; SIZE_OF_MAX_LEN] = [0; SIZE_OF_MAX_LEN];
+        let mut payload_size_buff_len = 0usize;
 
         let (mut sender_stream, _) = peer.create_stream();
 
+        // for sending -- returns `false` if it was not possible to send (an unrecoverable error which should cause the upper method to return)
+        async fn send_message<LocalMessagesType: ReactiveMessagingSerializer<LocalMessagesType> + Send + Sync + PartialEq + Debug + 'static,
+                              StateType:                                                          Send + Sync + Clone     + Debug + 'static>
+                             (to_send: Option<LocalMessagesType>,
+                              serialization_buffer: &mut Vec<u8>,
+                              socket_connection: &mut SocketConnection<StateType>,
+                              peer_descriptor: impl FnOnce() -> String)
+                             -> bool {
+            match to_send {
+                Some(to_send) => {
+                    // serialize
+                    LocalMessagesType::serialize_binary(&to_send, serialization_buffer);
+                    let payload_len = serialization_buffer.len() - SIZE_OF_MAX_LEN;
+                    let payload_len_bytes = payload_len.to_le_bytes();
+                    for i in 0..SIZE_OF_MAX_LEN {
+                        serialization_buffer[i] = payload_len_bytes[i];
+                    }
+                    // send
+                    if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
+                        warn!("`dialog_loop_for_variable_binary_form()`: PROBLEM in the connection with {} while WRITING '{to_send:?}': {err:?}", peer_descriptor());
+                        socket_connection.report_closed();
+                        return false
+                    }
+                },
+                None => {
+                    debug!("`dialog_loop_for_variable_binary_form()`: Sender for {} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called)", peer_descriptor());
+                    return false
+                }
+            }
+            true
+        }
+
         'connection: loop {
-            // wait for the socket to be readable or until we have something to write
-            tokio::select!(
 
-                biased;     // sending has priority over receiving
+            let mut read_slice: &mut [u8] = &mut payload_size_buff[payload_size_buff_len..];    // for some reason, Rust 1.76 doesn't allow inlining this expression where it is used (resulting in it not being recognized as &mut [u8]) -- a compiler bug?
 
-                // send?
-                to_send = sender_stream.next() => {
-                    match to_send {
-                        Some(to_send) => {
-                            // serialize
-                            match Self::CONST_CONFIG.message_form {
-                                MessageForms::Textual { .. } => {
-                                    LocalMessagesType::serialize_textual(&to_send, &mut serialization_buffer);
-                                    serialization_buffer.push(b'\n');
-                                },
-                                MessageForms::FixedBinary { size } => { todo!("One function for each form") },
-                                MessageForms::VariableBinary { max_size } => {
-                                    serialization_buffer.resize(SIZE_OF_MAX_LEN, 0);
-                                    LocalMessagesType::serialize_binary(&to_send, &mut serialization_buffer);
-                                    let payload_len = serialization_buffer.len()-SIZE_OF_MAX_LEN;
-                                    let payload_len_bytes = payload_len.to_le_bytes();
-                                    for i in 0..SIZE_OF_MAX_LEN {
-                                        serialization_buffer[i] = payload_len_bytes[i];
-                                    }
-                                },
-                            }
-                            // send
-                            if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
-                                warn!("`dialog_loop_for_textual_protocol`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
+            // 1) Read the payload size -- prioritizing writes back to the peer, in case any answer is ready
+            let expected_payload_size = 'reading_payload_size: loop {
+                tokio::select!(
+
+                    biased;     // sending has priority over receiving
+
+                    // send?
+                    to_send = sender_stream.next() => if !send_message(to_send, &mut serialization_buffer, socket_connection, || format!("{peer:?}")).await {
+                        break 'connection
+                    },
+
+                    // receive?
+                    read = socket_connection.connection_mut().read_buf(&mut read_slice) => {
+                        match read {
+                            Ok(n) if n > 0 => {
+                                payload_size_buff_len += n;
+                                // completed reading the payload size?
+                                if payload_size_buff_len == SIZE_OF_MAX_LEN {
+                                    let payload_size = u32::from_le_bytes(payload_size_buff);
+                                    break 'reading_payload_size payload_size as usize
+                                }
+                            },
+                            Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
+                                trace!("`dialog_loop_for_variable_binary_form()`: EOF while reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
                                 socket_connection.report_closed();
                                 break 'connection
-                            }
-                        },
-                        None => {
-                            debug!("`dialog_loop_for_textual_protocol`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer` by the unresponsive processor OR a disconnection message was previously answered by the responsive processor)");
-                            break 'connection
+                            },
+                            Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
+                            Err(err) => {
+                                error!("`dialog_loop_for_variable_binary_form()`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
+                                socket_connection.report_closed();
+                                break 'connection
+                            },
                         }
-                    }
-                },
+                    },
+                );
+            };
 
-                // receive?
-                read = socket_connection.connection_mut().read_buf(&mut read_buffer) => {
-                    match read {
-                        Ok(n) if n > 0 => {
-                            // deserialize
-                            match Self::CONST_CONFIG.message_form {
-                                MessageForms::FixedBinary { size } => { todo!("One function for each form") },
-                                MessageForms::VariableBinary { max_size } => {
-                                    if read_buffer.len() > SIZE_OF_MAX_LEN {
-                                        let mut payload_len_bytes = [0u8; 4];
-                                        for i in 0..SIZE_OF_MAX_LEN {
-                                            payload_len_bytes[i] = read_buffer[i];
-                                        }
-                                        let payload_len = u32::from_le_bytes(payload_len_bytes);
-                                        if read_buffer.len() >= payload_len as usize + SIZE_OF_MAX_LEN {
-                                            match RemoteMessagesType::deserialize_binary(&read_buffer[SIZE_OF_MAX_LEN..]) {
-                                                Ok(remote_message) => {
-                                                    // fill in
-                                                },
-                                                Err(err) => {
-                                                    // fill in
-                                                },
-                                            }
-                                        }
-                                    }
-                                },
-                                MessageForms::Textual { .. } => {
-                                    let mut next_line_index = 0;
-                                    let mut this_line_search_start = read_buffer.len() - n;
-                                    loop {
-                                        if let Some(mut eol_pos) = read_buffer[next_line_index+this_line_search_start..].iter().position(|&b| b == b'\n') {
-                                            eol_pos += next_line_index+this_line_search_start;
-                                            let line_bytes = &read_buffer[next_line_index..eol_pos];
-                                            match RemoteMessagesType::deserialize_textual(line_bytes) {
-                                                Ok(remote_message) => {
-                                                    if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
-                                                        // log & send the error message to the remote peer
-                                                        error!("`dialog_loop_for_textual_protocol`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
-                                                        if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
-                                                                warn!("reactive-messaging: {error_msg_sender} -- Slow reader {:?}", peer);
-                                                            if abort_sender {
-                                                                socket_connection.report_closed();
-                                                                break 'connection
-                                                            }
-                                                        }
-                                                        if abort_processor {
-                                                            socket_connection.report_closed();
-                                                            break 'connection
-                                                        }
-                                                    }
-                                                },
-                                                Err(err) => {
-                                                    let stripped_line = String::from_utf8_lossy(line_bytes);
-                                                    let error_message = format!("Unknown command received from {:?} (peer id {}): '{}': {}",
-                                                                                    peer.peer_address, peer.peer_id, stripped_line, err);
-                                                    // log & send the error message to the remote peer
-                                                    warn!("`dialog_loop_for_textual_protocol`:  {error_message}");
-                                                    let outgoing_error = LocalMessagesType::processor_error_message(error_message);
-                                                    if let Err((abort, error_msg)) = peer.send_async(outgoing_error).await {
-                                                        if abort {
-                                                            warn!("`dialog_loop_for_textual_protocol`:  {error_msg} -- Slow reader {:?}", peer);
-                                                            socket_connection.report_closed();
-                                                            break 'connection
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            next_line_index = eol_pos + 1;
-                                            this_line_search_start = 0;
-                                            if next_line_index >= read_buffer.len() {
-                                                read_buffer.clear();
-                                                break
-                                            }
-                                        } else {
-                                            if next_line_index > 0 {
-                                                read_buffer.drain(0..next_line_index);
-                                            }
-                                            break
-                                        }
-                                    }
-                                },
-                            }
-                        },
-                        Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
-                            trace!("`dialog_loop_for_textual_protocol`: EOF with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
-                            socket_connection.report_closed();
-                            break 'connection
-                        },
-                        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
-                        Err(err) => {
-                            error!("`dialog_loop_for_textual_protocol`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
-                            socket_connection.report_closed();
-                            break 'connection
-                        },
-                    }
-                },
-            );
+            let mut payload_slot: Box<[u8]> = vec![0; expected_payload_size as usize].into_boxed_slice();
+            let mut payload_slot_len = 0usize;
+
+            // 2) Read the payload & deliver it to the local processor -- prioritizing writes back to the peer, in case any answer is ready
+            let payload_slot = 'reading_payload: loop {
+
+                let mut read_slice: &mut [u8] = &mut payload_slot[payload_slot_len..];  // for some reason, Rust 1.76 doesn't allow inlining this expression where it is used (resulting in it not being recognized as &mut [u8]) -- a compiler bug?
+
+                tokio::select!(
+
+                    biased;     // sending has priority over receiving
+
+                    // send?
+                    to_send = sender_stream.next() => if !send_message(to_send, &mut serialization_buffer, socket_connection, || format!("{peer:?}")).await {
+                        break 'connection
+                    },
+
+                    // receive?
+                    read = socket_connection.connection_mut().read_buf(&mut read_slice) => {
+                        match read {
+                            Ok(n) if n > 0 => {
+                                payload_slot_len += n;
+                                // completed reading the payload?
+                                if payload_slot_len == expected_payload_size {
+                                    // deserialize
+                                    let rkyv_archive = ();  // make, somehow, RKYV to use `payload_slot` as our `Box<archive_model>`
+                                    // TODO: RKYV obviously needs a variable size... do we need to check that?
+                                    // let ptr = slot.as_mut_ptr();
+                                    break 'reading_payload rkyv_archive
+
+                                }
+                            },
+                            Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
+                                trace!("`dialog_loop_for_variable_binary_form()`: EOF with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                                socket_connection.report_closed();
+                                break 'connection
+                            },
+                            Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
+                            Err(err) => {
+                                error!("`dialog_loop_for_variable_binary_form()`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
+                                socket_connection.report_closed();
+                                break 'connection
+                            },
+                        }
+                    },
+                );
+            };
+
+            // 3) deliver the payload for processing
+            // processor_sender(payload);
+
+            // TESTS to add to our crate:
+            // 1) serialize_binary(PayloadType) -> Vec<u8> -- containing the data of a ArchivePayloadType
+            // 2) deserialize_binary? No, not needed!!! We are zero-copy, so NO DESERIALIZATION!
+            // 3) This dialog's `processor_sender` should receive items like  Arc<ArchiveRemoteMessagesType>
+
+            // TESTS to add to `reactive-mutiny`:
+            // 1) Being able to send_derived an `Arc<ArchivePayloadType>` to a `Uni<PayloadType>`.
+            //    (and the method here must require that the processor sender uses an -- yet to be introduced -- Arc allocator?)
+
         }
         Ok(())
     }
@@ -570,30 +574,42 @@ impl<const CONFIG:        u64,
                                                payload_size:          u32)
 
                                               -> Result<(), Box<dyn Error + Sync + Send>> {
-        // message form
-        //let MESSAGE_FORM: MessageForms = Self::CONST_CONFIG.message_form;     /* NOT NEEDED ANYMORE? // TODO: fix this performance hit by splitting the following code into 2 distinct functions, after all tests are passing */
-        const SIZE_OF_MAX_LEN: usize = 4; // use Self::CONST_CONFIG.message_form.size_of_max_len() everywhere
-        let max_line_size = if let MessageForms::Textual { max_size } = Self::CONST_CONFIG.message_form {
-            max_size
-        } else {
-            0
-        };
-        // buffers
-        let mut read_buffer = Vec::with_capacity(max_line_size as usize);
-        let mut serialization_buffer = Vec::with_capacity(max_line_size as usize);
-        // socket
-        if let Some(no_delay) = Self::CONST_CONFIG.socket_options.no_delay {
-            socket_connection.connection_mut().set_nodelay(no_delay).map_err(|err| format!("error setting nodelay({no_delay}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
-        }
-        if let Some(hops_to_live) = Self::CONST_CONFIG.socket_options.hops_to_live {
-            let hops_to_live = hops_to_live.get() as u32;
-            socket_connection.connection_mut().set_ttl(hops_to_live).map_err(|err| format!("error setting ttl({hops_to_live}) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
-        }
-        if let Some(millis) = Self::CONST_CONFIG.socket_options.linger_millis {
-            socket_connection.connection_mut().set_linger(Some(Duration::from_millis(millis as u64))).map_err(|err| format!("error setting linger({millis}ms) for the socket connected at {}:{}: {err}", peer.peer_address, peer.peer_id))?;
-        }
+
+        // bad, Rust 1.76, bad... I cannot use const here: "error[E0401]: can't use generic parameters from outer item"
+        let local_payload_size = std::mem::size_of::<LocalMessagesType>();
+        let remote_payload_size = std::mem::size_of::<RemoteMessagesType>();
 
         let (mut sender_stream, _) = peer.create_stream();
+
+        let allocate_reader_slot = || {
+            let mut slot = processor_sender.reserve_slot().expect("Add retrying code here, bailing out if it fails");
+/*
+            if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
+                // log & send the error message to the remote peer
+                error!("`dialog_loop_for_fixed_binary_form()`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
+                if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
+                        warn!("dialog_loop_for_fixed_binary_form(): {error_msg_sender} -- Slow reader {:?}", peer);
+                    if abort_sender {
+                        socket_connection.report_closed();
+                        break 'connection
+                    }
+                }
+                if abort_processor {
+                    socket_connection.report_closed();
+                    break 'connection
+                }
+            }
+ */
+            let bytes_buffer = unsafe {
+                let ptr = (slot as *mut RemoteMessagesType).cast::<u8>();
+                let len = remote_payload_size;
+                std::slice::from_raw_parts_mut(ptr, len)
+            };
+            (slot, bytes_buffer, 0usize)
+        };
+
+        /// The place where the incoming messages should be put
+        let (mut reader_slot, mut reader_bytes_buffer, mut received_len) = allocate_reader_slot();
 
         'connection: loop {
             // wait for the socket to be readable or until we have something to write
@@ -605,128 +621,45 @@ impl<const CONFIG:        u64,
                 to_send = sender_stream.next() => {
                     match to_send {
                         Some(to_send) => {
-                            // serialize
-                            match Self::CONST_CONFIG.message_form {
-                                MessageForms::Textual { .. } => {
-                                    LocalMessagesType::serialize_textual(&to_send, &mut serialization_buffer);
-                                    serialization_buffer.push(b'\n');
-                                },
-                                MessageForms::FixedBinary { size } => { todo!("One function for each form") },
-                                MessageForms::VariableBinary { max_size } => {
-                                    serialization_buffer.resize(SIZE_OF_MAX_LEN, 0);
-                                    LocalMessagesType::serialize_binary(&to_send, &mut serialization_buffer);
-                                    let payload_len = serialization_buffer.len()-SIZE_OF_MAX_LEN;
-                                    let payload_len_bytes = payload_len.to_le_bytes();
-                                    for i in 0..SIZE_OF_MAX_LEN {
-                                        serialization_buffer[i] = payload_len_bytes[i];
-                                    }
-                                },
-                            }
+                            // "serialize" -- actually, only get the pointer to the bytes, as we are zero-copy here
+                            let to_send_bytes = unsafe {
+                                let ptr = (&to_send as *const LocalMessagesType).cast::<u8>();
+                                let len = local_payload_size;
+                                std::slice::from_raw_parts(ptr, len)
+                            };
                             // send
-                            if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
-                                warn!("`dialog_loop_for_textual_protocol`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
+                            if let Err(err) = socket_connection.connection_mut().write_all(&to_send_bytes).await {
+                                warn!("`dialog_loop_for_fixed_binary_form()`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
                                 socket_connection.report_closed();
                                 break 'connection
                             }
                         },
                         None => {
-                            debug!("`dialog_loop_for_textual_protocol`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer` by the unresponsive processor OR a disconnection message was previously answered by the responsive processor)");
+                            debug!("`dialog_loop_for_fixed_binary_form()`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer`");
                             break 'connection
                         }
                     }
                 },
 
                 // receive?
-                read = socket_connection.connection_mut().read_buf(&mut read_buffer) => {
+                read = socket_connection.connection_mut().read_buf(&mut reader_bytes_buffer) => {
                     match read {
                         Ok(n) if n > 0 => {
-                            // deserialize
-                            match Self::CONST_CONFIG.message_form {
-                                MessageForms::FixedBinary { size } => { todo!("One function for each form") },
-                                MessageForms::VariableBinary { max_size } => {
-                                    if read_buffer.len() > SIZE_OF_MAX_LEN {
-                                        let mut payload_len_bytes = [0u8; 4];
-                                        for i in 0..SIZE_OF_MAX_LEN {
-                                            payload_len_bytes[i] = read_buffer[i];
-                                        }
-                                        let payload_len = u32::from_le_bytes(payload_len_bytes);
-                                        if read_buffer.len() >= payload_len as usize + SIZE_OF_MAX_LEN {
-                                            match RemoteMessagesType::deserialize_binary(&read_buffer[SIZE_OF_MAX_LEN..]) {
-                                                Ok(remote_message) => {
-                                                    // fill in
-                                                },
-                                                Err(err) => {
-                                                    // fill in
-                                                },
-                                            }
-                                        }
-                                    }
-                                },
-                                MessageForms::Textual { .. } => {
-                                    let mut next_line_index = 0;
-                                    let mut this_line_search_start = read_buffer.len() - n;
-                                    loop {
-                                        if let Some(mut eol_pos) = read_buffer[next_line_index+this_line_search_start..].iter().position(|&b| b == b'\n') {
-                                            eol_pos += next_line_index+this_line_search_start;
-                                            let line_bytes = &read_buffer[next_line_index..eol_pos];
-                                            match RemoteMessagesType::deserialize_textual(line_bytes) {
-                                                Ok(remote_message) => {
-                                                    if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
-                                                        // log & send the error message to the remote peer
-                                                        error!("`dialog_loop_for_textual_protocol`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
-                                                        if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
-                                                                warn!("reactive-messaging: {error_msg_sender} -- Slow reader {:?}", peer);
-                                                            if abort_sender {
-                                                                socket_connection.report_closed();
-                                                                break 'connection
-                                                            }
-                                                        }
-                                                        if abort_processor {
-                                                            socket_connection.report_closed();
-                                                            break 'connection
-                                                        }
-                                                    }
-                                                },
-                                                Err(err) => {
-                                                    let stripped_line = String::from_utf8_lossy(line_bytes);
-                                                    let error_message = format!("Unknown command received from {:?} (peer id {}): '{}': {}",
-                                                                                    peer.peer_address, peer.peer_id, stripped_line, err);
-                                                    // log & send the error message to the remote peer
-                                                    warn!("`dialog_loop_for_textual_protocol`:  {error_message}");
-                                                    let outgoing_error = LocalMessagesType::processor_error_message(error_message);
-                                                    if let Err((abort, error_msg)) = peer.send_async(outgoing_error).await {
-                                                        if abort {
-                                                            warn!("`dialog_loop_for_textual_protocol`:  {error_msg} -- Slow reader {:?}", peer);
-                                                            socket_connection.report_closed();
-                                                            break 'connection
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            next_line_index = eol_pos + 1;
-                                            this_line_search_start = 0;
-                                            if next_line_index >= read_buffer.len() {
-                                                read_buffer.clear();
-                                                break
-                                            }
-                                        } else {
-                                            if next_line_index > 0 {
-                                                read_buffer.drain(0..next_line_index);
-                                            }
-                                            break
-                                        }
-                                    }
-                                },
+                            received_len += n;
+                            if received_len == remote_payload_size {
+                                processor_sender.send_reserved(reader_slot);
+                                // prepare for the next read
+                                (reader_slot, reader_bytes_buffer, received_len) = allocate_reader_slot();
                             }
                         },
                         Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
-                            trace!("`dialog_loop_for_textual_protocol`: EOF with reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
+                            trace!("`dialog_loop_for_fixed_binary_form()`: EOF while reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
                             socket_connection.report_closed();
                             break 'connection
                         },
                         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
                         Err(err) => {
-                            error!("`dialog_loop_for_textual_protocol`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
+                            error!("`dialog_loop_for_fixed_binary_form()`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
                             socket_connection.report_closed();
                             break 'connection
                         },
@@ -734,6 +667,7 @@ impl<const CONFIG:        u64,
                 },
             );
         }
+        processor_sender.cancel_reservation(reader_slot);
         Ok(())
     }
 

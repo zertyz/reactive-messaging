@@ -139,6 +139,27 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
         }
     }
 
+    #[inline(always)]
+    pub async fn send_derived(&self) {
+        // TODO 2024-02-26: self.uni.send_derived... search for other 2024-02-26 TODOs
+    }
+
+    #[inline(always)]
+    pub fn reserve_slot(&self) -> Option<&mut RemoteMessages> {
+        // TODO 2024-02-26: self.uni.reserve_slot(), returning an Option<mutable reference>
+        None
+    }
+
+    #[inline(always)]
+    pub fn cancel_reservation(&self, slot: &mut RemoteMessages) {
+        // TODO see `reserve_slot()`
+    }
+
+    #[inline(always)]
+    pub fn send_reserved(&self, slot: &mut RemoteMessages) {
+        // TODO see `reserve_slot()`
+    }
+
     /// See [GenericUni::pending_items_count()]
     #[inline(always)]
     pub fn pending_items_count(&self) -> u32 {
