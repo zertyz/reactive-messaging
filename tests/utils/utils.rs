@@ -7,10 +7,10 @@ use std::future;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::{SystemTime, UNIX_EPOCH};
-use futures::{FutureExt, Stream};
+use futures::Stream;
 use futures::StreamExt;
 
 
@@ -59,9 +59,9 @@ pub fn last_micros_probed_protocol_events_handler<const CONFIG:  u64,
     (
         move |event| {
             match event {
-                ProtocolEvent::PeerArrived { peer }                                            => last_peer_arrived_notification_micros_ref.store(now_as_micros(), Relaxed),
-                ProtocolEvent::PeerLeft { peer, stream_stats } => last_peer_left_notification_micros_ref.store(now_as_micros(), Relaxed),
-                ProtocolEvent::LocalServiceTermination                                                      => last_local_service_termination_notification_micros_ref.store(now_as_micros(), Relaxed),
+                ProtocolEvent::PeerArrived { peer: _ }               => last_peer_arrived_notification_micros_ref.store(now_as_micros(), Relaxed),
+                ProtocolEvent::PeerLeft { peer: _, stream_stats: _ } => last_peer_left_notification_micros_ref.store(now_as_micros(), Relaxed),
+                ProtocolEvent::LocalServiceTermination               => last_local_service_termination_notification_micros_ref.store(now_as_micros(), Relaxed),
             }
             Box::pin(future::ready(()))
         },

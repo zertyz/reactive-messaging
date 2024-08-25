@@ -2,17 +2,12 @@
 
 use std::error::Error;
 use std::future;
-use std::io::BufWriter;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use crate::utils::*;
 use reactive_messaging::prelude::*;
 use std::sync::atomic::Ordering::Relaxed;
-use std::time::Duration;
 use futures::stream::StreamExt;
-use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
-use tokio::net::TcpListener;
-use tokio::task::yield_now;
 
 
 /// The compile-time configs used by the tests here
@@ -112,7 +107,7 @@ async fn distinct_connection_and_protocol_events() {
                         peer.send(TestString(format!("{protocol_id}"))).expect("{case}: Couldn't send");
                         println!("PROTOCOL EVENT #{protocol_id}: arrived -- {peer:?}");
                     },
-                    ProtocolEvent::PeerLeft{ peer, stream_stats  } => {
+                    ProtocolEvent::PeerLeft{ peer, stream_stats: _  } => {
                         client_protocol_datum_ref1.left.fetch_add(protocol_id+1, Relaxed);
                         println!("PROTOCOL EVENT #{protocol_id}: left -- {peer:?}");
                     },
@@ -121,9 +116,9 @@ async fn distinct_connection_and_protocol_events() {
                         println!("PROTOCOL EVENT #{protocol_id}: Local Service Termination request reported");
                     },
                 }),
-                move |_, _, peer, mut server_stream| {
+                move |_, _, peer, server_stream| {
                     let client_protocol_datum_ref2 = Arc::clone(&client_protocol_datum_ref2);
-                    let case = case_builder();
+                    let _case = case_builder();
                     server_stream
                         .take(1)
                         .map(move |message| {
@@ -137,7 +132,7 @@ async fn distinct_connection_and_protocol_events() {
             handles.push(handle);
         }
         client.start_multi_protocol(0,
-                                    move |socket_connection, is_reused| {
+                                    move |socket_connection, _is_reused| {
                                         let state = socket_connection.state();
                                         routing_sum_ref.fetch_add(state+1, Relaxed);
                                         let handle = handles.get(*state).map(ConnectionChannel::clone_sender);
@@ -232,13 +227,13 @@ async fn terminates_immediately_when_done() {
             }
             probed_protocol_events_handler(event)
         },
-        move |remote_addr, port, peer, server_messages_stream| {
+        move |remote_addr: _, port: _, peer, server_messages_stream| {
             probed_protocol_processor_builder(server_messages_stream)
                 .inspect(move |_server_message| {
                     peer.cancel_and_close();
                 })
         }
-    );
+    ).expect("Cannot start client processor");
 
     client.termination_waiter()().await.expect("Error waiting for the client to finish");
     let termination_reported_time_diff = last_server_message_micros.load(Relaxed).abs_diff(now_as_micros());
@@ -252,7 +247,7 @@ async fn terminates_immediately_when_done() {
 /// Our specially crafted text-based "mock" server suitable for Multi-protocol tests:
 /// receives a number, followed by `\n` and answers with number+1, also followed by `\n`.\
 /// If `disconnect_at` is given, it will drop the connection as soon as that number is received.
-async fn multi_protocol_server(port: u16, mut disconnect_at: Option<u16>) -> Result<impl MessagingService<{CONFIG.into()}>, Box<dyn Error + Send + Sync>> {
+async fn multi_protocol_server(port: u16, disconnect_at: Option<u16>) -> Result<impl MessagingService<{CONFIG.into()}>, Box<dyn Error + Send + Sync>> {
     let mut server = new_socket_server!(CONFIG, "127.0.0.1", port);
     start_server_processor!(CONFIG, Atomic, server, TestString, TestString,
         |_| future::ready(()),
@@ -267,7 +262,7 @@ async fn multi_protocol_server(port: u16, mut disconnect_at: Option<u16>) -> Res
                 .inspect(move |(input_number, server_answer)| println!("  ss Server received {input_number:?} and will {}",
                                                                                             if input_number != &disconnect_at { format!("answer '{server_answer}'") } else { String::from("disconnect") } ))
                 .take_while(move |(input_number, _server_answer)| future::ready(input_number != &disconnect_at))
-                .map(|(input_number, server_answer)| TestString(server_answer))
+                .map(|(_input_number, server_answer)| TestString(server_answer))
                 .to_responsive_stream(peer, |_, _| ())
         }
     )?;

@@ -23,7 +23,6 @@ use std::{
 };
 use reactive_mutiny::prelude::advanced::{GenericUni, FullDuplexUniChannel};
 use futures::{StreamExt, Stream};
-use futures::io::ReadToString;
 use tokio::io::{self,AsyncReadExt,AsyncWriteExt};
 use log::{trace, debug, warn, error};
 use crate::socket_connection::connection::SocketConnection;
@@ -400,7 +399,7 @@ impl<const CONFIG:        u64,
     async fn dialog_loop_for_variable_binary_form(self: Arc<Self>,
                                                   socket_connection:     &mut SocketConnection<StateType>,
                                                   peer:                  &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
-                                                  processor_sender:      &ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>,
+                                                  _processor_sender:     &ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>,
                                                   max_payload_size:      u32)
 
                                                  -> Result<(), Box<dyn Error + Sync + Send>>
@@ -422,7 +421,7 @@ impl<const CONFIG:        u64,
             ExpectingSize,
             ExpectingPayload,
         }
-        let mut read_state = ReadState::ExpectingSize;
+        let _read_state = ReadState::ExpectingSize;
         let mut payload_size_buff: [u8; SIZE_OF_MAX_LEN] = [0; SIZE_OF_MAX_LEN];
         let mut payload_size_buff_len = 0usize;
 
@@ -506,7 +505,7 @@ impl<const CONFIG:        u64,
             let mut payload_slot_len = 0usize;
 
             // 2) Read the payload & deliver it to the local processor -- prioritizing writes back to the peer, in case any answer is ready
-            let payload_slot = 'reading_payload: loop {
+            let _payload_slot = 'reading_payload: loop {
 
                 let mut read_slice: &mut [u8] = &mut payload_slot[payload_slot_len..];  // for some reason, Rust 1.76 doesn't allow inlining this expression where it is used (resulting in it not being recognized as &mut [u8]) -- a compiler bug?
 
@@ -571,7 +570,7 @@ impl<const CONFIG:        u64,
                                                socket_connection:     &mut SocketConnection<StateType>,
                                                peer:                  &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
                                                processor_sender:      &ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>,
-                                               payload_size:          u32)
+                                               _payload_size:         u32)
 
                                               -> Result<(), Box<dyn Error + Sync + Send>> {
 
@@ -582,7 +581,7 @@ impl<const CONFIG:        u64,
         let (mut sender_stream, _) = peer.create_stream();
 
         let allocate_reader_slot = || {
-            let mut slot = processor_sender.reserve_slot().expect("Add retrying code here, bailing out if it fails");
+            let slot = processor_sender.reserve_slot().expect("Add retrying code here, bailing out if it fails");
 /*
             if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
                 // log & send the error message to the remote peer
@@ -608,7 +607,7 @@ impl<const CONFIG:        u64,
             (slot, bytes_buffer, 0usize)
         };
 
-        /// The place where the incoming messages should be put
+        // The place where the incoming messages should be put
         let (mut reader_slot, mut reader_bytes_buffer, mut received_len) = allocate_reader_slot();
 
         'connection: loop {
@@ -703,6 +702,7 @@ mod tests {
     const DEFAULT_TEST_CONFIG: ConstConfig         = ConstConfig {
         //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
         retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(30),
+        //message_form: MessageForms::FixedBinary { size: 32 },
         ..ConstConfig::default()
     };
     const DEFAULT_TEST_CONFIG_U64:  u64            = DEFAULT_TEST_CONFIG.into();

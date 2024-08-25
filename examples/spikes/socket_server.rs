@@ -79,7 +79,7 @@ SocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, RemoteMes
 }
 
 pub trait SocketServerController {
-    fn shutdown(self);
+    fn _shutdown(self);
 }
 impl<const CONFIG: usize,
      const PROCESSOR_UNI_INSTRUMENTS: usize,
@@ -90,7 +90,7 @@ impl<const CONFIG: usize,
      SenderChannelType>
 SocketServerController for
 SocketServer<CONFIG, PROCESSOR_UNI_INSTRUMENTS, PROCESSOR_BUFFER_SIZE, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannelType> {
-    fn shutdown(self) {}
+    fn _shutdown(self) {}
 }
 
 

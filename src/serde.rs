@@ -19,7 +19,7 @@ pub trait ReactiveMessagingSerializer<LocalMessages> {
 
     /// Local messages serializer: transforms a strong typed `local_message` into a sequence of bytes, putting it in `buffer`.\
     /// IMPLEMENTORS: #[inline(always)]
-    fn serialize_binary(local_message: &LocalMessages, buffer: &mut Vec<u8>) {
+    fn serialize_binary(_local_message: &LocalMessages, _buffer: &mut Vec<u8>) {
         unreachable!("`ReactiveMessagingSerializer<{}>::serialize_binary()` is not implemented yet", type_name::<LocalMessages>())
     }
 
@@ -40,7 +40,7 @@ pub trait ReactiveMessagingDeserializer<RemoteMessages> {
 
     /// Remote messages deserializer: transform the textual-serialized `remote_message` into a `RemoteMessages` value.\
     /// IMPLEMENTORS: #[inline(always)]
-    fn deserialize_binary(remote_message: &[u8]) -> Result<RemoteMessages, Box<dyn std::error::Error + Sync + Send>> {
+    fn deserialize_binary(_remote_message: &[u8]) -> Result<RemoteMessages, Box<dyn std::error::Error + Sync + Send>> {
         unreachable!("`ReactiveMessagingDeserializer<{}>::deserialize_binary()` is not implemented yet", type_name::<RemoteMessages>())
     }
 

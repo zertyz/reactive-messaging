@@ -1,7 +1,7 @@
 //! Implementation of the Ping-Pong game logic as described in [protocol_model]
 
 use super::ping_pong_models::*;
-use rand::{random, Rng};
+use rand::random;
 
 
 /// Represents a Ping-Pong match "official" or "Umpire", responsible for ensuring the ping-pong rules are followed and for accounting scores & declaring the winner.\

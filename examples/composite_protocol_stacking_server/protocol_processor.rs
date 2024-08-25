@@ -11,8 +11,6 @@ use std::{
     fmt::Debug,
     sync::Arc,
 };
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Relaxed;
 use reactive_messaging::prelude::{ProtocolEvent, Peer, ResponsiveStream};
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use dashmap::DashMap;
@@ -56,7 +54,7 @@ impl ServerProtocolProcessor {
                 warn!("Connected: {:?}", peer);
                 self.sessions.insert(peer.peer_id, Arc::new(Session { umpire: UnsafeCell::new(None) }));
             },
-            ProtocolEvent::PeerLeft { peer, stream_stats } => {
+            ProtocolEvent::PeerLeft { peer: _, stream_stats: _ } => {
                 // TODO 2024-01-27: add another state on ConnectionEvent to differentiate a "ProcessorEnded" from a "SocketDisconnected", or else memory leaks (for the session) will occur
                 // TODO 2024-01-27: also rename "is_disconnect_message" for "is_processor_ending_message"
                 // warn!("Pre-Disconnected: {:?} -- stats: {:?}", peer, stream_stats);

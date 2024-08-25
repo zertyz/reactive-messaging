@@ -7,7 +7,6 @@ use std::{
 };
 use futures::Stream;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni, MutinyStream};
-use crate::config::ConstConfig;
 use crate::prelude::SocketConnection;
 use crate::serde::ReactiveMessagingSerializer;
 
