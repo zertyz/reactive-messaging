@@ -227,7 +227,7 @@ async fn terminates_immediately_when_done() {
             }
             probed_protocol_events_handler(event)
         },
-        move |remote_addr: _, port: _, peer, server_messages_stream| {
+        move |_remote_addr: _, _port: _, peer, server_messages_stream| {
             probed_protocol_processor_builder(server_messages_stream)
                 .inspect(move |_server_message| {
                     peer.cancel_and_close();

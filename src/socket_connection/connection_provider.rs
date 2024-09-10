@@ -28,7 +28,7 @@ use crate::config::{ConstConfig, RetryingStrategies};
 use crate::socket_connection::connection::SocketConnection;
 
 
-type ConnectionFuture = Pin < Box < dyn Future < Output=RetryProducerResult<TcpStream, Box<dyn Error + Sync + Send>> > > >;
+type ConnectionFuture = Pin < Box < dyn Future < Output=RetryProducerResult<TcpStream, Box<dyn Error + Sync + Send>> > + Send > >;
 
 /// Abstracts out the TCP/IP intricacies for establishing (and retrying) connections,
 /// while still enabling the "Protocol Stack Composition" pattern by accepting existing
@@ -36,7 +36,7 @@ type ConnectionFuture = Pin < Box < dyn Future < Output=RetryProducerResult<TcpS
 pub struct ClientConnectionManager<const CONFIG_U64: u64> {
     host:                         String,
     port:                         u16,
-    connect_continuation_closure: Arc < Mutex < Box<dyn FnMut() -> ConnectionFuture> > >,
+    connect_continuation_closure: Arc < Mutex < Box<dyn FnMut() -> ConnectionFuture + Send> > >,
 }
 
 impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
@@ -92,7 +92,7 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
     }
 
     /// Consumes this object and returns the underlying connect closure
-    fn into_connect_continuation_closure(self) -> Arc < Mutex < Box<dyn FnMut() -> ConnectionFuture> > > {
+    fn into_connect_continuation_closure(self) -> Arc < Mutex < Box<dyn FnMut() -> ConnectionFuture + Send> > > {
         self.connect_continuation_closure
     }
 

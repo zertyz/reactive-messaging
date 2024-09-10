@@ -151,12 +151,12 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
     }
 
     #[inline(always)]
-    pub fn cancel_reservation(&self, slot: &mut RemoteMessages) {
+    pub fn cancel_reservation(&self, _slot: &mut RemoteMessages) {
         // TODO see `reserve_slot()`
     }
 
     #[inline(always)]
-    pub fn send_reserved(&self, slot: &mut RemoteMessages) {
+    pub fn send_reserved(&self, _slot: &mut RemoteMessages) {
         // TODO see `reserve_slot()`
     }
 

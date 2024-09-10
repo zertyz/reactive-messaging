@@ -24,7 +24,7 @@ use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMes
 
 
 const MATCH_CONFIG: MatchConfig = MatchConfig {
-    score_limit:            5000,
+    score_limit:            15000,
     rally_timeout_millis:   1000,
     no_bounce_probability:  0.001,
     no_rebate_probability:  0.002,

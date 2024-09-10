@@ -44,21 +44,21 @@ pub trait MessagingService<const CONFIG: u64> {
     ///                 -> impl Stream<Item=ANY_TYPE> {...}
     ///     ```
     /// -- if you want the processor to produce answer messages of type `LocalMessages` to be sent to clients, see [Self::spawn_responsive_processor()]:
-    async fn spawn_processor<RemoteMessages:                ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                         + Send + Sync + PartialEq + Debug + 'static,
-                             LocalMessages:                 ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                            + Send + Sync + PartialEq + Debug + 'static,
-                             ProcessorUniType:              GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                                   + Send + Sync                     + 'static,
-                             SenderChannel:                 FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                           + Send + Sync                     + 'static,
-                             OutputStreamItemsType:                                                                                                                                                                                                                                                 Send + Sync             + Debug + 'static,
-                             RemoteStreamType:              Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                    + Send                            + 'static,
-                             ProtocolEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                     + Send                            + 'static,
-                             ProtocolEventsCallback:        Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                   -> ProtocolEventsCallbackFuture + Send + Sync                     + 'static,
-                             ProcessorBuilderFn:            Fn(/*remote_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> RemoteStreamType             + Send + Sync                     + 'static>
+    fn spawn_processor<RemoteMessages:                ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                         + Send + Sync + PartialEq + Debug + 'static,
+                       LocalMessages:                 ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                            + Send + Sync + PartialEq + Debug + 'static,
+                       ProcessorUniType:              GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                                   + Send + Sync                     + 'static,
+                       SenderChannel:                 FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                           + Send + Sync                     + 'static,
+                       OutputStreamItemsType:                                                                                                                                                                                                                                                 Send + Sync             + Debug + 'static,
+                       RemoteStreamType:              Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                    + Send                            + 'static,
+                       ProtocolEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                     + Send                            + 'static,
+                       ProtocolEventsCallback:        Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                   -> ProtocolEventsCallbackFuture + Send + Sync                     + 'static,
+                       ProcessorBuilderFn:            Fn(/*remote_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> RemoteStreamType             + Send + Sync                     + 'static>
 
-                            (&mut self,
-                             connection_events_callback:  ProtocolEventsCallback,
-                             dialog_processor_builder_fn: ProcessorBuilderFn)
+                      (&mut self,
+                       connection_events_callback:  ProtocolEventsCallback,
+                       dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                            -> Result<ConnectionChannel<Self::StateType>, Box<dyn Error + Sync + Send>>;
+                      -> impl Future<Output=Result<ConnectionChannel<Self::StateType>, Box<dyn Error + Sync + Send>>> + Send;
 
     /// Start the service with a single processor (after calling either [Self::spawn_unresponsive_processor()]
     /// or [Self::spawn_responsive_processor()] once) -- A.K.A. "The Single Protocol Mode".\
@@ -66,19 +66,21 @@ pub trait MessagingService<const CONFIG: u64> {
     /// different protocol processors.
     ///
     /// Starts the service using the provided `connection_channel` to distribute the connections.
-    async fn start_single_protocol(&mut self, connection_channel: ConnectionChannel<Self::StateType>)
-                                  -> Result<(), Box<dyn Error + Sync + Send>>
-                                  where Self::StateType: Default {
-        // this closure will cause incoming or just-opened connections to be sent to `connection_channel` and returned connections to be dropped
-        let connection_routing_closure = move |_socket_connection: &SocketConnection<Self::StateType>, is_reused: bool|
-            if is_reused {
-                None
-            } else {
-                Some(connection_channel.clone_sender())
-            };
-        // tracking the connection events is not really necessary for the "single protocol" case here, as, for this specific case, the "protocol events" contain that information already
-        let connection_events_callback = |_: ConnectionEvent<'_, Self::StateType>| future::ready(());
-        self.start_multi_protocol(Self::StateType::default(), connection_routing_closure, connection_events_callback).await
+    fn start_single_protocol(&mut self, connection_channel: ConnectionChannel<Self::StateType>)
+                            -> impl Future<Output=Result<(), Box<dyn Error + Sync + Send>>> + Send
+                            where Self: Send, Self::StateType: Default {
+        async {
+            // this closure will cause incoming or just-opened connections to be sent to `connection_channel` and returned connections to be dropped
+            let connection_routing_closure = move |_socket_connection: &SocketConnection<Self::StateType>, is_reused: bool|
+                if is_reused {
+                    None
+                } else {
+                    Some(connection_channel.clone_sender())
+                };
+            // tracking the connection events is not really necessary for the "single protocol" case here, as, for this specific case, the "protocol events" contain that information already
+            let connection_events_callback = |_: ConnectionEvent<'_, Self::StateType>| future::ready(());
+            self.start_multi_protocol(Self::StateType::default(), connection_routing_closure, connection_events_callback).await
+        }
     }
 
     /// Starts the service using the provided `connection_routing_closure` to distribute the connections among the configured processors
@@ -96,12 +98,12 @@ pub trait MessagingService<const CONFIG: u64> {
     /// This method returns an error in the following cases:
     ///   1) if the connecting/binding process fails;
     ///   2) if no processors were configured.
-    async fn start_multi_protocol<ConnectionEventsCallbackFuture:  Future<Output=()> + Send>
-                                 (&mut self,
-                                  initial_connection_state:    Self::StateType,
-                                  connection_routing_closure:  impl FnMut(/*socket_connection: */&SocketConnection<Self::StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<Self::StateType>>> + Send + 'static,
-                                  connection_events_callback:  impl for <'r> Fn(/*event: */ConnectionEvent<'r, Self::StateType>)                          -> ConnectionEventsCallbackFuture                                       + Send + 'static)
-                                 -> Result<(), Box<dyn Error + Sync + Send>>;
+    fn start_multi_protocol<ConnectionEventsCallbackFuture:  Future<Output=()> + Send>
+                           (&mut self,
+                            initial_connection_state:    Self::StateType,
+                            connection_routing_closure:  impl FnMut(/*socket_connection: */&SocketConnection<Self::StateType>, /*is_reused: */bool) -> Option<tokio::sync::mpsc::Sender<SocketConnection<Self::StateType>>> + Send + 'static,
+                            connection_events_callback:  impl for <'r> Fn(/*event: */ConnectionEvent<'r, Self::StateType>)                          -> ConnectionEventsCallbackFuture                                       + Send + 'static)
+                           -> impl Future<Output=Result<(), Box<dyn Error + Sync + Send>>> + Send;
 
     /// Returns an async closure that blocks until [Self::terminate()] is called.
     /// Example:
@@ -113,7 +115,7 @@ pub trait MessagingService<const CONFIG: u64> {
     /// Notifies the service it is time to stop / shutdown / terminate.\
     /// It is a recommended practice that the `connection_events_handler()` you provided (when starting each dialog processor)
     /// inform all clients that a remote-initiated disconnection (due to the call to this function) is happening -- the protocol must support that, though.
-    async fn terminate(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    fn terminate(self) -> impl Future<Output=Result<(), Box<dyn std::error::Error + Send + Sync>>> + Send;
 
 }
 
