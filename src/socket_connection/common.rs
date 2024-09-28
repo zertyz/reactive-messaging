@@ -146,18 +146,17 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
 
     #[inline(always)]
     pub fn reserve_slot(&self) -> Option<&mut RemoteMessages> {
-        // TODO 2024-02-26: self.uni.reserve_slot(), returning an Option<mutable reference>
-        None
+        self.uni.reserve_slot()
     }
 
     #[inline(always)]
-    pub fn cancel_reservation(&self, _slot: &mut RemoteMessages) {
-        // TODO see `reserve_slot()`
+    pub fn try_send_reserved(&self, slot: &mut RemoteMessages) -> bool {
+        self.uni.try_send_reserved(slot)
     }
 
     #[inline(always)]
-    pub fn send_reserved(&self, _slot: &mut RemoteMessages) {
-        // TODO see `reserve_slot()`
+    pub fn try_cancel_reservation(&self, slot: &mut RemoteMessages) -> bool {
+        self.uni.try_cancel_slot_reserve(slot)
     }
 
     /// See [GenericUni::pending_items_count()]
@@ -182,12 +181,12 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
 /// retrying logic & connection control return values
 /// -- used to send messages to the remote peer
 pub struct ReactiveMessagingSender<const CONFIG:    u64,
-                                   LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                                   LocalMessages:                                                                                 Send + Sync + PartialEq + Debug + 'static,
                                    OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync> {
     channel: Arc<OriginalChannel>,
 }
 impl<const CONFIG: u64,
-     LocalMessages:   ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+     LocalMessages:                                                                                 Send + Sync + PartialEq + Debug,
      OriginalChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
 ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 

@@ -31,7 +31,7 @@ pub enum MessageForms {
     /// models containing small raw types & subtypes containing raw types themselves.\
     /// `size` must be a power of 2 and models are required to override the appropriate functions of the
     /// [ReactiveMessagingSerializer] & [ReactiveMessagingDeserializer] traits.
-    FixedBinary { size: u32 },
+    MmapBinary { size: u32 },
 }
 impl MessageForms {
     /// requires 2+5=7 bits to represent the data; reverse of [Self::from_repr()]
@@ -39,7 +39,7 @@ impl MessageForms {
         (match self {
             Self::Textual { max_size }        => set_bits_from_power_of_2_u32(0, 2..=6, *max_size),
             Self::VariableBinary { max_size } => set_bits_from_power_of_2_u32(1, 2..=6, *max_size),
-            Self::FixedBinary { size }        => set_bits_from_power_of_2_u32(2, 2..=6, *size),
+            Self::MmapBinary { size }         => set_bits_from_power_of_2_u32(2, 2..=6, *size),
         }) as u8
     }
     /// reverse of [Self::as_repr()]
@@ -48,7 +48,7 @@ impl MessageForms {
         match variant {
             0 => Self::Textual        { max_size: n  },
             1 => Self::VariableBinary { max_size: n },
-            2 => Self::FixedBinary    { size: n },
+            2 => Self::MmapBinary { size: n },
             _ => unreachable!(),    // If this errors out, was a new enum member added?
         }
     }
