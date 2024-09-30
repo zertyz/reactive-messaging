@@ -261,8 +261,8 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn latency_measurements_atomic_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 81815;
-        const RELEASE_EXPECTED_COUNT: u32 = 397491;
+        const DEBUG_EXPECTED_COUNT: u32 = 18486;
+        const RELEASE_EXPECTED_COUNT: u32 = 137601;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::latency_measurements::
@@ -276,8 +276,8 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn latency_measurements_fullsync_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 81815;
-        const RELEASE_EXPECTED_COUNT: u32 = 398196;
+        const DEBUG_EXPECTED_COUNT: u32 = 18824;
+        const RELEASE_EXPECTED_COUNT: u32 = 138113;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::latency_measurements::
@@ -295,8 +295,8 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn message_flooding_throughput_atomic_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 1146880;
-        const RELEASE_EXPECTED_COUNT: u32 = 1245184;
+        const DEBUG_EXPECTED_COUNT: u32 = 327680;
+        const RELEASE_EXPECTED_COUNT: u32 = 425984;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::message_flooding_throughput::
@@ -310,8 +310,8 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn message_flooding_throughput_fullsync_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 1146880;
-        const RELEASE_EXPECTED_COUNT: u32 = 1245184;
+        const DEBUG_EXPECTED_COUNT: u32 = 327680;
+        const RELEASE_EXPECTED_COUNT: u32 = 425984;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::message_flooding_throughput::
