@@ -247,14 +247,15 @@ impl<const CONFIG:        u64,
         }
 
         // delegate the dialog loop to the specialized message form specialist
-        let result = match Self::CONST_CONFIG.message_form {
-            MessageForms::Textual { max_size } => {
-                SocketDialogType::default().dialog_loop(&mut socket_connection, &peer, &processor_sender, max_size..=max_size).await
-            },
-            // MessageForms::VariableBinary { max_size } => self.dialog_loop_for_variable_binary_form(&mut socket_connection, &peer, &processor_sender, max_size).await,
-            // MessageForms::MmapBinary { size }        => self.dialog_loop_for_mmap_binary_form(&mut socket_connection, &peer, &processor_sender, size).await,
-            _ => panic!("Message Forms other than Textual are not supported during this refactoring"),
-        };
+        // let result = match Self::CONST_CONFIG.message_form {
+        //     MessageForms::Textual { max_size } => {
+let max_size = 4096;    // this should come form the parameter. The caller must also sort out this `match` statement that has been commented out
+                let result = SocketDialogType::default().dialog_loop(&mut socket_connection, &peer, &processor_sender, max_size..=max_size).await;
+        //     },
+        //     // MessageForms::VariableBinary { max_size } => self.dialog_loop_for_variable_binary_form(&mut socket_connection, &peer, &processor_sender, max_size).await,
+        //     // MessageForms::MmapBinary { size }        => self.dialog_loop_for_mmap_binary_form(&mut socket_connection, &peer, &processor_sender, size).await,
+        //     _ => panic!("Message Forms other than Textual are not supported during this refactoring"),
+        // };
 
         // processor closing procedures
         if let Ok(()) = result {
@@ -438,118 +439,6 @@ impl<const CONFIG:        u64,
 //         }
 //         Ok(())
 //     }
-//
-//     #[inline(always)]
-//     async fn dialog_loop_for_mmap_binary_form(self: Arc<Self>,
-//                                               socket_connection:     &mut SocketConnection<StateType>,
-//                                               peer:                  &Arc<Peer<CONFIG, LocalMessagesType, SenderChannel, StateType>>,
-//                                               processor_sender:      &ReactiveMessagingUniSender<CONFIG, RemoteMessagesType, ProcessorUniType::DerivedItemType, ProcessorUniType>,
-//                                               _payload_size:         u32)
-//
-//                                              -> Result<(), Box<dyn Error + Sync + Send>>
-//
-//                                              where LocalMessagesType:  ReactiveMessagingMemoryMappable,
-//                                                    RemoteMessagesType: ReactiveMessagingMemoryMappable {
-//
-//         // bad, Rust 1.76, bad... I cannot use const here: "error[E0401]: can't use generic parameters from outer item"
-//         let local_payload_size = std::mem::size_of::<LocalMessagesType>();
-//         let remote_payload_size = std::mem::size_of::<RemoteMessagesType>();
-//
-//         let (mut sender_stream, _) = peer.create_stream();
-//
-//         let allocate_reader_slot = || {
-//             let slot = processor_sender.reserve_slot().unwrap_or_else(|| panic!("Add retrying code here, bailing out if it fails. PROCESSOR SENDER buffer size is {} and {} are used", processor_sender.buffer_size(), processor_sender.pending_items_count()));
-// /*
-//             if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
-//                 // log & send the error message to the remote peer
-//                 error!("`dialog_loop_for_fixed_binary_form()`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
-//                 if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
-//                         warn!("dialog_loop_for_fixed_binary_form(): {error_msg_sender} -- Slow reader {:?}", peer);
-//                     if abort_sender {
-//                         socket_connection.report_closed();
-//                         break 'connection
-//                     }
-//                 }
-//                 if abort_processor {
-//                     socket_connection.report_closed();
-//                     break 'connection
-//                 }
-//             }
-//  */
-//             let bytes_buffer = unsafe {
-//                 let ptr = (slot as *mut RemoteMessagesType).cast::<u8>();
-//                 let len = remote_payload_size;
-//                 std::slice::from_raw_parts_mut(ptr, len)
-//             };
-//             (slot, bytes_buffer, 0usize)
-//         };
-//
-//         // The place where the incoming messages should be put
-//         let (mut reader_slot, mut reader_bytes_buffer, mut received_len) = allocate_reader_slot();
-//
-//         'connection: loop {
-//             // wait for the socket to be readable or until we have something to write
-//             tokio::select!(
-//
-//                 biased;     // sending has priority over receiving
-//
-//                 // send?
-//                 to_send = sender_stream.next() => {
-//                     match to_send {
-//                         Some(to_send) => {
-//                             // "serialize" -- actually, only get the pointer to the bytes, as we are zero-copy here
-//                             let to_send_bytes = unsafe {
-//                                 let ptr = (&to_send as *const LocalMessagesType).cast::<u8>();
-//                                 let len = local_payload_size;
-//                                 std::slice::from_raw_parts(ptr, len)
-//                             };
-//                             // send
-//                             if let Err(err) = socket_connection.connection_mut().write_all(&to_send_bytes).await {
-//                                 warn!("`dialog_loop_for_fixed_binary_form()`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
-//                                 socket_connection.report_closed();
-//                                 break 'connection
-//                             }
-// eprintln!(">>>> SENT: {to_send:?}");
-//                         },
-//                         None => {
-//                             debug!("`dialog_loop_for_fixed_binary_form()`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer`");
-//                             break 'connection
-//                         }
-//                     }
-//                 },
-//
-//                 // receive?
-//                 read = socket_connection.connection_mut().read_buf(&mut reader_bytes_buffer) => {
-//                     match read {
-//                         Ok(n) if n > 0 => {
-//                             received_len += n;
-//                             if received_len == remote_payload_size {
-// eprintln!("<<<< RECEIVED: {reader_slot:#?}");
-//                                 _ = processor_sender.try_send_reserved(reader_slot);
-//                                 // TODO: retry if sending was not possible
-//                                 // prepare for the next read
-//                                 (reader_slot, reader_bytes_buffer, received_len) = allocate_reader_slot();
-//                             }
-//                         },
-//                         Ok(_) /* zero bytes received -- the other end probably closed the connection */ => {
-//                             trace!("`dialog_loop_for_fixed_binary_form()`: EOF while reading from {:?} (peer id {}) -- it is out of bytes! Dropping the connection", peer.peer_address, peer.peer_id);
-//                             socket_connection.report_closed();
-//                             break 'connection
-//                         },
-//                         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
-//                         Err(err) => {
-//                             error!("`dialog_loop_for_fixed_binary_form()`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
-//                             socket_connection.report_closed();
-//                             break 'connection
-//                         },
-//                     }
-//                 },
-//             );
-//         }
-//         _ = processor_sender.try_cancel_reservation(reader_slot);
-//         // TODO: retry the above
-//         Ok(())
-//     }
 
 }
 
@@ -588,9 +477,7 @@ pub mod tests {
     async fn sanity_check() {
 
         const DEFAULT_TEST_CONFIG: ConstConfig         = ConstConfig {
-            //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
             retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(30),
-            message_form: MessageForms::Textual { max_size: 1024 }, // IMPORTANT: this is not enforced in this module!!
             ..ConstConfig::default()
         };
         const DEFAULT_TEST_CONFIG_U64:  u64            = DEFAULT_TEST_CONFIG.into();
@@ -1138,87 +1025,4 @@ pub mod tests {
     
     }
 
-    // Memory mapped binary specific tests
-    //////////////////////////////////////
-
-    // #[cfg_attr(not(doc),tokio::test)]
-    // async fn memory_mapped_binary_messages() {
-    //     const CURRENT_TEST_CONFIG: ConstConfig         = ConstConfig {
-    //         //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
-    //         retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(30),
-    //         message_form: MessageForms::MmapBinary { size: 32 },
-    //         ..ConstConfig::default()
-    //     };
-    //     const CURRENT_TEST_CONFIG_U64:  u64            = CURRENT_TEST_CONFIG.into();
-    //
-    //     struct Mmappable {
-    //         count: u32,
-    //     }
-    //     impl ReactiveMessagingMemoryMappable for Mmappable {}
-    //
-    //     const LISTENING_INTERFACE: &str = "127.0.0.1";
-    //     const PORT               : u16  = 8575;
-    //     const COUNT_LIMIT        : u32 = 4;
-    //     let (_client_shutdown_sender, client_shutdown_receiver) = tokio::sync::broadcast::channel(1);
-    //
-    //     // server
-    //     let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, PORT, ()).await
-    //         .expect("Sanity Check: couldn't start the Connection Provider server event loop");
-    //     let new_connections_source = connection_provider.connection_receiver()
-    //         .expect("Sanity Check: couldn't move the Connection Receiver out of the Connection Provider");
-    //     let socket_communications_handler = SocketConnectionHandler::<CURRENT_TEST_CONFIG_U64, Mmappable, Mmappable, DefaultTestUni, SenderChannel>::new();
-    //     let (returned_connections_sink, mut server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
-    //     socket_communications_handler.server_loop(
-    //         LISTENING_INTERFACE, PORT, new_connections_source, returned_connections_sink,
-    //         |connection_event| {
-    //             match connection_event {
-    //                 ProtocolEvent::PeerArrived { peer } => {
-    //                     assert!(peer.send(Mmappable { count: 0 }).is_ok(), "couldn't send");
-    //                 },
-    //                 ProtocolEvent::PeerLeft { peer: _, stream_stats: _ } => {},
-    //                 ProtocolEvent::LocalServiceTermination => {
-    //                     println!("Test Server: shutdown was requested... No connection will receive the drop message (nor will be even closed) because I, the lib caller, intentionally didn't keep track of the connected peers for this test!");
-    //                 }
-    //             }
-    //             future::ready(())
-    //         },
-    //         move |_client_addr, _client_port, peer, client_messages_stream| {
-    //             client_messages_stream.inspect(move |client_message| {
-    //                 if *client_message.as_ref().count >= COUNT_LIMIT {
-    //                     peer.flush_and_close()
-    //                 }
-    //                 assert!(peer.send(Mmappable { count: *client_message.count }).is_ok(), "server couldn't send");
-    //             })
-    //         }
-    //     ).await.expect("Starting the server");
-    //
-    //     println!("### Waiting a little for the server to start...");
-    //     tokio::time::sleep(Duration::from_millis(10)).await;
-    //
-    //     // client
-    //     let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, PORT).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
-    //     let socket_connection = SocketConnection::new(tokio_connection, ());
-    //     let client_communications_handler = SocketConnectionHandler::<CURRENT_TEST_CONFIG_U64, Mmappable, Mmappable, DefaultTestUni, SenderChannel>::new();
-    //     tokio::spawn(
-    //         client_communications_handler.client(
-    //             socket_connection, client_shutdown_receiver,
-    //             move |connection_event| future::ready(()),
-    //             move |_client_addr, _client_port, peer, server_messages_stream| {
-    //                 server_messages_stream.then(move |server_message| {
-    //                     async move {
-    //                         println!("Server said: '{}'", server_message);
-    //                         assert!(peer.send(Mmappable { count: *server_message.count }).is_ok(), "client couldn't send");
-    //                     }
-    //                 })
-    //             }
-    //         )
-    //     );
-    //     println!("### Started a client -- which is running concurrently, in the background... it has 100ms to do its thing!");
-    //
-    //     tokio::time::sleep(Duration::from_millis(100)).await;
-    //     server_connections_source.close();  // terminates the server
-    //
-    //     println!("### Waiting a little for the shutdown signal to reach the server...");
-    //     tokio::time::sleep(Duration::from_millis(10)).await;
-    // }
 }
