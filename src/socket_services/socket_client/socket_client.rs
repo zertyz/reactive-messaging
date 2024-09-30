@@ -320,7 +320,9 @@ for CompositeSocketClient<CONFIG, StateType> {
         tokio::spawn(async move {
             /*while*/ if let Some(connection) = connection_source.recv().await {
                 let client_termination_receiver = client_termination_signaler.expect("BUG! client_termination_signaler is NONE").subscribe();
-                let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
+                let socket_communications_handler = SocketConnectionHandler::<CONFIG,
+                    crate::socket_connection::socket_dialog::textual_dialog::TextualDialog<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>
+                    >::new(crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::default());
                 let result = socket_communications_handler.client(connection,
                                                                                                      client_termination_receiver,
                                                                                                      connection_events_callback,

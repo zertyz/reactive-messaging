@@ -219,7 +219,9 @@ for CompositeSocketServer<CONFIG, StateType> {
             .ok_or_else(|| String::from("couldn't move the Connection Receiver out of the Connection Provider"))?;
 
         // start the server
-        let socket_communications_handler = SocketConnectionHandler::<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>::new();
+        let socket_communications_handler = SocketConnectionHandler::<CONFIG, 
+            crate::socket_connection::socket_dialog::textual_dialog::TextualDialog<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>
+        >::new(crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::default());
         socket_communications_handler.server_loop(&self.interface_ip,
                                                   self.port,
                                                   new_connections_source,

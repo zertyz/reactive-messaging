@@ -9,3 +9,6 @@ pub(crate) mod socket_connection;
 pub(crate) mod serde;
 pub(crate) mod socket_services;
 pub mod prelude;
+
+#[cfg(any(test,doc))]
+mod unit_test_utils;

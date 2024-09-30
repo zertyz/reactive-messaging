@@ -15,18 +15,24 @@ use log::{debug, error, trace, warn};
 use tokio::io;
 
 pub struct TextualDialog<const CONFIG:       u64,
-                         RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType> + Send + Sync + PartialEq + Debug + 'static,
-                         LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>    + Send + Sync + PartialEq + Debug + 'static,
+                         RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+                         LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+                         ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
+                         SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
+                         StateType:                                                                                                Send + Sync + Clone     + Debug + 'static = ()
                         > {
-    _phantom_data: PhantomData<(RemoteMessagesType, LocalMessagesType)>,
+    _phantom_data: PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType)>,
 }
 
 impl<const CONFIG: u64,
-     RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType> + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>    + Send + Sync + PartialEq + Debug + 'static,
+     RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+     ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
+     SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
+     StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
     >
 Default
-for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType> {
+for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType> {
     fn default() -> Self {
         Self {
             _phantom_data: PhantomData,
@@ -35,29 +41,31 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType> {
 }
 
 impl<const CONFIG: u64,
-     RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType> + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>    + Send + Sync + PartialEq + Debug + 'static,
+     RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+     ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
+     SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
+     StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
     >
 SocketDialog<CONFIG>
-for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType> {
-    type RemoteMessagesConstrainedType = RemoteMessagesType;
-    type LocalMessagesConstrainedType = LocalMessagesType;
+for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType> {
+    type RemoteMessages = RemoteMessagesType;
+    type LocalMessages = LocalMessagesType;
+    type ProcessorUni  = ProcessorUniType;
+    type SenderChannel = SenderChannelType;
+    type State         = StateType;
 
     /// Dialog loop specialist for text-based message forms, where each in & out event/command/sentence ends in '\n'.\
     /// `max_line_size` is the limit length of the lines that can be parsed (including the '\n' delimiter): if bigger
     /// lines come in, the dialog will end in error.
     #[inline(always)]
-    async fn dialog_loop<ProcessorUniType:   GenericUni<ItemType=Self::RemoteMessagesConstrainedType>                                                              + Send + Sync                     + 'static,
-                         SenderChannel:      FullDuplexUniChannel<ItemType=Self::LocalMessagesConstrainedType, DerivedItemType=Self::LocalMessagesConstrainedType> + Send + Sync                     + 'static,
-                         StateType:                                                                                                                                  Send + Sync + Clone + Debug     + 'static,
-                        >
-                        (self,
+    async fn dialog_loop(self,
                          socket_connection:     &mut SocketConnection<StateType>,
-                         peer:                  &Arc<Peer<CONFIG, Self::LocalMessagesConstrainedType, SenderChannel, StateType>>,
-                         processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessagesConstrainedType, ProcessorUniType::DerivedItemType, ProcessorUniType>,
+                         peer:                  &Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, StateType>>,
+                         processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>,
                          payload_size_range:    RangeInclusive<u32>)
 
-                        -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+                         -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
         // sanity checks on payload sizes
         let max_line_size = *payload_size_range.end();
@@ -174,4 +182,142 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType> {
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::super::socket_connection_handler;
+    use reactive_mutiny::prelude::advanced::{ChannelUniMoveAtomic, ChannelUniMoveFullSync, UniZeroCopyAtomic, UniZeroCopyFullSync};
+    use crate::config::{ConstConfig, MessageForms, RetryingStrategies};
+
+    const DEFAULT_TEST_CONFIG: ConstConfig = ConstConfig {
+        //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
+        retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(30),
+        message_form: MessageForms::Textual { max_size: 1024 }, // IMPORTANT: this is not enforced in this module!!
+        ..ConstConfig::default()
+    };
+    const DEFAULT_TEST_CONFIG_U64:  u64              = DEFAULT_TEST_CONFIG.into();
+    const DEFAULT_TEST_UNI_INSTRUMENTS: usize        = DEFAULT_TEST_CONFIG.executor_instruments.into();
+    type AtomicTestUni<PayloadType = String>         = UniZeroCopyAtomic<PayloadType, {DEFAULT_TEST_CONFIG.receiver_channel_size as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
+    type AtomicSenderChannel<PayloadType = String>   = ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_channel_size as usize}, 1>;
+    type FullSyncTestUni<PayloadType = String>       = UniZeroCopyFullSync<PayloadType, {DEFAULT_TEST_CONFIG.receiver_channel_size as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
+    type FullSyncSenderChannel<PayloadType = String> = ChannelUniMoveFullSync<PayloadType, {DEFAULT_TEST_CONFIG.sender_channel_size as usize}, 1>;
+
+
+    // "unresponsive dialogs" tests
+    ///////////////////////////////
+
+    /// Performs the test [socket_connection_handler::tests::unresponsive_dialogs()] with the Atomic Uni channel
+    #[cfg_attr(not(doc),tokio::test)]
+    async fn unresponsive_dialogs_atomic_channel() {
+        socket_connection_handler::tests::unresponsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, AtomicTestUni, AtomicSenderChannel, ()>>().await
+    }
+
+    /// Performs the test [socket_connection_handler::tests::unresponsive_dialogs()] with the FullSync Uni channel
+    #[cfg_attr(not(doc),tokio::test)]
+    async fn unresponsive_dialogs_fullsync_channel() {
+        socket_connection_handler::tests::unresponsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, FullSyncTestUni, FullSyncSenderChannel, ()>>().await
+    }
+
+
+    // "responsive dialogs" tests
+    /////////////////////////////
+
+    /// Performs the test [socket_connection_handler::tests::responsive_dialogs()] with the Atomic Uni channel
+    #[cfg_attr(not(doc),tokio::test)]
+    async fn responsive_dialogs_atomic_channel() {
+        socket_connection_handler::tests::responsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, AtomicTestUni, AtomicSenderChannel, ()>>().await
+    }
+
+    /// Performs the test [socket_connection_handler::tests::responsive_dialogs()] with the FullSync Uni channel
+    #[cfg_attr(not(doc),tokio::test)]
+    async fn responsive_dialogs_fullsync_channel() {
+        socket_connection_handler::tests::responsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, FullSyncTestUni, FullSyncSenderChannel, ()>>().await
+    }
+
+
+    // "client termination" tests
+    /////////////////////////////
+
+    /// Performs the test [socket_connection_handler::tests::client_termination()] with the Atomic Uni channel
+    #[cfg_attr(not(doc),tokio::test)]
+    async fn client_termination_atomic_channel() {
+        socket_connection_handler::tests::client_termination::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, AtomicTestUni, AtomicSenderChannel, ()>>().await
+    }
+
+    /// Performs the test [socket_connection_handler::tests::client_termination()] with the FullSync Uni channel
+    #[cfg_attr(not(doc),tokio::test)]
+    async fn client_termination_fullsync_channel() {
+        socket_connection_handler::tests::client_termination::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, FullSyncTestUni, AtomicSenderChannel, ()>>().await
+    }
+
+
+    // "latency measurements" assertions
+    ////////////////////////////////////
+
+    /// Performs the measured test [socket_connection_handler::tests::latency_measurements()] with the Atomic Uni channel.\
+    /// The values here are for a `Intel(R) Core(TM) i5-4200U CPU @ 1.60GHz` machine
+    #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    #[ignore]   // convention for this project: ignored tests are to be run by a single thread
+    async fn latency_measurements_atomic_channel() {
+        const DEBUG_EXPECTED_COUNT: u32 = 81815;
+        const RELEASE_EXPECTED_COUNT: u32 = 397491;
+        const TOLERANCE: f64 = 0.10;
+
+        socket_connection_handler::tests::latency_measurements::
+            <DEFAULT_TEST_CONFIG_U64,
+             TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, AtomicTestUni, AtomicSenderChannel, ()>
+            > (TOLERANCE, DEBUG_EXPECTED_COUNT, RELEASE_EXPECTED_COUNT).await
+    }
+
+    /// Performs the measured test [socket_connection_handler::tests::latency_measurements()] with the FullSync Uni channel.\
+    /// The values here are for a `Intel(R) Core(TM) i5-4200U CPU @ 1.60GHz` machine
+    #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    #[ignore]   // convention for this project: ignored tests are to be run by a single thread
+    async fn latency_measurements_fullsync_channel() {
+        const DEBUG_EXPECTED_COUNT: u32 = 81815;
+        const RELEASE_EXPECTED_COUNT: u32 = 398196;
+        const TOLERANCE: f64 = 0.10;
+
+        socket_connection_handler::tests::latency_measurements::
+            <DEFAULT_TEST_CONFIG_U64,
+             TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, FullSyncTestUni, FullSyncSenderChannel, ()>
+            > (TOLERANCE, DEBUG_EXPECTED_COUNT, RELEASE_EXPECTED_COUNT).await
+    }
+    
+    
+    // "message_flooding_throughput" assertions
+    ///////////////////////////////////////////
+
+    /// Performs the measured test [socket_connection_handler::tests::message_flooding_throughput()] with the Atomic Uni channel.\
+    /// The values here are for a `Intel(R) Core(TM) i5-4200U CPU @ 1.60GHz` machine
+    #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    #[ignore]   // convention for this project: ignored tests are to be run by a single thread
+    async fn message_flooding_throughput_atomic_channel() {
+        const DEBUG_EXPECTED_COUNT: u32 = 1146880;
+        const RELEASE_EXPECTED_COUNT: u32 = 1245184;
+        const TOLERANCE: f64 = 0.10;
+
+        socket_connection_handler::tests::message_flooding_throughput::
+            <DEFAULT_TEST_CONFIG_U64,
+             TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, AtomicTestUni, AtomicSenderChannel, ()>
+            > (TOLERANCE, DEBUG_EXPECTED_COUNT, RELEASE_EXPECTED_COUNT).await
+    }
+
+    /// Performs the measured test [socket_connection_handler::tests::message_flooding_throughput()] with the FullSync Uni channel.\
+    /// The values here are for a `Intel(R) Core(TM) i5-4200U CPU @ 1.60GHz` machine
+    #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
+    #[ignore]   // convention for this project: ignored tests are to be run by a single thread
+    async fn message_flooding_throughput_fullsync_channel() {
+        const DEBUG_EXPECTED_COUNT: u32 = 1146880;
+        const RELEASE_EXPECTED_COUNT: u32 = 1245184;
+        const TOLERANCE: f64 = 0.10;
+
+        socket_connection_handler::tests::message_flooding_throughput::
+            <DEFAULT_TEST_CONFIG_U64,
+             TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, FullSyncTestUni, FullSyncSenderChannel, ()>
+            > (TOLERANCE, DEBUG_EXPECTED_COUNT, RELEASE_EXPECTED_COUNT).await
+    }
+
 }
