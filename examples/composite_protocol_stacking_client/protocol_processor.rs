@@ -19,8 +19,8 @@ use std::{
 use std::fmt::Debug;
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use futures::{future, Stream, stream, StreamExt};
-use log::{debug,info,error};
-use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
+use log::{debug, info, error, warn};
+use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientError, PreGameClientMessages, PreGameServerMessages, ProtocolStates, PROTOCOL_VERSIONS};
 
 
 const MATCH_CONFIG: MatchConfig = MatchConfig {
@@ -78,22 +78,20 @@ impl ClientProtocolProcessor {
                 cloned_self.in_messages_count.fetch_add(1, Relaxed);
                 match server_message.as_ref() {
                     PreGameServerMessages::Version(server_protocol_version) => {
-                        if server_protocol_version == &*PROTOCOL_VERSION {
+                        if server_protocol_version == &PROTOCOL_VERSION {
                             // Upgrade to the next protocol
                             _ = peer.try_set_state(ProtocolStates::Game);
                             None
                         } else {
-                            let msg = format!("Client protocol version is {PROTOCOL_VERSION:?} while server is {server_protocol_version:?}");
-                            error!("{}", msg);
+                            warn!("Aborting Connection: Client protocol version is {:?} while server is {server_protocol_version:?}", PROTOCOL_VERSIONS.get_key_value(&PROTOCOL_VERSION));
                             _ = peer.try_set_state(ProtocolStates::Disconnect);
-                            Some(PreGameClientMessages::Error(msg))
+                            Some(PreGameClientMessages::Error(PreGameClientError::IncompatibleProtocols))
                         }
                     },
                     PreGameServerMessages::Error(err) => {
-                        let msg = format!("Server (pre game) answered with error '{err}' -- closing the connection");
-                        error!("{}", msg);
+                        warn!("Server (pre game) answered with error {err:?} -- closing the connection");
                         _ = peer.try_set_state(ProtocolStates::Disconnect);
-                        Some(PreGameClientMessages::Error(msg))
+                        Some(PreGameClientMessages::Error(PreGameClientError::TextualProtocolProcessorParsingError))
                     },
                 }
             })
@@ -209,7 +207,7 @@ impl ClientProtocolProcessor {
                                     info!("Game ended: {} Client; {} Server @ {}:{}", final_score.opponent, final_score.oneself, server_addr, port);
                                     vec![GameClientMessages::EndorsedScore]
                                 }
-                                GameOverStates::GameCancelled { partial_score: _, broken_rule_description: _ } => {
+                                GameOverStates::GameCancelled { partial_score: _, broken_rule: _ } => {
                                     vec![/* no answer */]
                                 }
                             }
@@ -218,7 +216,7 @@ impl ClientProtocolProcessor {
                 },
 
                 GameServerMessages::Error(err) => {
-                    error!("Server answered with error '{err}'");
+                    error!("Server answered with error {err:?}");
                     vec![GameClientMessages::Quit]
                 },
 

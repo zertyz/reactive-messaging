@@ -63,7 +63,7 @@ use log::{trace, warn, error, debug};
 #[macro_export]
 macro_rules! new_socket_client {
     ($const_config:    expr,
-     $host:              expr,
+     $host:            expr,
      $port:            expr) => {
         new_composite_socket_client!($const_config, $host, $port, ())
     }
@@ -107,6 +107,7 @@ pub use new_composite_socket_client;
 ///
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
+///   - `message_kind`: One of the following [dialog_processor]s / [NessageForms]: `Textual`, `VariableBinary` or `MmapBinary`
 ///   - `channel_type`: One of the following `reactive-mutiny` channels to be used for message passing. Either `Atomic`, `FullSync` or `Crossbeam`;
 ///   - `socket_client`: [CompositeSocketClient] -- The object returned by the call to [`new_socket_client!()`];
 ///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the server;
@@ -142,15 +143,42 @@ pub use new_composite_socket_client;
 #[macro_export]
 macro_rules! spawn_client_processor {
     ($const_config:                 expr,
-     $channel_type:                 tt,
+     Textual,
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
      $socket_client:                expr,
      $remote_messages:              ty,
      $local_messages:               ty,
      $protocol_events_handler_fn:   expr,
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
-        $socket_client.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>($protocol_events_handler_fn, $dialog_processor_builder_fn).await
-    }}
+        let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        $socket_client.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $protocol_events_handler_fn, $dialog_processor_builder_fn).await
+    }};
+    ($const_config:                 expr,
+     VariableBinary,
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
+     $socket_client:                expr,
+     $remote_messages:              ty,
+     $local_messages:               ty,
+     $protocol_events_handler_fn:   expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
+        todo!("missing impl here");
+        // let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        // $socket_client.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $protocol_events_handler_fn, $dialog_processor_builder_fn).await
+    }};
+    ($const_config:                 expr,
+     MmapBinary,
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
+     $socket_client:                expr,
+     $remote_messages:              ty,
+     $local_messages:               ty,
+     $protocol_events_handler_fn:   expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
+        let socket_dialog = $crate::socket_connection::socket_dialog::mmap_binary_dialog::MmapBinaryDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        $socket_client.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $protocol_events_handler_fn, $dialog_processor_builder_fn).await
+    }};
 }
 pub use spawn_client_processor;
 
@@ -162,6 +190,7 @@ pub use spawn_client_processor;
 ///
 /// Params:
 ///   - `const_config`: [ConstConfig] -- the configurations for the client, enforcing const/compile time optimizations;
+///   - `message_kind`: One of the following [dialog_processor]s / [NessageForms]: `Textual`, `VariableBinary` or `MmapBinary`
 ///   - `channel_type`: One of the following `reactive-mutiny` channels to be used for message passing. Either `Atomic`, `FullSync` or `Crossbeam`;
 ///   - `socket_client`: [CompositeSocketClient] -- The object returned by the call to [`new_socket_client!()`];
 ///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the server;
@@ -195,20 +224,21 @@ pub use spawn_client_processor;
 #[macro_export]
 macro_rules! start_client_processor {
     ($const_config:                 expr,
-     $channel_type:                 tt,
+     $message_form:                 tt,     // one of `Textual`, `VariableBinary` or `MmapBinary`
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
      $socket_client:                expr,
      $remote_messages:              ty,
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        match spawn_client_processor!($const_config, $channel_type, $socket_client, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+        match spawn_client_processor!($const_config, $message_form, $channel_type, $socket_client, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
             Ok(connection_channel) => $socket_client.start_single_protocol(connection_channel).await,
             Err(err) => Err(err),
         }
     }}
 }
 pub use start_client_processor;
-
+use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;
 
 /// Real definition & implementation for our Socket Client, full of generic parameters.\
 /// Probably you want to instantiate this structure through the sugared macros [new_socket_client!()] or [new_composite_socket_client!()] instead.
@@ -298,10 +328,11 @@ for CompositeSocketClient<CONFIG, StateType> {
                              ProcessorBuilderFn:             Fn(/*server_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*server_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                             (&mut self,
+                             socket_dialog:               impl SocketDialog<CONFIG, RemoteMessages=RemoteMessages, LocalMessages=LocalMessages, ProcessorUni=ProcessorUniType, SenderChannel=SenderChannel, State=StateType> + 'static,
                              connection_events_callback:  ConnectionEventsCallback,
                              dialog_processor_builder_fn: ProcessorBuilderFn)
 
-                            -> Result<ConnectionChannel<StateType>, Box<dyn Error + Sync + Send>> {
+                             -> Result<ConnectionChannel<StateType>, Box<dyn Error + Sync + Send>> {
 
         let ip = self.ip.clone();
         let port = self.port;
@@ -320,9 +351,7 @@ for CompositeSocketClient<CONFIG, StateType> {
         tokio::spawn(async move {
             /*while*/ if let Some(connection) = connection_source.recv().await {
                 let client_termination_receiver = client_termination_signaler.expect("BUG! client_termination_signaler is NONE").subscribe();
-                let socket_communications_handler = SocketConnectionHandler::<CONFIG,
-                    crate::socket_connection::socket_dialog::textual_dialog::TextualDialog<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>
-                    >::new(crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::default());
+                let socket_communications_handler = SocketConnectionHandler::<CONFIG, _>::new(socket_dialog);
                 let result = socket_communications_handler.client(connection,
                                                                                                      client_termination_receiver,
                                                                                                      connection_events_callback,
@@ -462,7 +491,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use crate::{new_socket_server, start_server_processor};
     use crate::serde::{ron_deserializer, ron_serializer};
-
+    use crate::socket_connection::socket_dialog::textual_dialog::TextualDialog;
 
     const REMOTE_SERVER: &str = "66.45.249.218";
 
@@ -525,7 +554,7 @@ mod tests {
             TEST_CONFIG,
             REMOTE_SERVER,
             443);
-        start_client_processor!(TEST_CONFIG, Atomic, client,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             connection_events_handler,
@@ -559,7 +588,7 @@ mod tests {
             TEST_CONFIG,
             REMOTE_SERVER,
             443);
-        start_client_processor!(TEST_CONFIG, Atomic, client,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             connection_events_handler,
@@ -588,7 +617,7 @@ mod tests {
             TEST_CONFIG,
             REMOTE_SERVER,
             443);
-        start_client_processor!(TEST_CONFIG, Atomic, client,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             |_| future::ready(()),
@@ -615,11 +644,13 @@ mod tests {
                                                                       :: new(REMOTE_SERVER,443);
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.receiver_channel_size as usize}, 1, {CUSTOM_CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.sender_channel_size as usize}, 1>;
+        let socket_dialog_handler = TextualDialog::<{CUSTOM_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ProcessorUniType, SenderChannelType, ()>::default();
         let connection_channel = client.spawn_processor::<DummyClientAndServerMessages,
                                                                              DummyClientAndServerMessages,
                                                                              ProcessorUniType,
                                                                              SenderChannelType,
                                                                              _, _, _, _, _ > (
+            socket_dialog_handler,
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await.expect("Error spawning a protocol processor");
@@ -643,7 +674,7 @@ mod tests {
         let connected_to_client = Arc::new(AtomicBool::new(false));
         let connected_to_client_ref = Arc::clone(&connected_to_client);
         let mut server = new_socket_server!(TEST_CONFIG, IP, PORT);
-        start_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             move |event| {
                 let connected_to_client_ref = Arc::clone(&connected_to_client_ref);
                 async move {
@@ -659,7 +690,7 @@ mod tests {
             |_, _, _, stream| stream
         ).expect("Error starting the server");
         let mut client = new_socket_client!(TEST_CONFIG, IP, PORT);
-        start_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |_| future::ready(()),
             |_, _, _, stream| stream
         ).expect("Error starting the client");
@@ -677,7 +708,7 @@ mod tests {
         let connected_to_client = Arc::new(AtomicBool::new(false));
         let connected_to_client_ref = Arc::clone(&connected_to_client);
         let mut server = new_socket_server!(TEST_CONFIG, IP, PORT);
-        start_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             move |event| {
                 let connected_to_client_ref = Arc::clone(&connected_to_client_ref);
                 async move {
@@ -694,7 +725,7 @@ mod tests {
             |_, _, _, stream| stream
         ).expect("Error starting the server");
         let mut client = new_socket_client!(TEST_CONFIG, IP, PORT);
-        start_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |_| future::ready(()),
             |_, _, peer, stream| stream.map(move |_msg| peer.cancel_and_close())     // close the connection when any message arrives
         ).expect("Error starting the client");
@@ -730,7 +761,7 @@ mod tests {
             TEST_CONFIG,
             IP,
             PORT);
-        start_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             |_| future::ready(()),
             move |_, _, peer, client_messages| client_messages
                 .map(|msg| {
@@ -760,7 +791,7 @@ mod tests {
         // first level processors shouldn't do anything until the client says something meaningful -- newcomers must know, a priori, who they are talking to (a security measure)
         let handshake_processor_greeted = Arc::new(AtomicBool::new(false));
         let handshake_processor_greeted_ref = Arc::clone(&handshake_processor_greeted);
-        let handshake_processor = spawn_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        let handshake_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `Handshake`")).await
@@ -785,7 +816,7 @@ mod tests {
         // deeper processors should inform the server that they are now subjected to a new processor / protocol, so they may adjust accordingly
         let welcome_authenticated_friend_processor_greeted = Arc::new(AtomicBool::new(false));
         let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted);
-        let welcome_authenticated_friend_processor = spawn_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        let welcome_authenticated_friend_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `WelcomeAuthenticatedFriend`")).await
@@ -809,7 +840,7 @@ mod tests {
 
         let account_settings_processor_greeted = Arc::new(AtomicBool::new(false));
         let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted);
-        let account_settings_processor = spawn_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        let account_settings_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `AccountSettings`")).await
@@ -833,7 +864,7 @@ mod tests {
 
         let goodbye_options_processor_greeted = Arc::new(AtomicBool::new(false));
         let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted);
-        let goodbye_options_processor = spawn_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        let goodbye_options_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `GoodbyeOptions`")).await

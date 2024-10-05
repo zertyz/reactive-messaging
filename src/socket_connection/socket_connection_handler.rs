@@ -1,40 +1,28 @@
 //! Common & low-level code for reactive clients and servers
 
 
-use crate::serde::{ReactiveMessagingMemoryMappable, ReactiveMessagingSerializer};
-
 use crate::{
     config::*,
     types::*,
-    serde::ReactiveMessagingDeserializer,
     socket_connection::{
         common::{ReactiveMessagingSender, ReactiveMessagingUniSender, upgrade_processor_uni_retrying_logic},
         peer::Peer,
     },
 };
-use std::{
-    error::Error,
-    fmt::Debug,
-    future::Future,
-    net::SocketAddr,
-    sync::Arc,
-    time::Duration,
-    marker::PhantomData,
-};
-use reactive_mutiny::prelude::advanced::{GenericUni, FullDuplexUniChannel};
-use futures::{StreamExt, Stream};
-use tokio::io::{self,AsyncReadExt,AsyncWriteExt};
+use std::{error::Error, fmt::Debug, future::Future, net::SocketAddr, sync::Arc, time::Duration};
+use reactive_mutiny::prelude::advanced::GenericUni;
+use futures::Stream;
+use tokio::io::AsyncWriteExt;
 use log::{trace, debug, warn, error};
 use crate::socket_connection::connection::SocketConnection;
 use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;
-use crate::socket_connection::socket_dialog::textual_dialog::TextualDialog;
 
 /// Contains abstractions, useful for clients and servers, for dealing with socket connections handled by Stream Processors:\
 ///   - handles all combinations of the Stream's output types returned by `dialog_processor_builder_fn()`: futures/non-future & fallible/non-fallible;
 ///   - handles unresponsive / responsive output types (also issued by the Streams created by `dialog_processor_builder_fn()`).
 pub struct SocketConnectionHandler<const CONFIG:        u64,
                                    SocketDialogType:    SocketDialog<CONFIG> + Send + Sync + 'static> {
-    socket_dialog: SocketDialogType,
+    _socket_dialog: SocketDialogType,
 }
 
 impl<const CONFIG:        u64,
@@ -44,9 +32,9 @@ impl<const CONFIG:        u64,
     const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
 
 
-    pub fn new(socket_dialog: SocketDialogType) -> Self {
+    pub fn new(_socket_dialog: SocketDialogType) -> Self {
         Self {
-            socket_dialog,
+            _socket_dialog,
         }
     }
 
@@ -247,15 +235,7 @@ impl<const CONFIG:        u64,
         }
 
         // delegate the dialog loop to the specialized message form specialist
-        // let result = match Self::CONST_CONFIG.message_form {
-        //     MessageForms::Textual { max_size } => {
-let max_size = 4096;    // this should come form the parameter. The caller must also sort out this `match` statement that has been commented out
-                let result = SocketDialogType::default().dialog_loop(&mut socket_connection, &peer, &processor_sender, max_size..=max_size).await;
-        //     },
-        //     // MessageForms::VariableBinary { max_size } => self.dialog_loop_for_variable_binary_form(&mut socket_connection, &peer, &processor_sender, max_size).await,
-        //     // MessageForms::MmapBinary { size }        => self.dialog_loop_for_mmap_binary_form(&mut socket_connection, &peer, &processor_sender, size).await,
-        //     _ => panic!("Message Forms other than Textual are not supported during this refactoring"),
-        // };
+        let result = SocketDialogType::default().dialog_loop(&mut socket_connection, &peer, &processor_sender).await;
 
         // processor closing procedures
         if let Ok(()) = result {
@@ -448,7 +428,10 @@ let max_size = 4096;    // this should come form the parameter. The caller must 
 pub mod tests {
     use super::*;
     use crate::unit_test_utils::next_server_port;
-    use crate::socket_connection::connection_provider::ServerConnectionHandler;
+    use crate::socket_connection::{
+        socket_dialog::textual_dialog::TextualDialog,
+        connection_provider::ServerConnectionHandler,
+    };
     use std::{
         future,
         sync::atomic::{
@@ -458,10 +441,9 @@ pub mod tests {
         },
         net::ToSocketAddrs,
     };
-    use std::fmt::Display;
     use std::time::Instant;
     use reactive_mutiny::{prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic}, types::{ChannelCommon, ChannelUni, ChannelProducer}};
-    use futures::stream;
+    use futures::stream::{self, StreamExt};
     use tokio::net::TcpStream;
     use tokio::sync::Mutex;
 

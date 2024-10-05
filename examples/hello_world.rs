@@ -71,7 +71,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
     if start_server {
         println!("==> starting the server");
         let server = server.insert(new_socket_server!(CONFIG, LISTENING_INTERFACE, PORT));
-        let server_processor_handler = spawn_server_processor!(CONFIG, Atomic, server, ClientMessages, ServerMessages,
+        let server_processor_handler = spawn_server_processor!(CONFIG, Textual, Atomic, server, ClientMessages, ServerMessages,
             |_| future::ready(()),
             |_, _, peer, client_stream| client_stream
                 .inspect(|client_message| println!(">>> {:?}", client_message.deref()))
@@ -87,7 +87,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
     if start_client {
         println!("==> starting the client");
         let mut client = new_socket_client!(CONFIG, LISTENING_INTERFACE, PORT);
-        start_client_processor!(CONFIG, Atomic, client, ServerMessages, ClientMessages,
+        start_client_processor!(CONFIG, Textual, Atomic, client, ServerMessages, ClientMessages,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer } => {

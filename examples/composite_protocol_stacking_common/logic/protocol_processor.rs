@@ -1,7 +1,8 @@
 //! Defines the functions to be used as the dialogue processors of server & clients
 
+use log::debug;
 use crate::composite_protocol_stacking_common::logic::ping_pong_logic::{act, Umpire};
-use crate::composite_protocol_stacking_common::logic::ping_pong_models::{GameStates, Players, PingPongEvent, GameOverStates, PlayerAction, FaultEvents};
+use crate::composite_protocol_stacking_common::logic::ping_pong_models::{GameStates, Players, PingPongEvent, GameOverStates, PlayerAction, FaultEvents, Rules};
 
 
 
@@ -25,15 +26,15 @@ pub fn react_to_rally_event(umpire:                  &mut Umpire,
             umpire.process_turn(Players::Ourself, &our_action)
         } else {
             // game rule offense: unexpected event
-            let broken_rule_description = format!("You said your action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
-                                                  opponent_action, reported_event, expected_event);
-            PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })
+            debug!("Umpires Disagree: Remote player says their action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
+                    opponent_action, reported_event, expected_event);
+            PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnEvent })
         }
     } else {
         // game rule offense: unexpected game state
-        let broken_rule_description = format!("Your said your action `{:?}` was taken due to the game being in the `{:?}` state, but our umpire said the game state was `{:?}`",
-                                              opponent_action, reported_state_name, expected_state);
-        PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })
+        debug!("Umpires Disagree: Remote player said their action `{:?}` was taken due to the game being in the `{:?}` state, but our umpire said the game state was in `{:?}`",
+               opponent_action, reported_state_name, expected_state);
+        PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnState })
     }
 
 }
@@ -47,15 +48,15 @@ pub fn react_to_hard_fault(umpire: &mut Umpire, opponent_action: &PlayerAction, 
             service_ball(umpire)
         } else {
             // game rule offense: unexpected event
-            let broken_rule_description = format!("You said your action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
-                                                         opponent_action, reported_fault_event, expected_event);
-            vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })]
+            debug!("Umpires Disagree: Remote player said their action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
+                   opponent_action, reported_fault_event, expected_event);
+            vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnEvent })]
         }
     } else {
-        // game rule offense: unexpected game state
-        let broken_rule_description = format!("You said your action `{:?}` lead to the HardFault `{:?}`, but our umpire said the resulting event was `{:?}`",
-                                                     opponent_action, reported_fault_event, expected_event);
-        vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })]
+        // game rule offense: unexpected hard fault
+        debug!("Umpires Disagree: Remote player said their action `{:?}` lead to the HardFault `{:?}`, but our umpire said the resulting event was `{:?}`",
+               opponent_action, reported_fault_event, expected_event);
+        vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnHardFault })]
     }
 }
 
@@ -71,27 +72,27 @@ pub fn react_to_service_soft_fault(umpire: &mut Umpire, opponent_action: &Player
                     vec![]
                 } else {
                     // game rule offense: exceeded servicing attempts
-                    let broken_rule_description = format!("You said your action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
-                                                                 opponent_action, reported_fault_event, expected_event);
-                    vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })]
+                    debug!("Umpires Disagree: Remote player said their action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
+                           opponent_action, reported_fault_event, expected_event);
+                    vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnExceededServicingAttempts })]
                 }
             } else {
-                // game rule offense: exceeded servicing attempts
-                let broken_rule_description = format!("You said your SoftFault after the action `{:?}` lead to a `WaitForService` state, but `{:?}` was found",
-                                                             opponent_action, umpire.state());
-                vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })]
+                // game rule offense: Umpires disagree with state after soft fault
+                debug!("Umpires Disagree: Remote player said their SoftFault after the action `{:?}` lead to a `WaitForService` state, but `{:?}` was found",
+                       opponent_action, umpire.state());
+                vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnState })]
             }
         } else {
             // game rule offense: unexpected event
-            let broken_rule_description = format!("You said your action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
-                                                         opponent_action, reported_fault_event, expected_event);
-            vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })]
+            debug!("Umpires Disagree: Remote player said their action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
+                   opponent_action, reported_fault_event, expected_event);
+            vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnEvent })]
         }
     } else {
         // game rule offense: unexpected game state
-        let broken_rule_description = format!("You said your action `{:?}` lead to the SoftFault `{:?}`, but our umpire said the resulting event was `{:?}`",
-                                                     opponent_action, reported_fault_event, expected_event);
-        vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })]
+        debug!("Umpires Disagree: Remote player said their action `{:?}` lead to the SoftFault `{:?}`, but our umpire said the resulting event was `{:?}`",
+               opponent_action, reported_fault_event, expected_event);
+        vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnSoftFault })]
     }
 }
 
@@ -104,15 +105,15 @@ pub fn react_to_score(umpire: &mut Umpire, opponent_action: &PlayerAction, repor
             service_ball(umpire)
         } else {
             // game rule offense: unexpected event
-            let broken_rule_description = format!("You said your action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
-                                                  opponent_action, reported_fault_event, expected_event);
-            vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })]
+            debug!("Umpires Disagree: Remote player said their action `{:?}` lead to a `{:?}` event, but our umpire said the resulting event would be `{:?}`",
+                   opponent_action, reported_fault_event, expected_event);
+            vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnEvent })]
         }
     } else {
         // game rule offense: unexpected game state
-        let broken_rule_description = format!("You said your action `{:?}` lead to the Score `{:?}`, but our umpire said the resulting event was `{:?}` (notice the player names, as they should be flipped)",
-                                              opponent_action, reported_fault_event, expected_event);
-        vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule_description })]
+        debug!("Umpires Disagree: Remote player said their action `{:?}` lead to the Score `{:?}`, but our umpire said the resulting event was `{:?}` (notice the player names, as they should be flipped)",
+               opponent_action, reported_fault_event, expected_event);
+        vec![PingPongEvent::GameOver(GameOverStates::GameCancelled { partial_score: *umpire.score(), broken_rule: Rules::UmpiresDisagreeOnState })]
     }
 }
 

@@ -55,14 +55,21 @@
 //! simply match that number with all the probabilities above, in that order: if the received number is lower or equal, the rally will end
 //! for the triggered reason.
 
+use std::collections::HashMap;
 use std::error::Error;
 use once_cell::sync::Lazy;
 use super::logic::ping_pong_models::*;
-use reactive_messaging::prelude::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use reactive_messaging::prelude::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingMemoryMappable, ReactiveMessagingSerializer};
 use serde::{Serialize, Deserialize};
 
 
-pub static PROTOCOL_VERSION: Lazy<String> = Lazy::new(|| String::from("2024-02-19"));
+pub static PROTOCOL_VERSIONS: Lazy<HashMap<VersionType, &str>> = Lazy::new(|| 
+    HashMap::from([
+        (1, "2024-02-19"),
+        (2, "2024-10-04"),
+    ]));
+pub static PROTOCOL_VERSION: VersionType = 2;
+type VersionType = u8;
 
 
 /// The states the dialog between client and server may be into
@@ -77,6 +84,7 @@ pub enum ProtocolStates {
     Game,
 }
 
+
 /// Client messages to set up the game in the server
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum PreGameClientMessages {
@@ -90,13 +98,15 @@ pub enum PreGameClientMessages {
     ////////////////////
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
-    Error(/*explanation: */String),
+    Error(PreGameClientError),
 }
 impl Default for PreGameClientMessages {
     fn default() -> Self {
-        Self::Error(String::from("`PreGameClientMessages` SLOT NOT INITIALIZED"))
+        Self::Error(PreGameClientError::SlotNotInitialized)
     }
 }
+impl ReactiveMessagingMemoryMappable for PreGameClientMessages {} 
+
 
 /// Messages coming from the clients after [PreGameClientMessages] protocol was performed, suitable to be deserialized by the server
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -120,7 +130,7 @@ pub enum GameClientMessages {
     ////////////////////
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
-    Error(/*explanation: */String),
+    Error(GameClientError),
     /// Sent at any time, when the client request an immediate termination of the communications.\
     /// It is elegant to send it before abruptly closing the connection, even if we are in the middle of a transaction
     /// -- anyway, if the connection is dropped or faces an error, the "connection events callback" may be instructed to
@@ -128,6 +138,31 @@ pub enum GameClientMessages {
     #[default]
     Quit,
 }
+impl ReactiveMessagingMemoryMappable for GameClientMessages {}
+
+
+/// Errors that the client may return in the `ProtocolStates::PreGame`
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum PreGameClientError {
+    /// Occurs only if there is a bug: reserving a slot, not filling it up and sending the message anyway
+    /// (this value is set on the `default()` constructor)
+    SlotNotInitialized,
+    /// Occurs when the client couldn't parse a message sent by the server
+    /// when the `Textual` messages are being used
+    TextualProtocolProcessorParsingError,
+    /// Occurs when the local and peer are found to be using
+    /// incompatible protocol versions
+    IncompatibleProtocols,
+}
+
+/// Errors that the client may return in the `ProtocolStates::Game`
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum GameClientError {
+    /// Occurs when the client couldn't parse a message sent by the server
+    /// when the `Textual` messages are being used
+    TextualProtocolProcessorParsingError,
+}
+
 
 /// Messages coming from the server, suitable to be deserialized by the clients
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -138,19 +173,21 @@ pub enum PreGameServerMessages {
     /// After this, the server progresses to the [GameServerMessages] protocol and the
     /// client should do it as well (progressing to [GameClientMessages]) or disconnect if
     /// it doesn't agree with the server version.
-    Version(String),
+    Version(VersionType),
 
     // standard messages
     ////////////////////
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
-    Error(/*explanation: */String),
+    Error(PreGameServerError),
 }
 impl Default for PreGameServerMessages {
     fn default() -> Self {
-        Self::Version(PROTOCOL_VERSION.clone())
+        Self::Version(PROTOCOL_VERSION)
     }
 }
+impl ReactiveMessagingMemoryMappable for PreGameServerMessages {}
+
 
 /// Messages coming from the server, suitable to be deserialized by the clients
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -169,13 +206,34 @@ pub enum GameServerMessages {
     ////////////////////
 
     /// States that the last command wasn't correctly processed or was not recognized as valid
-    Error(/*explanation: */String),
+    Error(GameServerError),
     /// Issued when the server is ending the connection due to gracefully completing the communications
     #[default]
     GoodBye,
     /// Issued when the server was asked to gracefully shutdown: all connected clients will be informed, data will be persisted and pretty much nothing else will be done.
     ServerShutdown,
 
+}
+impl ReactiveMessagingMemoryMappable for GameServerMessages {}
+
+
+/// Errors that the server may return in the `ProtocolStates::PreGame`
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum PreGameServerError {
+    /// Occurs when the client couldn't parse a message sent by the server
+    /// when the `Textual` messages are being used
+    TextualProtocolProcessorParsingError,
+    /// Occurs when the peer send us an error message
+    /// (in which case we should disconnect)
+    AbortingDueToPeerError,
+}
+
+/// Errors that the server may return in the `ProtocolStates::Game`
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum GameServerError {
+    /// Occurs when the client couldn't parse a message sent by the server
+    /// when the `Textual` messages are being used
+    TextualProtocolProcessorParsingError,
 }
 
 // implementation of the RON SerDe & Responsive traits
@@ -201,8 +259,8 @@ impl ReactiveMessagingSerializer<PreGameClientMessages> for PreGameClientMessage
             .expect("BUG in `ReactiveMessagingSerializer<PreGameClientMessages>`. Is the buffer too small?");
     }
     #[inline(always)]
-    fn processor_error_message(err: String) -> PreGameClientMessages {
-        PreGameClientMessages::Error(err)
+    fn processor_error_message(_err: String) -> PreGameClientMessages {
+        PreGameClientMessages::Error(PreGameClientError::TextualProtocolProcessorParsingError)
     }
 }
 impl ReactiveMessagingSerializer<GameClientMessages> for GameClientMessages {
@@ -212,8 +270,8 @@ impl ReactiveMessagingSerializer<GameClientMessages> for GameClientMessages {
             .expect("BUG in `ReactiveMessagingSerializer<GameClientMessages>`. Is the buffer too small?");
     }
     #[inline(always)]
-    fn processor_error_message(err: String) -> GameClientMessages {
-        GameClientMessages::Error(err)
+    fn processor_error_message(_err: String) -> GameClientMessages {
+        GameClientMessages::Error(GameClientError::TextualProtocolProcessorParsingError)
     }
 }
 
@@ -250,8 +308,8 @@ impl ReactiveMessagingSerializer<PreGameServerMessages> for PreGameServerMessage
             .expect("BUG in `ReactiveMessagingSerializer<PreServerMessages>`. Is the buffer too small?");
     }
     #[inline(always)]
-    fn processor_error_message(err: String) -> PreGameServerMessages {
-        PreGameServerMessages::Error(err)
+    fn processor_error_message(_err: String) -> PreGameServerMessages {
+        PreGameServerMessages::Error(PreGameServerError::TextualProtocolProcessorParsingError)
     }
 }
 impl ReactiveMessagingSerializer<GameServerMessages> for GameServerMessages {
@@ -261,8 +319,8 @@ impl ReactiveMessagingSerializer<GameServerMessages> for GameServerMessages {
             .expect("BUG in `ReactiveMessagingSerializer<ServerMessages>`. Is the buffer too small?");
     }
     #[inline(always)]
-    fn processor_error_message(err: String) -> GameServerMessages {
-        GameServerMessages::Error(err)
+    fn processor_error_message(_err: String) -> GameServerMessages {
+        GameServerMessages::Error(GameServerError::TextualProtocolProcessorParsingError)
     }
 }
 

@@ -17,6 +17,7 @@ pub use crate::serde::{
     ReactiveMessagingDeserializer,
     ron_serializer,
     ron_deserializer,
+    ReactiveMessagingMemoryMappable,
 };
 
 // from `reactive-mutiny`:

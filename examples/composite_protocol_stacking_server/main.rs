@@ -19,8 +19,15 @@ const LISTENING_PORT:      u16         = 1234;
 const NETWORK_CONFIG:      ConstConfig = ConstConfig {
     ..ConstConfig::default()
 };
+#[macro_export]
+macro_rules! spawn_server_processor {
+    ($_1: expr, $_4: expr, $_5: ty, $_6: ty, $_7: expr, $_8: expr) => {
+        reactive_messaging::spawn_server_processor!($_1, MmapBinary, FullSync, $_4, $_5, $_6, $_7, $_8)
+    }
+}
 
-#[tokio::main(flavor = "multi_thread")]
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
 
@@ -33,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut socket_server = new_composite_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ProtocolStates);
     // pre-game protocol processor
-    let pre_game_processor = spawn_server_processor!(NETWORK_CONFIG, Atomic, socket_server, PreGameClientMessages, PreGameServerMessages,
+    let pre_game_processor = spawn_server_processor!(NETWORK_CONFIG, socket_server, PreGameClientMessages, PreGameServerMessages,
         move |connection_event| {
             server_processor_ref1.pre_game_connection_events_handler(connection_event);
             future::ready(())
@@ -41,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         move |client_addr, port, peer, client_messages_stream| server_processor_ref2.pre_game_dialog_processor(client_addr, port, peer, client_messages_stream)
     )?;
     // game protocol processor
-    let game_processor = spawn_server_processor!(NETWORK_CONFIG, Atomic, socket_server, GameClientMessages, GameServerMessages,
+    let game_processor = spawn_server_processor!(NETWORK_CONFIG, socket_server, GameClientMessages, GameServerMessages,
         move |connection_event| {
             server_processor_ref3.game_connection_events_handler(connection_event);
             future::ready(())

@@ -1,6 +1,4 @@
-use std::error::Error;
 use std::fmt::Debug;
-use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
@@ -13,6 +11,7 @@ use crate::socket_connection::common::ReactiveMessagingUniSender;
 use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;
 use log::{debug, error, trace, warn};
 use tokio::io;
+use crate::config::ConstConfig;
 
 pub struct TextualDialog<const CONFIG:       u64,
                          RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
@@ -22,6 +21,17 @@ pub struct TextualDialog<const CONFIG:       u64,
                          StateType:                                                                                                Send + Sync + Clone     + Debug + 'static = ()
                         > {
     _phantom_data: PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType)>,
+}
+
+impl<const CONFIG: u64,
+    RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+    LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+    ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
+    SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
+    StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
+>
+TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType> {
+    const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
 }
 
 impl<const CONFIG: u64,
@@ -62,19 +72,18 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
     async fn dialog_loop(self,
                          socket_connection:     &mut SocketConnection<StateType>,
                          peer:                  &Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, StateType>>,
-                         processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>,
-                         payload_size_range:    RangeInclusive<u32>)
+                         processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
 
                          -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
-
         // sanity checks on payload sizes
-        let max_line_size = *payload_size_range.end();
-        if max_line_size < 4 {
-            return Err(Box::from(format!("Textual DIalog Loop: the given `max_line_size` for the payload is too small (only {max_line_size} bytes) and this is probably a BUG in your program")))
-        }
+        // let min_buffer = usize::min(Self::CONST_CONFIG.incoming_buffer_size, Self::CONST_CONFIG.outgoing_buffer_size);
+        // if min_buffer < 4 {
+        //     return Err(Box::from(format!("Textual DIalog Loop: the given `max_line_size` for the payload is too small (only {max_line_size} bytes) and this is probably a BUG in your program")))
+        // }
+let fix_configs = 4096;
 
-        let mut read_buffer = Vec::with_capacity(max_line_size as usize);
-        let mut serialization_buffer = Vec::with_capacity(max_line_size as usize);
+        let mut read_buffer = Vec::with_capacity(fix_configs);
+        let mut serialization_buffer = Vec::with_capacity(fix_configs);
 
         let (mut sender_stream, _) = peer.create_stream();
 

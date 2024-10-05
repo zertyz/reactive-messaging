@@ -17,10 +17,16 @@ use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMes
 
 const SERVER_IP:      &str        = "127.0.0.1";
 const PORT:           u16         = 1234;
-const INSTANCES:      u16         = 2;
+const INSTANCES:      u16         = 22;
 const NETWORK_CONFIG: ConstConfig = ConstConfig {
     ..ConstConfig::default()
 };
+#[macro_export]
+macro_rules! spawn_client_processor {
+    ($_1: expr, $_4: expr, $_5: ty, $_6: ty, $_7: expr, $_8: expr) => {
+        reactive_messaging::spawn_client_processor!($_1, MmapBinary, FullSync, $_4, $_5, $_6, $_7, $_8)
+    }
+}
 
 
 #[cfg(debug_assertions)]
@@ -29,7 +35,7 @@ const DEBUG: bool = true;
 const DEBUG: bool = false;
 
 
-#[tokio::main(flavor = "multi_thread")]
+#[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
@@ -46,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
         let mut socket_client = new_composite_socket_client!(NETWORK_CONFIG, SERVER_IP, PORT, ProtocolStates);
         // pre-game protocol processor
-        let pre_game_processor = spawn_client_processor!(NETWORK_CONFIG, Atomic, socket_client, PreGameServerMessages, PreGameClientMessages,
+        let pre_game_processor = spawn_client_processor!(NETWORK_CONFIG, socket_client, PreGameServerMessages, PreGameClientMessages,
             move |connection_event| {
                 client_processor_ref1.pre_game_connection_events_handler(connection_event);
                 future::ready(())
@@ -74,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
             }
         )?;
         // game protocol processor
-        let game_processor = spawn_client_processor!(NETWORK_CONFIG, Atomic, socket_client, GameServerMessages, GameClientMessages,
+        let game_processor = spawn_client_processor!(NETWORK_CONFIG, socket_client, GameServerMessages, GameClientMessages,
             move |connection_event| {
                 client_processor_ref3.game_connection_events_handler(connection_event);
                 future::ready(())

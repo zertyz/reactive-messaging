@@ -40,7 +40,7 @@ impl Umpire {
         if self.turn_player != player {
             let game_over_state = GameOverStates::GameCancelled {
                 partial_score: self.score,
-                broken_rule_description: format!("The expected player for this turn was {:?}, but {:?} claimed it instead", self.turn_player, player),
+                broken_rule: Rules::WrongPlayerForTurn,
             };
             self.state = GameStates::GameOver(game_over_state.clone());
             PingPongEvent::GameOver(game_over_state)

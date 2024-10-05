@@ -17,7 +17,7 @@ use dashmap::DashMap;
 use futures::future;
 use futures::stream::{self, Stream, StreamExt};
 use log::{info, warn, error};
-use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
+use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerError, PreGameServerMessages, ProtocolStates};
 
 
 /// Session for each connected peer
@@ -95,10 +95,9 @@ impl ServerProtocolProcessor {
                         PreGameServerMessages::Version(PROTOCOL_VERSION.clone())
                     },
                     PreGameClientMessages::Error(err) => {
-                        let msg = format!("Pre-game Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
-                        error!("{msg}");
+                        warn!("Pre-game Client {peer:?} errored. Closing the connection after receiving: {err:?}");
                         _ = peer.try_set_state(ProtocolStates::Disconnect);
-                        PreGameServerMessages::Error(msg)
+                        PreGameServerMessages::Error(PreGameServerError::AbortingDueToPeerError)
                     },
                 }
             })
@@ -207,7 +206,7 @@ impl ServerProtocolProcessor {
                                     info!("Game ended: {} Server; {} Client #{} @ {}", final_score.opponent, final_score.oneself, peer.peer_id, peer.peer_address);
                                     vec![GameServerMessages::GoodBye]
                                 },
-                                GameOverStates::GameCancelled { partial_score: _, broken_rule_description: _ } => {
+                                GameOverStates::GameCancelled { partial_score: _, broken_rule: _ } => {
                                     vec![GameServerMessages::GoodBye]
                                 },
                             }
@@ -215,7 +214,7 @@ impl ServerProtocolProcessor {
                     }
                 }
                 GameClientMessages::ContestedScore(client_provided_match_score) => {
-                    warn!("Client {:?} contested the match score. Ours: {:?}; Theirs: {:?}", peer, umpire.score(), client_provided_match_score);
+                    warn!("Client {peer:?} contested the match score. Ours: {:?}; Theirs: {:?}", umpire.score(), client_provided_match_score);
                     vec![GameServerMessages::GoodBye]
                 },
 
@@ -228,7 +227,7 @@ impl ServerProtocolProcessor {
                 }
 
                 GameClientMessages::Error(err) => {
-                    error!("Client {:?} errored. Closing the connection after receiving: '{}'", *peer, err);
+                    error!("Client {peer:?} errored. Closing the connection after receiving: {err:?}");
                     vec![GameServerMessages::GoodBye]
                 },
 

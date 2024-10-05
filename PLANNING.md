@@ -32,6 +32,11 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
   - the serializer may return a reference to internal data (or a pointer? whatever reactive-mutiny does) -- allowing zero-copy (or not) serializing patterns
 5) Build benchmarks comparing RON vs var size RKYV vs fixed size bin
 
+**(n12)** 2024-10-04: Address the `IMPORTANT` and `CRITICALLY IMPORTANT` comments of `ReactiveMessagingMemoryMappable` and, of course, delete the comments.
+
+**(r13)** 2024-10-04: Follow the `ReactiveMessagingMemoryMappable` example for the other serializers: some traits are always required to be implemented.
+                      After identifying them, the type declarations throughout the code might be simplified?
+
 
 
 # Backlog

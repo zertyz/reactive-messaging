@@ -87,8 +87,8 @@ pub enum GameOverStates {
     },
     /// A rule was not honored, causing the game to be aborted due to the given (human-readable) reason
     GameCancelled {
-        partial_score:           MatchScore,
-        broken_rule_description: String,
+        partial_score:  MatchScore,
+        broken_rule:    Rules,
     },
 }
 
@@ -127,4 +127,27 @@ pub struct MatchScore {
 pub enum Players {
     Ourself,
     Opponent,
+}
+
+/// Enumerates the game rules that might be broken, for referee reporting purposes
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
+pub enum Rules {
+    /// Happens when the Umpire expects player A to react to the game event,
+    /// but the reaction was actually done by player B
+    WrongPlayerForTurn,
+    /// Happens when the remote player's Umpire says the remote player action lead to event X,
+    /// but our Umpire -- upon reviewing the action -- says this would lead to event Y instead.
+    UmpiresDisagreeOnEvent,
+    /// Happens when the remote player's Umpire says they took an action due to the game being in
+    /// State X, but our Umpire says the game should have been in State Y.
+    UmpiresDisagreeOnState,
+    /// Happens when the remote player's Umpire says they actions lead to a non-faulty (or hard fault) event,
+    /// but our Umpire says that action lead to a Soft Fault event.
+    UmpiresDisagreeOnSoftFault,
+    /// Happens when the remote player's Umpire says they actions lead to a non-faulty (or soft fault) event,
+    /// but our Umpire says that action lead to a Hard Fault event.
+    UmpiresDisagreeOnHardFault,
+    /// Happens when our Umpire says there were too many services but the remote
+    /// player's Umpire is still trying to service.
+    UmpiresDisagreeOnExceededServicingAttempts,
 }

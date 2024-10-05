@@ -55,6 +55,7 @@ pub trait MessagingService<const CONFIG: u64> {
                        ProcessorBuilderFn:            Fn(/*remote_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> RemoteStreamType             + Send + Sync                     + 'static>
 
                       (&mut self,
+                       socket_dialog:               impl SocketDialog<CONFIG, RemoteMessages=RemoteMessages, LocalMessages=LocalMessages, ProcessorUni=ProcessorUniType, SenderChannel=SenderChannel, State=Self::StateType> + 'static,
                        connection_events_callback:  ProtocolEventsCallback,
                        dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -122,11 +123,13 @@ pub trait MessagingService<const CONFIG: u64> {
 
 /// For internal use: defines `ProcessorUniType` & `SenderChannel` based on the given [Channels] parameter
 /// (for use when spawning processors with [MessagingService::spawn_unresponsive_processor()] &
-///  [MessagingService::spawn_responsive_processor()].)
+///  [MessagingService::spawn_responsive_processor()].)\
+/// The second parameter -- `channel_type` can be one of `Atomic`, `FullSync`, `Crossbeam`.
 #[macro_export]
 macro_rules! _define_processor_uni_and_sender_channel_types {
     ($const_config: expr, Atomic, $remote_messages: ty, $local_messages: ty) => {
         const _CONST_CONFIG:              ConstConfig  = $const_config;
+        const _CONFIG:                    u64          = _CONST_CONFIG.into();
         const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
         const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
@@ -135,6 +138,7 @@ macro_rules! _define_processor_uni_and_sender_channel_types {
     };
     ($const_config: expr, FullSync, $remote_messages: ty, $local_messages: ty) => {
         const _CONST_CONFIG:              ConstConfig  = $const_config;
+        const _CONFIG:                    u64          = _CONST_CONFIG.into();
         const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
         const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
@@ -143,6 +147,7 @@ macro_rules! _define_processor_uni_and_sender_channel_types {
     };
     ($const_config: expr, Crossbeam, $remote_messages: ty, $local_messages: ty) => {
         const _CONST_CONFIG:              ConstConfig  = $const_config;
+        const _CONFIG:                    u64          = _CONST_CONFIG.into();
         const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
         const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
@@ -151,3 +156,4 @@ macro_rules! _define_processor_uni_and_sender_channel_types {
     };
 }
 pub use _define_processor_uni_and_sender_channel_types;
+use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;

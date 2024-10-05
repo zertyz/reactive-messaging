@@ -31,6 +31,7 @@ use crate::{
 use crate::socket_connection::connection::SocketConnection;
 use crate::socket_services::types::MessagingService;
 use crate::types::ConnectionEvent;
+use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;
 use std::{
     error::Error,
     fmt::Debug,
@@ -97,19 +98,48 @@ macro_rules! new_composite_socket_server {
 pub use new_composite_socket_server;
 
 
-/// See [CompositeSocketServer::spawn_processor()].
+/// Spawns a server processor using [CompositeSocketServer::spawn_processor()] -- see there for the parameter definitions.\
+/// This macro, however, has en an extra second parameter, which can be either
+/// `Textual`, `VariableBinary` or `MmapBinary` -- being, these names, the variants of [MessageForms].
 #[macro_export]
 macro_rules! spawn_server_processor {
     ($const_config:                 expr,
-     $channel_type:                 tt,
+     Textual,
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
      $socket_server:                expr,
      $remote_messages:              ty,
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
-        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>($connection_events_handler_fn, $dialog_processor_builder_fn).await
-    }}
+        let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+    }};
+    ($const_config:                 expr,
+     VariableBinary,
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
+     $socket_server:                expr,
+     $remote_messages:              ty,
+     $local_messages:               ty,
+     $connection_events_handler_fn: expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
+        todo!("missing impl here");
+        // let socket_dialog = $crate::socket_connection::socket_dialog::MmapBinaryDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        // $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+    }};
+    ($const_config:                 expr,
+     MmapBinary,
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
+     $socket_server:                expr,
+     $remote_messages:              ty,
+     $local_messages:               ty,
+     $connection_events_handler_fn: expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
+        let socket_dialog = $crate::socket_connection::socket_dialog::mmap_binary_dialog::MmapBinaryDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+    }};
 }
 pub use spawn_server_processor;
 
@@ -117,16 +147,18 @@ pub use spawn_server_processor;
 /// Starts a server (previously instantiated by [new_socket_server!()]) that will communicate with clients using a single protocol -- as defined by the given
 /// `dialog_processor_builder_fn`, a builder of "unresponsive" `Stream`s as specified in [CompositeSocketServer::spawn_processor()].\
 /// If you want to follow the "Composite Protocol Stacking" pattern, see the [spawn_composite_server_processor!()] macro instead.
+/// The second parameter here can be either `Textual`, `VariableBinary` or `MmapBinary` -- being, these names, the variants of [MessageForms].
 #[macro_export]
 macro_rules! start_server_processor {
     ($const_config:                 expr,
-     $channel_type:                 tt,
+     $message_form:                 tt,     // one of `Textual`, `VariableBinary` or `MmapBinary`
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
      $socket_server:                expr,
      $remote_messages:              ty,
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        match spawn_server_processor!($const_config, $channel_type, $socket_server, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+        match spawn_server_processor!($const_config, $message_form, $channel_type, $socket_server, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
             Ok(connection_channel) => $socket_server.start_single_protocol(connection_channel).await,
             Err(err) => Err(err),
         }
@@ -203,6 +235,7 @@ for CompositeSocketServer<CONFIG, StateType> {
                              ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                             (&mut self,
+                             socket_dialog:               impl SocketDialog<CONFIG, RemoteMessages=RemoteMessages, LocalMessages=LocalMessages, ProcessorUni=ProcessorUniType, SenderChannel=SenderChannel, State=StateType> + 'static,
                              connection_events_callback:  ConnectionEventsCallback,
                              dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -219,9 +252,7 @@ for CompositeSocketServer<CONFIG, StateType> {
             .ok_or_else(|| String::from("couldn't move the Connection Receiver out of the Connection Provider"))?;
 
         // start the server
-        let socket_communications_handler = SocketConnectionHandler::<CONFIG, 
-            crate::socket_connection::socket_dialog::textual_dialog::TextualDialog<CONFIG, RemoteMessages, LocalMessages, ProcessorUniType, SenderChannel, StateType>
-        >::new(crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::default());
+        let socket_communications_handler = SocketConnectionHandler::<CONFIG, _>::new(socket_dialog);
         socket_communications_handler.server_loop(&self.interface_ip,
                                                   self.port,
                                                   new_connections_source,
@@ -349,6 +380,8 @@ for CompositeSocketServer<CONFIG, StateType> {
 mod tests {
     use super::*;
     use crate::prelude::*;
+    use crate::serde::ReactiveMessagingMemoryMappable;
+    use crate::socket_connection::socket_dialog::textual_dialog::TextualDialog;
     use std::{
         future,
         ops::Deref,
@@ -359,7 +392,6 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use futures::StreamExt;
     use tokio::sync::Mutex;
-
 
     /// The interface for listening to connections
     const LISTENING_INTERFACE: &str = "127.0.0.1";
@@ -426,7 +458,7 @@ mod tests {
             TEST_CONFIG,
             LISTENING_INTERFACE,
             PORT);
-        start_server_processor!(TEST_CONFIG, Atomic, server,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             connection_events_handler,
@@ -459,7 +491,7 @@ mod tests {
             TEST_CONFIG,
             LISTENING_INTERFACE,
             PORT);
-        start_server_processor!(TEST_CONFIG, Atomic, server,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             connection_events_handler,
@@ -488,7 +520,7 @@ mod tests {
             TEST_CONFIG,
             LISTENING_INTERFACE,
             PORT);
-        start_server_processor!(TEST_CONFIG, Atomic, server,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             |_| future::ready(()),
@@ -513,11 +545,13 @@ mod tests {
                                                                        :: new(LISTENING_INTERFACE, PORT);
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.receiver_channel_size as usize}, 1, {CUSTOM_CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.sender_channel_size as usize}, 1>;
+        let socket_dialog_handler = TextualDialog::<{CUSTOM_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ProcessorUniType, SenderChannelType, ()>::default();
         let connection_channel = server.spawn_processor::<DummyClientAndServerMessages,
                                                                              DummyClientAndServerMessages,
                                                                              ProcessorUniType,
                                                                              SenderChannelType,
                                                                              _, _, _, _, _ > (
+            socket_dialog_handler,
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
         ).await?;
@@ -559,11 +593,13 @@ mod tests {
                                                                        :: new(LISTENING_INTERFACE, PORT);
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {TEST_CONFIG.receiver_channel_size as usize}, 1, {TEST_CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {TEST_CONFIG.sender_channel_size as usize}, 1>;
+        let socket_dialog_handler = TextualDialog::<{TEST_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ProcessorUniType, SenderChannelType, ()>::default();
         let connection_channel = server.spawn_processor :: <DummyClientAndServerMessages,
                                                                                DummyClientAndServerMessages,
                                                                                ProcessorUniType,
                                                                                SenderChannelType,
                                                                                _, _, _, _, _> (
+                socket_dialog_handler,
                 move |connection_event: ProtocolEvent<{TEST_CONFIG.into()}, DummyClientAndServerMessages, SenderChannelType>| {
                 let client_peer = Arc::clone(&client_peer_ref1);
                 async move {
@@ -603,7 +639,7 @@ mod tests {
             TEST_CONFIG,
             LISTENING_INTERFACE,
             PORT);
-        start_client_processor!(TEST_CONFIG, Atomic, client,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             |_| async {},
@@ -668,7 +704,7 @@ mod tests {
         // first level processors shouldn't do anything until the client says something meaningful -- newcomers must know, a priori, who they are talking to (a security measure)
         let incoming_client_processor_greeted = Arc::new(AtomicBool::new(false));
         let incoming_client_processor_greeted_ref = Arc::clone(&incoming_client_processor_greeted);
-        let incoming_client_processor = spawn_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        let incoming_client_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             |_| future::ready(()),
             move |_, _, peer, client_messages_stream| {
                 assert_eq!(peer.try_take_state(), Some(Some(Protocols::IncomingClient)), "Connection is in a wrong state");
@@ -689,7 +725,7 @@ mod tests {
         // deeper processors should inform the client that they are now subjected to a new processor / protocol, so they may adjust accordingly
         let welcome_authenticated_friend_processor_greeted = Arc::new(AtomicBool::new(false));
         let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted);
-        let welcome_authenticated_friend_processor = spawn_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        let welcome_authenticated_friend_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer } =>
@@ -714,7 +750,7 @@ mod tests {
 
         let account_settings_processor_greeted = Arc::new(AtomicBool::new(false));
         let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted);
-        let account_settings_processor = spawn_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        let account_settings_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer } =>
@@ -739,7 +775,7 @@ mod tests {
 
         let goodbye_options_processor_greeted = Arc::new(AtomicBool::new(false));
         let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted);
-        let goodbye_options_processor = spawn_server_processor!(TEST_CONFIG, Atomic, server, String, String,
+        let goodbye_options_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer } =>
@@ -780,7 +816,7 @@ mod tests {
             TEST_CONFIG,
             LISTENING_INTERFACE,
             PORT);
-        start_client_processor!(TEST_CONFIG, Atomic, client, String, String,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
                 match connection_event {
                     ProtocolEvent::PeerArrived { peer }           => peer.send_async(String::from("Hello! Am I in?")).await.expect("Sending failed"),
@@ -844,4 +880,6 @@ mod tests {
             ron_deserializer(local_message)
         }
     }
+    
+    impl ReactiveMessagingMemoryMappable for DummyClientAndServerMessages {}
 }

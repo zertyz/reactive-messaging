@@ -100,7 +100,7 @@ async fn distinct_connection_and_protocol_events() {
             });
             let client_protocol_datum_ref2 = Arc::clone(&client_protocol_datum_ref1);
             client_protocol_data.push(Arc::clone(&client_protocol_datum_ref1));
-            let handle = spawn_client_processor!(CONFIG, Atomic, client, TestString, TestString,
+            let handle = spawn_client_processor!(CONFIG, Textual, Atomic, client, TestString, TestString,
                 move |event| future::ready(match event {
                     ProtocolEvent::PeerArrived { peer } => {
                         client_protocol_datum_ref1.arrived.fetch_add(protocol_id+1, Relaxed);
@@ -219,7 +219,7 @@ async fn terminates_immediately_when_done() {
     let (probed_protocol_processor_builder,
          last_server_message_micros) = last_micros_probed_protocol_processor_builder();
 
-    start_client_processor!(CONFIG, Atomic, client, TestString, TestString,
+    start_client_processor!(CONFIG, Textual, Atomic, client, TestString, TestString,
         move |event| {
             if let ProtocolEvent::PeerArrived { peer } = &event {
                 let result = peer.send(TestString(String::from("GET / HTTP/1.0\n\n")));
@@ -249,7 +249,7 @@ async fn terminates_immediately_when_done() {
 /// If `disconnect_at` is given, it will drop the connection as soon as that number is received.
 async fn multi_protocol_server(port: u16, disconnect_at: Option<u16>) -> Result<impl MessagingService<{CONFIG.into()}>, Box<dyn Error + Send + Sync>> {
     let mut server = new_socket_server!(CONFIG, "127.0.0.1", port);
-    start_server_processor!(CONFIG, Atomic, server, TestString, TestString,
+    start_server_processor!(CONFIG, Textual, Atomic, server, TestString, TestString,
         |_| future::ready(()),
         move |_, _, peer, client_messages_stream| {
             let disconnect_at = disconnect_at.clone();

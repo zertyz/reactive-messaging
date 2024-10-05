@@ -1,7 +1,6 @@
 //! Resting place for [Peer], representing the remote party on a TCP/IP socket connection
 
 use crate::{
-    serde::ReactiveMessagingSerializer,
     socket_connection::common::{
         ReactiveMessagingSender,
     },

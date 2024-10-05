@@ -20,8 +20,7 @@ pub trait SocketDialog<const CONFIG: u64>: Sync + Send + Default {
     fn dialog_loop(self,
                    socket_connection:     &mut SocketConnection<Self::State>,
                    peer:                  &Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, Self::State>>,
-                   processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>,
-                   payload_size_range:    RangeInclusive<u32>)
+                   processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
 
                    -> impl Future < Output = Result<(), Box<dyn std::error::Error + Sync + Send>> >  + Send;
 }

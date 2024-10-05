@@ -62,8 +62,7 @@ for MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUni
     async fn dialog_loop(self,
                          socket_connection:     &mut SocketConnection<StateType>,
                          peer:                  &Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, StateType>>,
-                         processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>,
-                         payload_size_range:    RangeInclusive<u32>)
+                         processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
 
                          -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
