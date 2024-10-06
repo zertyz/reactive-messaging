@@ -22,17 +22,17 @@ license       = "Unlicense"
 [dependencies]
 tokio             = { version = "1", features = ["full", "rt-multi-thread"] }
 log               = "0.4"
-reactive-mutiny   = "1.1.25"  # for reactive programming in Rust
+reactive-mutiny   = "1.3"  # for reactive programming in Rust
 futures           = "0.3"     # brings in "Streams" / async iterators
 minstant          = "0.1"     # as fast as possible time measurements on X86_64 using TSC / RDTSC instructions -- avoiding system calls & context switches
 once_cell         = "1"       # lazy statics
 
 # for the const configs pattern
-strum        = { version = "0.25", features = ["derive"] }      # enums serialization/deserialization
-strum_macros = "0.25"
+strum        = { version = "0.26", features = ["derive"] }      # enums serialization/deserialization
+strum_macros = "0.26"
 
 # for the retrying mechanism
-keen-retry = "0.4"
+keen-retry = "0.5"
 
 # soon to be dropped when Rust finally goes forward in late 2023...
 # (in this crate, the costs of async traits are only paid for functions out of the hot path)
@@ -50,18 +50,18 @@ serde      = { version = "1.0", features = ["derive"] }      # typed serializati
 
 [dev-dependencies]
 ctor          = "0.2"    # setup and teardown for modules
-simple_logger = "4.0"    # a dirty console logger
+simple_logger = "5.0"    # a dirty console logger
 log           = { version = "0.4", features = ["max_level_trace", "release_max_level_info"] }
 
 # dependencies for the examples
 ###############################
 
-dashmap    = "5.4"     # atomic hash maps & sets -- to send a shutdown message to clients
+dashmap    = "6"     # atomic hash maps & sets -- to send a shutdown message to clients
 
 # default config loading & saving
 serde      = { version = "1.0", features = ["derive"] }      # typed serialization / deserialization
 ron        = "0.8"                                           # .ron config files
-regex      = "1.5"                                           # for placing docs along with config files
+regex      = "1.11"                                           # for placing docs along with config files
 rand       = "0.8"                                           # random number
 
 # std replacements
