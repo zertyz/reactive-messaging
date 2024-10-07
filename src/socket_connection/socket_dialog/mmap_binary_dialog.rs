@@ -1,13 +1,13 @@
 use std::fmt::Debug;
 use std::io;
 use std::marker::PhantomData;
-use std::ops::RangeInclusive;
 use std::sync::Arc;
 use futures::StreamExt;
 use log::{debug, error, trace, warn};
 use reactive_mutiny::types::FullDuplexUniChannel;
 use reactive_mutiny::uni::GenericUni;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use crate::config::ConstConfig;
 use crate::prelude::{Peer, SocketConnection};
 use crate::serde::ReactiveMessagingMemoryMappable;
 use crate::socket_connection::common::ReactiveMessagingUniSender;
@@ -22,6 +22,17 @@ pub struct MmapBinaryDialog<const CONFIG:       u64,
                             StateType:                                                                                                Send + Sync + Clone     + Debug + 'static = ()
                            > {
     _phantom_data: PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType)>,
+}
+
+impl<const CONFIG:       u64,
+    RemoteMessagesType: ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
+    LocalMessagesType:  ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
+    ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
+    SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
+    StateType:                                                                                                Send + Sync + Clone     + Debug + 'static
+>
+MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType> {
+    const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
 }
 
 impl<const CONFIG:       u64,
@@ -69,6 +80,10 @@ for MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUni
         // bad, Rust 1.76, bad... I cannot use const here: "error[E0401]: can't use generic parameters from outer item"
         let local_payload_size = std::mem::size_of::<LocalMessagesType>();
         let remote_payload_size = std::mem::size_of::<RemoteMessagesType>();
+
+        // sanity checks on payload sizes
+        debug_assert!(remote_payload_size as u32 <= Self::CONST_CONFIG.receiver_max_msg_size, "MmapBinary Dialog Loop: the given `CONST_CONFIG.receiver_max_msg_size` for the payload is too small (only {} bytes where {} would be needed) and this is probably a BUG in your program", Self::CONST_CONFIG.receiver_max_msg_size, remote_payload_size);
+        debug_assert!(local_payload_size  as u32 <= Self::CONST_CONFIG.sender_max_msg_size,   "MmapBinary Dialog Loop: the given `CONST_CONFIG.sender_max_msg_size` for the payload is too small (only {} bytes where {} would be needed) and this is probably a BUG in your program", Self::CONST_CONFIG.sender_max_msg_size, local_payload_size);
 
         let (mut sender_stream, _) = peer.create_stream();
 
@@ -177,7 +192,7 @@ mod tests {
     use std::time::Duration;
     use super::*;
     use crate::prelude::{ConstConfig, ServerConnectionHandler};
-    use crate::config::{MessageForms, RetryingStrategies};
+    use crate::config::RetryingStrategies;
     use reactive_mutiny::prelude::advanced::{ChannelUniMoveAtomic, ChannelUniMoveFullSync, UniZeroCopyAtomic, UniZeroCopyFullSync};
     use tokio::net::TcpStream;
     use crate::socket_connection::socket_connection_handler::SocketConnectionHandler;
@@ -187,7 +202,6 @@ mod tests {
     const DEFAULT_TEST_CONFIG: ConstConfig = ConstConfig {
         //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
         retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(30),
-        message_form: MessageForms::MmapBinary { size: 32 },    // IMPORTANT: this is not enforced in this module!!
         ..ConstConfig::default()
     };
     const DEFAULT_TEST_CONFIG_U64:  u64       = DEFAULT_TEST_CONFIG.into();

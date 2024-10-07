@@ -175,14 +175,16 @@ pub struct ConstConfig {
     pub sender_channel_size: u32,
     /// How many remote messages (per peer) may be enqueued while awaiting processing by the local processor (power of 2)
     pub receiver_channel_size: u32,
+    /// The limit of bytes to send out for each message 
+    pub sender_max_msg_size: u32,
+    /// The limit of bytes to receive for each peer message
+    pub receiver_max_msg_size: u32,
     /// How many milliseconds to wait when flushing messages out to a to-be-closed connection.
     pub flush_timeout_millis: u16,
     /// Specifies what to do when operations fail (full buffers / connection droppings)
     pub retrying_strategy: RetryingStrategies,
     /// Messes with the low level (system) socket options
     pub socket_options: SocketOptions,
-    /// Tells if messages should be sent in TEXTUAL or BINARY forms
-    pub message_form: MessageForms,
     /// Allows changing the Stream executor options in regard to logging & collected/reported metrics
     pub executor_instruments: /*reactive_mutiny::*/Instruments,
 }
@@ -199,16 +201,18 @@ impl ConstConfig {
     const SENDER_CHANNEL_SIZE: RangeInclusive<usize> = 0..=4;
     /// u32_value = 2^n
     const RECEIVER_CHANNEL_SIZE: RangeInclusive<usize> = 5..=9;
+    /// u32_value = 2^n
+    const SENDER_MAX_MSG_SIZE: RangeInclusive<usize> = 10..=14;
+    /// u32_value = 2^n
+    const RECEIVER_MAX_MSG_SIZE: RangeInclusive<usize> = 15..=19;
     /// u16_value = 2^n
-    const FLUSH_TIMEOUT_MILLIS: RangeInclusive<usize> = 10..=13;
+    const FLUSH_TIMEOUT_MILLIS: RangeInclusive<usize> = 20..=23;
     /// One of [RetryingStrategies], converted by [RetryingStrategies::as_repr()]
-    const RETRYING_STRATEGY: RangeInclusive<usize> = 14..=24;
+    const RETRYING_STRATEGY: RangeInclusive<usize> = 24..=34;
     /// One of [SocketOptions], converted by [SocketOptions::as_repr()]
-    const SOCKET_OPTIONS: RangeInclusive<usize> = 25..=40;
-    /// One of [MessageForms], converted by [MessageForms::as_repr()]
-    const MESSAGE_FORM: RangeInclusive<usize> = 41..=47;
+    const SOCKET_OPTIONS: RangeInclusive<usize> = 35..=50;
     /// The 8 bits from `reactive-mutiny`
-    const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 48..=56;
+    const EXECUTOR_INSTRUMENTS: RangeInclusive<usize> = 51..=59;
 
 
     /// Contains sane & performant defaults.\
@@ -222,10 +226,11 @@ impl ConstConfig {
         ConstConfig {
             sender_channel_size:    1024,
             receiver_channel_size:  1024,
+            sender_max_msg_size:    1024,
+            receiver_max_msg_size:  1024,
             flush_timeout_millis:   256,
             retrying_strategy:      RetryingStrategies::RetryWithBackoffUpTo(20),
             socket_options:         SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
-            message_form:           MessageForms::Textual { max_size: 1024 },
             executor_instruments:   Instruments::from(Instruments::NoInstruments.into()),
         }
     }
@@ -240,13 +245,13 @@ impl ConstConfig {
         let mut config = 0u64;
         config = set_bits_from_power_of_2_u32(config, Self::SENDER_CHANNEL_SIZE,   self.sender_channel_size);
         config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_CHANNEL_SIZE, self.receiver_channel_size);
+        config = set_bits_from_power_of_2_u32(config, Self::SENDER_MAX_MSG_SIZE, self.sender_max_msg_size);
+        config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_MAX_MSG_SIZE, self.receiver_max_msg_size);
         config = set_bits_from_power_of_2_u16(config, Self::FLUSH_TIMEOUT_MILLIS,  self.flush_timeout_millis);
         let retrying_strategy_repr = self.retrying_strategy.as_repr();
         config = set_bits(config, Self::RETRYING_STRATEGY, retrying_strategy_repr as u64);
         let socket_options_repr = self.socket_options.as_repr();
         config = set_bits(config, Self::SOCKET_OPTIONS, socket_options_repr as u64);
-        let message_form_repr = self.message_form.as_repr();
-        config = set_bits(config, Self::MESSAGE_FORM, message_form_repr as u64);
         let executor_instruments_repr = self.executor_instruments.into();
         config = set_bits(config, Self::EXECUTOR_INSTRUMENTS, executor_instruments_repr as u64);
         config
@@ -255,20 +260,22 @@ impl ConstConfig {
     /// Builds [Self] from the generic `const CONFIGS: usize` parameter used in structs
     /// by the "Const Config Pattern"
     pub const fn from(config: u64) -> Self {
-        let sender_buffer              = get_power_of_2_u32_bits(config, Self::SENDER_CHANNEL_SIZE);
-        let receiver_buffer            = get_power_of_2_u32_bits(config, Self::RECEIVER_CHANNEL_SIZE);
+        let sender_channel_size        = get_power_of_2_u32_bits(config, Self::SENDER_CHANNEL_SIZE);
+        let receiver_channel_size      = get_power_of_2_u32_bits(config, Self::RECEIVER_CHANNEL_SIZE);
+        let sender_max_msg_size        = get_power_of_2_u32_bits(config, Self::SENDER_MAX_MSG_SIZE);
+        let receiver_max_msg_size      = get_power_of_2_u32_bits(config, Self::RECEIVER_MAX_MSG_SIZE);
         let flush_timeout_millis       = get_power_of_2_u16_bits(config, Self::FLUSH_TIMEOUT_MILLIS);
         let retrying_strategy_repr     = get_bits(config, Self::RETRYING_STRATEGY);
         let socket_options_repr        = get_bits(config, Self::SOCKET_OPTIONS);
-        let message_form_repr          = get_bits(config, Self::MESSAGE_FORM);
         let executor_instruments_repr  = get_bits(config, Self::EXECUTOR_INSTRUMENTS);
         Self {
             flush_timeout_millis,
-            sender_channel_size:   sender_buffer,
-            receiver_channel_size: receiver_buffer,
+            sender_channel_size,
+            receiver_channel_size,
+            sender_max_msg_size,
+            receiver_max_msg_size,
             retrying_strategy:     RetryingStrategies::from_repr(retrying_strategy_repr as u16),
             socket_options:        SocketOptions::from_repr(socket_options_repr as u32),
-            message_form:          MessageForms::from_repr(message_form_repr as u8),
             executor_instruments:  Instruments::from(executor_instruments_repr as usize),
         }
     }
@@ -287,6 +294,16 @@ impl ConstConfig {
         config.receiver_channel_size
     }
 
+    pub const fn extract_sender_max_msg_size(config: u64) -> u32 {
+        let config = Self::from(config);
+        config.sender_max_msg_size
+    }
+
+    pub const fn extract_receiver_max_msg_size(config: u64) -> u32 {
+        let config = Self::from(config);
+        config.receiver_max_msg_size
+    }
+
     pub const fn extract_flush_timeout(config: u64) -> Duration {
         let config = Self::from(config);
         Duration::from_millis(config.flush_timeout_millis as u64)
@@ -300,11 +317,6 @@ impl ConstConfig {
     pub const fn extract_socket_options(config: u64) -> SocketOptions {
         let config = Self::from(config);
         config.socket_options
-    }
-
-    pub const fn extract_message_form(config: u64) -> MessageForms {
-        let config = Self::from(config);
-        config.message_form
     }
 
     pub const fn extract_executor_instruments(config: u64) -> usize {
@@ -481,12 +493,13 @@ mod tests {
     #[cfg_attr(not(doc),test)]
     fn const_config() {
         let expected = || ConstConfig {
-            sender_channel_size:   2048,
+            sender_channel_size:   4096,
             receiver_channel_size: 2048,
+            sender_max_msg_size:   256,
+            receiver_max_msg_size: 512,
             flush_timeout_millis:  256,
             retrying_strategy:     RetryingStrategies::RetryWithBackoffUpTo(14),
             socket_options:        SocketOptions { hops_to_live: NonZeroU8::new(255), linger_millis: Some(128), no_delay: Some(true) },
-            message_form:          MessageForms::Textual { max_size: 65536 },
             executor_instruments:  Instruments::from(Instruments::LogsWithExpensiveMetrics.into()),
         };
         let converted = ConstConfig::into(expected());

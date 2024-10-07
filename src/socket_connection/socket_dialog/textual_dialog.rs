@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::ops::RangeInclusive;
 use std::sync::Arc;
 use futures::StreamExt;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
@@ -75,15 +74,13 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
                          processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
 
                          -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
-        // sanity checks on payload sizes
-        // let min_buffer = usize::min(Self::CONST_CONFIG.incoming_buffer_size, Self::CONST_CONFIG.outgoing_buffer_size);
-        // if min_buffer < 4 {
-        //     return Err(Box::from(format!("Textual DIalog Loop: the given `max_line_size` for the payload is too small (only {max_line_size} bytes) and this is probably a BUG in your program")))
-        // }
-let fix_configs = 4096;
 
-        let mut read_buffer = Vec::with_capacity(fix_configs);
-        let mut serialization_buffer = Vec::with_capacity(fix_configs);
+        let mut read_buffer = Vec::with_capacity(Self::CONST_CONFIG.receiver_max_msg_size as usize);
+        let mut serialization_buffer = Vec::with_capacity(Self::CONST_CONFIG.sender_max_msg_size as usize);
+
+        // sanity checks on payload sizes
+        debug_assert!(read_buffer.capacity() >= 4,          "Textual Dialog Loop: the given `CONST_CONFIG.receiver_max_msg_size` for the payload is too small (only {} bytes) and this is probably a BUG in your program", read_buffer.len());
+        debug_assert!(serialization_buffer.capacity() >= 4, "Textual Dialog Loop: the given `CONST_CONFIG.sender_max_msg_size` for the payload is too small (only {} bytes) and this is probably a BUG in your program", serialization_buffer.len());
 
         let (mut sender_stream, _) = peer.create_stream();
 
@@ -198,12 +195,11 @@ mod tests {
     use super::*;
     use super::super::super::socket_connection_handler;
     use reactive_mutiny::prelude::advanced::{ChannelUniMoveAtomic, ChannelUniMoveFullSync, UniZeroCopyAtomic, UniZeroCopyFullSync};
-    use crate::config::{ConstConfig, MessageForms, RetryingStrategies};
+    use crate::config::{ConstConfig, RetryingStrategies};
 
     const DEFAULT_TEST_CONFIG: ConstConfig = ConstConfig {
         //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
         retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(30),
-        message_form: MessageForms::Textual { max_size: 1024 }, // IMPORTANT: this is not enforced in this module!!
         ..ConstConfig::default()
     };
     const DEFAULT_TEST_CONFIG_U64:  u64              = DEFAULT_TEST_CONFIG.into();

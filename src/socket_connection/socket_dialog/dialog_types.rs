@@ -2,7 +2,6 @@
 
 use std::fmt::Debug;
 use std::future::Future;
-use std::ops::RangeInclusive;
 use std::sync::Arc;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 use crate::prelude::{Peer, SocketConnection};
@@ -10,11 +9,11 @@ use crate::socket_connection::common::ReactiveMessagingUniSender;
 
 pub trait SocketDialog<const CONFIG: u64>: Sync + Send + Default {
 
-    type RemoteMessages: Send + Sync + PartialEq + Debug + 'static;
-    type LocalMessages:  Send + Sync + PartialEq + Debug + 'static;
-    type ProcessorUni:              GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync                     + 'static;
-    type SenderChannel:             FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Send + Sync                     + 'static;
-    type State:                                                                                                               Send + Sync + Clone + Debug     + 'static;
+    type RemoteMessages:                                                                                           Send + Sync + PartialEq + Debug + 'static;
+    type LocalMessages:                                                                                            Send + Sync + PartialEq + Debug + 'static;
+    type ProcessorUni:   GenericUni<ItemType=Self::RemoteMessages>                                               + Send + Sync                     + 'static;
+    type SenderChannel:  FullDuplexUniChannel<ItemType=Self::LocalMessages, DerivedItemType=Self::LocalMessages> + Send + Sync                     + 'static;
+    type State:                                                                                                    Send + Sync + Clone + Debug     + 'static;
     
     /// IMPLEMENTORS: #[inline(always)]
     fn dialog_loop(self,
@@ -22,5 +21,5 @@ pub trait SocketDialog<const CONFIG: u64>: Sync + Send + Default {
                    peer:                  &Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, Self::State>>,
                    processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
 
-                   -> impl Future < Output = Result<(), Box<dyn std::error::Error + Sync + Send>> >  + Send;
+                  -> impl Future < Output = Result<(), Box<dyn std::error::Error + Sync + Send>> >  + Send;
 }

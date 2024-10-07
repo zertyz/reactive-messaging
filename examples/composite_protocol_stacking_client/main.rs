@@ -2,7 +2,9 @@
 
 mod protocol_processor;
 
-use composite_protocol_stacking_common::protocol_model::{GameServerMessages, GameClientMessages};
+use composite_protocol_stacking_common::{
+    protocol_model::{GameServerMessages, GameClientMessages}
+};
 use crate::protocol_processor::ClientProtocolProcessor;
 use std::{
     future,
@@ -21,12 +23,6 @@ const INSTANCES:      u16         = 22;
 const NETWORK_CONFIG: ConstConfig = ConstConfig {
     ..ConstConfig::default()
 };
-#[macro_export]
-macro_rules! spawn_client_processor {
-    ($_1: expr, $_4: expr, $_5: ty, $_6: ty, $_7: expr, $_8: expr) => {
-        reactive_messaging::spawn_client_processor!($_1, MmapBinary, FullSync, $_4, $_5, $_6, $_7, $_8)
-    }
-}
 
 
 #[cfg(debug_assertions)]

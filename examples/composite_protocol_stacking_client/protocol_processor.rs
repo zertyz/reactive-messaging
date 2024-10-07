@@ -38,6 +38,7 @@ const MATCH_CONFIG: MatchConfig = MatchConfig {
 pub struct ClientProtocolProcessor {
     start_instant:     Instant,
     in_messages_count: AtomicU64,
+    out_messages_count: AtomicU64,
 }
 
 impl ClientProtocolProcessor {
@@ -46,6 +47,7 @@ impl ClientProtocolProcessor {
         Arc::new(Self {
             start_instant:     Instant::now(),
             in_messages_count: AtomicU64::new(0),
+            out_messages_count: AtomicU64::new(0),
         })
     }
 
@@ -70,12 +72,13 @@ impl ClientProtocolProcessor {
 
                                     -> impl Stream<Item=bool> {
                             
-        let cloned_self = Arc::clone(self);
+        let cloned_self1 = Arc::clone(self);
+        let cloned_self2 = Arc::clone(self);
         let peer_ref = Arc::clone(&peer);
         _ = peer.send(PreGameClientMessages::Config(MATCH_CONFIG));
         server_messages_stream
+            .inspect(move |_| {cloned_self1.in_messages_count.fetch_add(1, Relaxed);})  // increment the incoming messages metrics
             .map(move |server_message| {
-                cloned_self.in_messages_count.fetch_add(1, Relaxed);
                 match server_message.as_ref() {
                     PreGameServerMessages::Version(server_protocol_version) => {
                         if server_protocol_version == &PROTOCOL_VERSION {
@@ -96,6 +99,7 @@ impl ClientProtocolProcessor {
                 }
             })
             .take_while(|server_message| future::ready(server_message.is_some()))    // stop if the protocol was upgraded
+            .inspect(move |_| { cloned_self2.out_messages_count.fetch_add(1, Relaxed); })        // increment the outgoing messages metrics
             .map(|server_message| server_message.unwrap())
             .to_responsive_stream(peer_ref, |server_message, _peer| matches!(server_message, PreGameClientMessages::Error(..)) )
             .take_while(|stop| future::ready(!stop))    // stop if an error happened (after sending the error message)
@@ -109,10 +113,11 @@ impl ClientProtocolProcessor {
             ProtocolEvent::PeerArrived { peer: _ } => {},
             ProtocolEvent::PeerLeft { peer, stream_stats } => {
                 let in_messages_count = self.in_messages_count.load(Relaxed);
-                info!("CLIENT Disconnected: {:?}; stats: {:?} -- with {} messages IN & OUT: {:.2}/s",
+                let out_messages_count = self.out_messages_count.load(Relaxed);
+                info!("CLIENT Disconnected: {:?}; stats: {:?} -- with {in_messages_count}+{out_messages_count} messages IN & OUT: {:.2}/s",
                       peer,
                       stream_stats,
-                      in_messages_count, in_messages_count as f64 / self.start_instant.elapsed().as_secs_f64());
+                      (in_messages_count + out_messages_count) as f64 / self.start_instant.elapsed().as_secs_f64());
             }
             ProtocolEvent::LocalServiceTermination => {
                 info!("Ping-Pong client shutdown requested. Notifying the server...");
@@ -134,11 +139,12 @@ impl ClientProtocolProcessor {
 
         _ = peer.try_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
                                                                 // TODO 2024-01-27: this may be moved to the connection event handler after the new state is added
-        let cloned_self = Arc::clone(self);
+        let cloned_self1 = Arc::clone(self);
+        let cloned_self2 = Arc::clone(self);
         let peer_ref = Arc::clone(&peer);
         let mut umpire = Umpire::new(&MATCH_CONFIG, Players::Ourself);
         server_messages_stream.map(move |server_message| {
-            cloned_self.in_messages_count.fetch_add(1, Relaxed);
+            cloned_self1.in_messages_count.fetch_add(1, Relaxed);
             match server_message.as_ref() {
 
                 GameServerMessages::GameStarted => {
@@ -227,8 +233,8 @@ impl ClientProtocolProcessor {
             }
         })
         .flat_map(stream::iter)
+        .inspect(move |_| { cloned_self2.out_messages_count.fetch_add(1, Relaxed); })       // update the outgoing messages metrics
         .to_responsive_stream(peer_ref, |client_message, _peer| matches!(client_message, GameClientMessages::Quit | GameClientMessages::Error(..)))
         .take_while(|stop| future::ready(!stop))
     }
 }
-
