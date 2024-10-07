@@ -3,6 +3,7 @@
 pub mod protocol_processor;
 
 use composite_protocol_stacking_common::{
+    NETWORK_CONFIG,
     protocol_model::{GameClientMessages, GameServerMessages}
 };
 use protocol_processor::ServerProtocolProcessor;
@@ -16,11 +17,8 @@ use log::warn;
 use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
 
 
-const LISTENING_INTERFACE: &str        = "0.0.0.0";
-const LISTENING_PORT:      u16         = 1234;
-const NETWORK_CONFIG:      ConstConfig = ConstConfig {
-    ..ConstConfig::default()
-};
+const LISTENING_INTERFACE: &str = "0.0.0.0";
+const LISTENING_PORT:      u16  = 1234;
 
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
@@ -96,7 +94,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // therefore:
     // fn pipeline_builder(client_addr: String, _connected_port: u16, incoming_messages_stream: impl Stream<Item=InputItemType>) -> impl Stream<Item=OutputItemType>
     // and the SocketServer::new() receives it
-
-
-
+    
 }

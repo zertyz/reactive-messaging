@@ -245,7 +245,7 @@ impl ConstConfig {
         let mut config = 0u64;
         config = set_bits_from_power_of_2_u32(config, Self::SENDER_CHANNEL_SIZE,   self.sender_channel_size);
         config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_CHANNEL_SIZE, self.receiver_channel_size);
-        config = set_bits_from_power_of_2_u32(config, Self::SENDER_MAX_MSG_SIZE, self.sender_max_msg_size);
+        config = set_bits_from_power_of_2_u32(config, Self::SENDER_MAX_MSG_SIZE,   self.sender_max_msg_size);
         config = set_bits_from_power_of_2_u32(config, Self::RECEIVER_MAX_MSG_SIZE, self.receiver_max_msg_size);
         config = set_bits_from_power_of_2_u16(config, Self::FLUSH_TIMEOUT_MILLIS,  self.flush_timeout_millis);
         let retrying_strategy_repr = self.retrying_strategy.as_repr();

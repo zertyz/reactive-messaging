@@ -3,6 +3,7 @@
 mod protocol_processor;
 
 use composite_protocol_stacking_common::{
+    NETWORK_CONFIG,
     protocol_model::{GameServerMessages, GameClientMessages}
 };
 use crate::protocol_processor::ClientProtocolProcessor;
@@ -14,15 +15,12 @@ use std::{
 use reactive_messaging::prelude::*;
 use futures::StreamExt;
 use log::warn;
-use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates};
+use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerMessages, ProtocolStates, PROTOCOL_VERSION, PROTOCOL_VERSIONS};
 
 
-const SERVER_IP:      &str        = "127.0.0.1";
-const PORT:           u16         = 1234;
-const INSTANCES:      u16         = 22;
-const NETWORK_CONFIG: ConstConfig = ConstConfig {
-    ..ConstConfig::default()
-};
+const SERVER_IP:      &str = "127.0.0.1";
+const PORT:           u16  = 1234;
+const INSTANCES:      u16  = 22;
 
 
 #[cfg(debug_assertions)]
@@ -36,6 +34,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
 
+    println!("Ping-pong game");
+    println!("===============");
+    println!("Protocol: {:?}", PROTOCOL_VERSIONS.get_key_value(&PROTOCOL_VERSION).expect("`PROTOCOL_VERSION` {PROTOCOL_VERSION} wasn't properly defined"));
+    println!("MMapBinary information:");
+    println!("  Pre-Game Client messages size: {}", std::mem::size_of::<PreGameClientMessages>());
+    println!("      Game Client messages size: {}", std::mem::size_of::<GameClientMessages>());
+    println!("  Pre-Game Server messages size: {}", std::mem::size_of::<PreGameServerMessages>());
+    println!("      Game Server messages size: {}", std::mem::size_of::<GameServerMessages>());
+    println!();
     warn!("{INSTANCES} Ping-Pong client(s) starting... connecting to {SERVER_IP}:{PORT}");
 
     let mut socket_clients = vec![];

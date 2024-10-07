@@ -1,6 +1,23 @@
 pub mod protocol_model;
 pub mod logic;
 
+use reactive_messaging::prelude::{ConstConfig, SocketOptions};
+
+pub const NETWORK_CONFIG: ConstConfig = ConstConfig {
+    // message size limits
+    receiver_max_msg_size: 1024,
+    sender_max_msg_size: 1024,
+    // queue limits -- we use tiny numbers as we don't buffer anything -- ping-pong, remember...
+    receiver_channel_size: 32,
+    sender_channel_size: 32,
+    socket_options: SocketOptions {
+        hops_to_live:  None,
+        linger_millis: None,
+        no_delay:      Some(true),
+    },
+    ..ConstConfig::default()
+};
+
 
 /// Wrapper around the real [reactive_messaging::spawn_server_processor!()] macro, specifying
 /// the fastest possible message kind & channel for our example:
