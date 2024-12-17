@@ -21,7 +21,7 @@ const LISTENING_INTERFACE: &str = "0.0.0.0";
 const LISTENING_PORT:      u16  = 1234;
 
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 5)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 6)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));
 

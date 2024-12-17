@@ -20,7 +20,10 @@ use crate::prelude::SocketConnection;
 /// ```no_compile
 ///     fn dialog_processor<RemoteStreamType: Stream<Item=SocketProcessorDerivedType<RemoteMessages>>>
 ///                        (remote_messages_stream: RemoteStreamType) -> impl Stream<Item=LocalMessages> { ... }
-pub type MessagingMutinyStream<GenericUniType: GenericUni> = MutinyStream<'static, GenericUniType::ItemType, GenericUniType::UniChannelType, GenericUniType::DerivedItemType>;
+pub type MessagingMutinyStream<GenericUniType> = MutinyStream<'static, 
+                                                              <GenericUniType as GenericUni>::ItemType,
+                                                              <GenericUniType as GenericUni>::UniChannelType,
+                                                              <GenericUniType as GenericUni>::DerivedItemType>;
 
 
 /// Event issued by Composite Protocol Clients & Servers when connections are made or dropped
