@@ -134,7 +134,7 @@ for MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUni
                                 std::slice::from_raw_parts(ptr, len)
                             };
                             // send
-                            if let Err(err) = socket_connection.connection_mut().write_all(&to_send_bytes).await {
+                            if let Err(err) = socket_connection.connection_mut().write_all(to_send_bytes).await {
                                 warn!("`dialog_loop_for_fixed_binary_form()`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
                                 socket_connection.report_closed();
                                 break 'connection

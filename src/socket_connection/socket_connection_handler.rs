@@ -122,8 +122,8 @@ impl<const CONFIG:        u64,
                             return
                         }
                     };
-                    if let Err(_) = cloned_connection_sink.send(socket_connection).await {
-                        error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while returning the connection with {client_ip}:{client_port} to the caller. It will now be forcibly closed.");
+                    if let Err(err) = cloned_connection_sink.send(socket_connection).await {
+                        error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while returning the connection with {client_ip}:{client_port} to the caller. It will now be forcibly closed: {err}");
                     };
                     // if let Err(err) = connection.shutdown().await {
                     //     error!("`reactive-messaging::SocketServer`: ERROR in server @ {listening_interface_and_port} while shutting down the socket with client {client_ip}:{client_port}: {err}");
@@ -213,6 +213,7 @@ impl<const CONFIG:        u64,
     ///   - `peer` represents the remote end of the connection;
     ///   - `processor_sender` is a [reactive_mutiny::Uni], to which incoming messages will be sent;
     ///   - conversely, `peer.sender` is the [reactive_mutiny::Uni] to receive outgoing messages.
+    ///
     /// After the processor is done with the `socket_connection`, the method returns it back to the caller if no errors had happen.
     #[inline(always)]
     async fn dialog_loop(self: Arc<Self>,
@@ -241,9 +242,13 @@ impl<const CONFIG:        u64,
         if let Ok(()) = result {
             _ = processor_sender.close(Duration::from_millis(Self::CONST_CONFIG.flush_timeout_millis as u64)).await;
             peer.cancel_and_close();
-            socket_connection.connection_mut().flush().await.map_err(|err| format!("error flushing the socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
-            peer.take_state().await
-                .map(|state| socket_connection.set_state(state));
+            socket_connection.connection_mut()
+                .flush()
+                .await
+                .map_err(|err| format!("error flushing the socket connected to {}:{}: {}", peer.peer_address, peer.peer_id, err))?;
+            if let Some(state) = peer.take_state().await {
+                socket_connection.set_state(state);                
+            }
         }
 
         // return the connection

@@ -55,7 +55,7 @@ use log::{error, trace, warn};
 ///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const/compile time optimizations;
 ///   - `interface_ip`: IntoString -- the interface to listen to incoming connections;
 ///   - `port`: u16 -- the port to listen to incoming connections;
-
+///
 /// Example:
 /// ```nocompile
 ///     let mut server = new_socket_server!(CONFIG, "127.0.0.1", 8768);
@@ -66,7 +66,7 @@ macro_rules! new_socket_server {
     ($const_config:    expr,
      $interface_ip:    expr,
      $port:            expr) => {
-        crate::new_composite_socket_server!($const_config, $interface_ip, $port, ())
+        $crate::new_composite_socket_server!($const_config, $interface_ip, $port, ())
     }
 }
 pub use new_socket_server;
@@ -83,6 +83,7 @@ pub use new_socket_server;
 ///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the clients;
 ///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.
 ///   - `state_type: Default` -- The state type used by the "connection routing closure" (to be provided) to promote the "Composite Protocol Stacking" pattern
+/// 
 /// See [new_socket_server!()] if you want to use the "Composite Protocol Stacking" pattern.
 #[macro_export]
 macro_rules! new_composite_socket_server {
@@ -318,8 +319,8 @@ for CompositeSocketServer<CONFIG, StateType> {
                             })
                             .unwrap_or_else(|err| (format!("<unknown -- err:{err}>"), 0));
                         trace!("`reactive-messaging::CompositeSocketServer`: ROUTING the client {client_ip}:{client_port} of the server @ {interface_ip}:{port} to another processor");
-                        if let Err(_) = sender.send(connection).await {
-                            error!("`reactive-messaging::CompositeSocketServer`: BUG(?) in server @ {interface_ip}:{port} while re-routing the client {client_ip}:{client_port}'s socket: THE NEW (ROUTED) PROCESSOR CAN NO LONGER RECEIVE CONNECTIONS -- THE CONNECTION WILL BE DROPPED");
+                        if let Err(err) = sender.send(connection).await {
+                            error!("`reactive-messaging::CompositeSocketServer`: BUG(?) in server @ {interface_ip}:{port} while re-routing the client {client_ip}:{client_port}'s socket: THE NEW (ROUTED) PROCESSOR CAN NO LONGER RECEIVE CONNECTIONS -- THE CONNECTION WILL BE DROPPED: {err}");
                             break
                         }
                     },

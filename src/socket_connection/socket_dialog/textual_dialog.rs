@@ -64,9 +64,9 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
     type SenderChannel = SenderChannelType;
     type State         = StateType;
 
-    /// Dialog loop specialist for text-based message forms, where each in & out event/command/sentence ends in '\n'.\
-    /// `max_line_size` is the limit length of the lines that can be parsed (including the '\n' delimiter): if bigger
-    /// lines come in, the dialog will end in error.
+    /// Dialog loop specializing in text-based message forms; in & out events/commands/sentences end with '\n'.
+    /// `max_line_size` defines the maximum length of parsable lines (including '\n'). Exceeding this limit
+    /// results in a dialog termination due to an error.
     #[inline(always)]
     async fn dialog_loop(self,
                          socket_connection:     &mut SocketConnection<StateType>,
@@ -176,7 +176,7 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
                             socket_connection.report_closed();
                             break 'connection
                         },
-                        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => {},
+                        Err(err) if err.kind() == io::ErrorKind::WouldBlock => {},
                         Err(err) => {
                             error!("`dialog_loop_for_textual_form()`: ERROR in the connection with {:?} (peer id {}) while READING: '{:?}' -- dropping it", peer.peer_address, peer.peer_id, err);
                             socket_connection.report_closed();

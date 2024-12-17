@@ -7,6 +7,7 @@
 //!     may be reused.\
 //!     See [ClientConnectionManager]
 //!   * Abstracts out the TCP/IP intricacies for establishing (and retrying) connections.
+//!
 //! IMPLEMENTATION NOTE: this code may be improved when Rust allows "async fn in traits": a common trait
 //!                      may be implemented.
 
@@ -81,13 +82,13 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
         resolved_result
             .inspect_recovered(|retrying_duration, _, errors|
                warn!("`reactive-messaging::SocketClient`: Connection to {}:{} SUCCEEDED Succeeded after retrying {} times in {:?}. Transient errors: {}",
-                     self.host, self.port, errors.len(), retrying_duration, keen_retry::loggable_retry_errors(&errors)) )
+                     self.host, self.port, errors.len(), retrying_duration, keen_retry::loggable_retry_errors(errors)) )
            .inspect_given_up(|retrying_duration, transient_errors, fatal_error|
                error!("`reactive-messaging::SocketClient`: Connection to {}:{} was GIVEN UP after retrying {} times in {:?}, with transient errors {}. The last error was {}",
-                      self.host, self.port, transient_errors.len()+1, retrying_duration, keen_retry::loggable_retry_errors(&transient_errors), fatal_error) )
+                      self.host, self.port, transient_errors.len()+1, retrying_duration, keen_retry::loggable_retry_errors(transient_errors), fatal_error) )
            .inspect_unrecoverable(|retrying_duration, transient_errors, fatal_error|
                error!("`reactive-messaging::SocketClient`: Connection to {}:{} FAILED FATABLY after retrying {} times in {:?}, with transient errors {}. The fatal error was {}",
-                      self.host, self.port, transient_errors.len(), retrying_duration, keen_retry::loggable_retry_errors(&transient_errors), fatal_error) )
+                      self.host, self.port, transient_errors.len(), retrying_duration, keen_retry::loggable_retry_errors(transient_errors), fatal_error) )
             .into_result()
     }
 
@@ -100,6 +101,7 @@ impl<const CONFIG_U64: u64> ClientConnectionManager<CONFIG_U64> {
     ///   * If the `server` is a name, and it resolves to several IPs, calling the returned closure again will attempt to connect to the next IP
     ///   * If the IPs list is over, a new host resolution will be done and the process above repeats
     ///   * The continuation closure may be indefinitely stored by the client, so an easy reconnection might be attempted at any time -- in case it drops.
+    ///
     /// IMPLEMENTATION NOTE: this method implements the "Partial Completion with Continuation Closure", as described in the `keen-retry` crate's book.
     fn build_connect_continuation_closure(host: &str, port: u16) -> impl FnMut() -> ConnectionFuture {
         let address = format!("{}:{}", host, port);
@@ -156,7 +158,7 @@ impl<StateType: Debug + Clone + Send + 'static> ServerConnectionHandler<StateTyp
         let connection_channel = ConnectionChannel::new();
         let connection_sender = connection_channel.sender.clone();
         let (network_event_loop_sender, network_event_loop_receiver) = tokio::sync::oneshot::channel::<()>();
-        Self::spawn_connection_listener(&listening_interface, listening_port, connection_initial_state, connection_sender, network_event_loop_receiver).await?;
+        Self::spawn_connection_listener(listening_interface, listening_port, connection_initial_state, connection_sender, network_event_loop_receiver).await?;
         Ok(Self {
             connection_channel,
             network_event_loop_signaler: network_event_loop_sender,
@@ -249,15 +251,21 @@ pub struct ConnectionChannel<StateType: Debug> {
     // and the statistics struct from `reactive-mutiny` may help here
 }
 
-impl<StateType: Debug> ConnectionChannel<StateType> {
-
-    /// Creates a new instance
-    pub fn new() -> Self {
+impl<StateType: Debug> Default for ConnectionChannel<StateType> {
+    fn default() -> Self {
         let (sender, receiver) = tokio::sync::mpsc::channel::<SocketConnection<StateType>>(2);
         Self {
             sender,
             receiver: Some(receiver),
         }
+    }
+}
+
+impl<StateType: Debug> ConnectionChannel<StateType> {
+
+    /// Creates a new instance
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Consumes and returns the `tokio::sync::mpsc::Receiver` which will be able to
