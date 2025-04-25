@@ -15,7 +15,7 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 
 
-# Being-Done
+# Under Execution
 
 **(n8)** 2024-01-04: Introduce binary messages:
 1) Use RKYV for serialization (the fastest & more flexible among current options, after a ChatGPT & bard research)

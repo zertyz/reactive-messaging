@@ -64,16 +64,14 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
     type SenderChannel = SenderChannelType;
     type State         = StateType;
 
-    /// Dialog loop specializing in text-based message forms; in & out events/commands/sentences end with '\n'.
-    /// `max_line_size` defines the maximum length of parsable lines (including '\n'). Exceeding this limit
-    /// results in a dialog termination due to an error.
+    /// Dialog loop specialized in text-based message forms, where each in & out event/command/sentence ends in '\n'.
     #[inline(always)]
     async fn dialog_loop(self,
                          socket_connection:     &mut SocketConnection<StateType>,
                          peer:                  &Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, StateType>>,
                          processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
 
-                         -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+                        -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
         let mut read_buffer = Vec::with_capacity(Self::CONST_CONFIG.receiver_max_msg_size as usize);
         let mut serialization_buffer = Vec::with_capacity(Self::CONST_CONFIG.sender_max_msg_size as usize);
@@ -99,13 +97,13 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
                             serialization_buffer.push(b'\n');
                             // send
                             if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
-                                warn!("`dialog_loop_for_textual_form()`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
+                                warn!("`dialog_loop() for textual protocol: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
                                 socket_connection.report_closed();
                                 break 'connection
                             }
                         },
                         None => {
-                            debug!("`dialog_loop_for_textual_form()`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer`)");
+                            debug!("`dialog_loop() for textual protocol: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer`)");
                             break 'connection
                         }
                     }

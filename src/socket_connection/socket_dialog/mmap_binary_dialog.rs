@@ -66,16 +66,14 @@ for MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUni
     type SenderChannel = SenderChannelType;
     type State         = StateType;
 
-    /// Dialog loop specialist for text-based message forms, where each in & out event/command/sentence ends in '\n'.\
-    /// `max_line_size` is the limit length of the lines that can be parsed (including the '\n' delimiter): if bigger
-    /// lines come in, the dialog will end in error.
+    /// Dialog loop specialist for fixed-binary message forms, where each in or out event/command/parcel have the same size.
     #[inline(always)]
     async fn dialog_loop(self,
                          socket_connection:     &mut SocketConnection<StateType>,
                          peer:                  &Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, StateType>>,
                          processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
 
-                         -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
+                        -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
         // bad, Rust 1.76, bad... I cannot use const here: "error[E0401]: can't use generic parameters from outer item"
         let local_payload_size = std::mem::size_of::<LocalMessagesType>();
@@ -135,14 +133,14 @@ for MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUni
                             };
                             // send
                             if let Err(err) = socket_connection.connection_mut().write_all(to_send_bytes).await {
-                                warn!("`dialog_loop_for_fixed_binary_form()`: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
+                                warn!("`dialog_loop()` for mmap_binary: PROBLEM in the connection with {peer:#?} while WRITING '{to_send:?}': {err:?}");
                                 socket_connection.report_closed();
                                 break 'connection
                             }
 // eprintln!(">>>> SENT: {to_send:?}");
                         },
                         None => {
-                            debug!("`dialog_loop_for_fixed_binary_form()`: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer`");
+                            debug!("`dialog_loop()` for mmap_binary: Sender for {peer:#?} ended (most likely, either `peer.flush_and_close()` or `peer.cancel_and_close()` was called on the `peer`");
                             break 'connection
                         }
                     }
@@ -252,10 +250,10 @@ mod tests {
                 future::ready(())
             },
             move |_client_addr, _client_port, peer, client_messages_stream| {
-                client_messages_stream.then(move |server_message| {
+                client_messages_stream.then(move |client_message| {
                     let peer = peer.clone();
                     async move {
-                        assert!(peer.send(Mmappable { count: server_message.count + 1 }).is_ok(), "client couldn't send");
+                        assert!(peer.send(Mmappable { count: client_message.count + 1 }).is_ok(), "server couldn't send");
                     }
                 })
             }
@@ -280,7 +278,7 @@ mod tests {
                         if server_message.count >= COUNT_LIMIT {
                             peer.cancel_and_close();
                         } else {
-                            assert!(peer.send(Mmappable { count: server_message.count }).is_ok(), "server couldn't send");
+                            assert!(peer.send(Mmappable { count: server_message.count }).is_ok(), "client couldn't send");
                         }
                     })
                 }
@@ -288,7 +286,7 @@ mod tests {
         );
         println!("### Started a client -- which is running concurrently, in the background... it has {TIMEOUT:?} to do its thing!");
     
-        // wait for for the client, so no errors would go unnoticed
+        // wait for the client, so no errors would go unnoticed
         tokio::time::timeout(TIMEOUT, client_task).await
             .expect("Client task timed out")
             .expect("Failed starting the client task")

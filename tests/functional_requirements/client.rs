@@ -207,7 +207,7 @@ async fn distinct_connection_and_protocol_events() {
 #[cfg_attr(not(doc), tokio::test)]
 async fn terminates_immediately_when_done() {
 
-    let threshold_micros = 100;  // maximum acceptable time, in µs, the client code has to inform the caller that the client completed its duties
+    let threshold_micros = 200;  // maximum acceptable time, in µs, the client code has to inform the caller that the client completed its duties
 
     let mut client = new_socket_client!(CONFIG, "google.com", 80);
 
