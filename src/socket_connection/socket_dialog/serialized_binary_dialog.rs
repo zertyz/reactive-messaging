@@ -248,6 +248,16 @@ SerializedWrapperType<MessagesType> {
             _phantom: PhantomData,
         }
     }
+    /// Intended for use while receiving
+    /// -- when the source might send junk binary data: you'll pay the price for the validation
+    pub fn try_from_raw(raw: Vec<u8>)
+                        -> Result<Self, ()> {
+        if MessagesType::validate(&raw).is_err() {
+            Err(())
+        } else {
+            Ok(Self::from_raw_unchecked(raw))
+        }
+    }
 }
 impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> +
      ReactiveMessagingBinarySerializer<MessagesType>                 + PartialEq + Debug>
@@ -264,24 +274,20 @@ SerializedWrapperType<MessagesType> {
     }
 }
 impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
-SerializedWrapperType<MessagesType> {
-    /// Intended for use while receiving
-    /// -- when the source might send junk binary data: you'll pay the price for the validation
-    pub fn try_from_raw(raw: Vec<u8>)
-                   -> Result<Self, ()> {
-        if MessagesType::validate(&raw).is_err() {
-            Err(())
-        } else {
-            Ok(Self::from_raw_unchecked(raw))
-        }
-    }
-}
-impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
 Deref
 for SerializedWrapperType<MessagesType> {
     type Target = <MessagesType as ReactiveMessagingBinaryDeserializer<MessagesType>>::DeserializedRemoteMessages;
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
         MessagesType::deserialize(&self.raw)
+    }
+}
+impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
+AsRef<<MessagesType as ReactiveMessagingBinaryDeserializer<MessagesType>>::DeserializedRemoteMessages>
+for SerializedWrapperType<MessagesType> {
+    #[inline(always)]
+    fn as_ref(&self) -> &<MessagesType as ReactiveMessagingBinaryDeserializer<MessagesType>>::DeserializedRemoteMessages {
+        self.deref()
     }
 }
 impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
@@ -363,7 +369,7 @@ mod tests {
             }
 
             fn deserialize(remote_message: &[u8]) -> &Self::DeserializedRemoteMessages {
-                crate::serde::rkyv_deserializer::<VariableBinary>(remote_message).expect("Failed to `crate::serde::rkyv_deserializer()`")
+                crate::serde::rkyv_deserializer::<VariableBinary>(remote_message)
             }
         }
 

@@ -183,13 +183,12 @@ Use when: performance matters and you're working with types that have large alig
 
 /// RKYV deserializer
 #[inline(always)]
-pub fn rkyv_deserializer<'a, T: rkyv::Archive>
-                        (message: &'a [u8])
-                        -> Result<&'a <T as rkyv::Archive>::Archived, Box<dyn std::error::Error + Sync + Send>> {
-    let result = unsafe {
+pub fn rkyv_deserializer<T: rkyv::Archive>
+                        (message: &[u8])
+                        -> &<T as rkyv::Archive>::Archived {
+    unsafe {
         archived_root::<T>(message)
-    };
-    Ok(result)
+    }
     
     /*
     
@@ -247,7 +246,7 @@ mod tests {
         let expected_value = String::from("This is a message tha will go through RKYV");
         let message = Messages::Echo(expected_value.clone());
         rkyv_serializer(&message, &mut buffer).expect("calling `rkyv_serializer()`");
-        let observed = rkyv_deserializer::<Messages>(&buffer).expect("RKYV deserialization failed");
+        let observed = rkyv_deserializer::<Messages>(&buffer);
         // assert
         if let ArchivedMessages::Echo(observed_value) = observed {
             assert_eq!(observed_value.as_str(), expected_value.as_str(), "RKYV serialization is not looking good");

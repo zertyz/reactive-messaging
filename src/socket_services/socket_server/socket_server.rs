@@ -124,10 +124,9 @@ macro_rules! spawn_server_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
-        todo!("missing impl here");
-        // let socket_dialog = $crate::socket_connection::socket_dialog::MmapBinaryDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
-        // $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages>, $local_messages);
+        let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
     ($const_config:                 expr,
      MmapBinary,

@@ -59,7 +59,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use once_cell::sync::Lazy;
 use super::logic::ping_pong_models::*;
-use reactive_messaging::prelude::{ron_deserializer, ron_serializer, ReactiveMessagingDeserializer, ReactiveMessagingMemoryMappable, ReactiveMessagingSerializer};
+use reactive_messaging::prelude::{rkyv_deserializer, rkyv_serializer, ron_deserializer, ron_serializer, ReactiveMessagingBinaryDeserializer, ReactiveMessagingBinarySerializer, ReactiveMessagingDeserializer, ReactiveMessagingMemoryMappable, ReactiveMessagingSerializer};
 use serde::{Serialize, Deserialize};
 
 
@@ -86,7 +86,8 @@ pub enum ProtocolStates {
 
 
 /// Client messages to set up the game in the server
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug))]
 pub enum PreGameClientMessages {
 
     /// First message that the client must send, upon establishing a connection
@@ -105,11 +106,11 @@ impl Default for PreGameClientMessages {
         Self::Error(PreGameClientError::SlotNotInitialized)
     }
 }
-impl ReactiveMessagingMemoryMappable for PreGameClientMessages {} 
 
 
 /// Messages coming from the clients after [PreGameClientMessages] protocol was performed, suitable to be deserialized by the server
-#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug))]
 pub enum GameClientMessages {
 
     /// The rally -- to be started after receiving [GameServerMessages::GameStarted]
@@ -138,11 +139,11 @@ pub enum GameClientMessages {
     #[default]
     Quit,
 }
-impl ReactiveMessagingMemoryMappable for GameClientMessages {}
 
 
 /// Errors that the client may return in the `ProtocolStates::PreGame`
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug))]
 pub enum PreGameClientError {
     /// Occurs only if there is a bug: reserving a slot, not filling it up and sending the message anyway
     /// (this value is set on the `default()` constructor)
@@ -156,7 +157,8 @@ pub enum PreGameClientError {
 }
 
 /// Errors that the client may return in the `ProtocolStates::Game`
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug))]
 pub enum GameClientError {
     /// Occurs when the client couldn't parse a message sent by the server
     /// when the `Textual` messages are being used
@@ -165,7 +167,8 @@ pub enum GameClientError {
 
 
 /// Messages coming from the server, suitable to be deserialized by the clients
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug))]
 pub enum PreGameServerMessages {
 
     /// After taking notice of a new client -- after it sent [PreGameClientMessages::Config] --
@@ -186,11 +189,11 @@ impl Default for PreGameServerMessages {
         Self::Version(PROTOCOL_VERSION)
     }
 }
-impl ReactiveMessagingMemoryMappable for PreGameServerMessages {}
 
 
 /// Messages coming from the server, suitable to be deserialized by the clients
-#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug))]
 pub enum GameServerMessages {
 
     /// Issued after a [PreGameClientMessages::Config] has been received, indicating both the client and server should start the game
@@ -214,11 +217,11 @@ pub enum GameServerMessages {
     ServerShutdown,
 
 }
-impl ReactiveMessagingMemoryMappable for GameServerMessages {}
 
 
 /// Errors that the server may return in the `ProtocolStates::PreGame`
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug))]
 pub enum PreGameServerError {
     /// Occurs when the client couldn't parse a message sent by the server
     /// when the `Textual` messages are being used
@@ -229,15 +232,16 @@ pub enum PreGameServerError {
 }
 
 /// Errors that the server may return in the `ProtocolStates::Game`
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug))]
 pub enum GameServerError {
     /// Occurs when the client couldn't parse a message sent by the server
     /// when the `Textual` messages are being used
     TextualProtocolProcessorParsingError,
 }
 
-// implementation of the RON SerDe & Responsive traits
-//////////////////////////////////////////////////////
+// implementation of the RON, Mmap and RKYV SerDe & Responsive traits
+/////////////////////////////////////////////////////////////////////
 
 impl AsRef<GameClientMessages> for GameClientMessages {
     #[inline(always)]
@@ -277,14 +281,14 @@ impl ReactiveMessagingSerializer<GameClientMessages> for GameClientMessages {
 
 impl ReactiveMessagingDeserializer<PreGameClientMessages> for PreGameClientMessages {
     #[inline(always)]
-    fn deserialize_textual(local_message: &[u8]) -> Result<PreGameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
-        ron_deserializer(local_message)
+    fn deserialize_textual(remote_message: &[u8]) -> Result<PreGameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+        ron_deserializer(remote_message)
     }
 }
 impl ReactiveMessagingDeserializer<GameClientMessages> for GameClientMessages {
     #[inline(always)]
-    fn deserialize_textual(local_message: &[u8]) -> Result<GameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
-        ron_deserializer(local_message)
+    fn deserialize_textual(remote_message: &[u8]) -> Result<GameClientMessages, Box<dyn Error + Sync + Send + 'static>> {
+        ron_deserializer(remote_message)
     }
 }
 
@@ -325,11 +329,113 @@ impl ReactiveMessagingSerializer<GameServerMessages> for GameServerMessages {
 }
 
 impl ReactiveMessagingDeserializer<PreGameServerMessages> for PreGameServerMessages {
-    fn deserialize_textual(local_message: &[u8]) -> Result<PreGameServerMessages, Box<dyn Error + Sync + Send>> {
-        ron_deserializer(local_message)
+    #[inline(always)]
+    fn deserialize_textual(remote_message: &[u8]) -> Result<PreGameServerMessages, Box<dyn Error + Sync + Send>> {
+        ron_deserializer(remote_message)
     }
-}impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
-    fn deserialize_textual(local_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
-        ron_deserializer(local_message)
+}
+impl ReactiveMessagingDeserializer<GameServerMessages> for GameServerMessages {
+    #[inline(always)]
+    fn deserialize_textual(remote_message: &[u8]) -> Result<GameServerMessages, Box<dyn Error + Sync + Send>> {
+        ron_deserializer(remote_message)
+    }
+}
+
+
+impl ReactiveMessagingMemoryMappable for PreGameClientMessages {}
+impl ReactiveMessagingMemoryMappable for GameClientMessages {}
+impl ReactiveMessagingMemoryMappable for PreGameServerMessages {}
+impl ReactiveMessagingMemoryMappable for GameServerMessages {}
+
+
+impl ReactiveMessagingBinarySerializer<PreGameClientMessages> for PreGameClientMessages {
+    #[inline(always)]
+    fn serialize(remote_message: &PreGameClientMessages, buffer: &mut Vec<u8>) {
+        rkyv_serializer(remote_message, buffer)
+            .expect("BUG in `ReactiveMessagingBinarySerializer<PreGameClientMessages>`");
+    }
+    #[inline(always)]
+    fn processor_error_message(_err: String) -> PreGameClientMessages {
+        PreGameClientMessages::Error(PreGameClientError::TextualProtocolProcessorParsingError)
+    }
+}
+impl ReactiveMessagingBinarySerializer<GameClientMessages> for GameClientMessages {
+    #[inline(always)]
+    fn serialize(remote_message: &GameClientMessages, buffer: &mut Vec<u8>) {
+        rkyv_serializer(remote_message, buffer)
+            .expect("BUG in `ReactiveMessagingBinarySerializer<GameClientMessages>`");
+    }
+    #[inline(always)]
+    fn processor_error_message(_err: String) -> GameClientMessages {
+        GameClientMessages::Error(GameClientError::TextualProtocolProcessorParsingError)
+    }
+}
+
+impl ReactiveMessagingBinaryDeserializer<PreGameClientMessages> for PreGameClientMessages {
+    type DeserializedRemoteMessages = <PreGameClientMessages as rkyv::Archive>::Archived;
+    #[inline(always)]
+    fn validate(_remote_message: &[u8]) -> Result<(), ()> {
+        todo!()
+    }
+    #[inline(always)]
+    fn deserialize(remote_message: &[u8]) -> &Self::DeserializedRemoteMessages {
+        rkyv_deserializer::<PreGameClientMessages>(remote_message)
+    }
+}
+impl ReactiveMessagingBinaryDeserializer<GameClientMessages> for GameClientMessages {
+    type DeserializedRemoteMessages = <GameClientMessages as rkyv::Archive>::Archived;
+    #[inline(always)]
+    fn validate(_remote_message: &[u8]) -> Result<(), ()> {
+        todo!()
+    }
+    #[inline(always)]
+    fn deserialize(remote_message: &[u8]) -> &Self::DeserializedRemoteMessages {
+        rkyv_deserializer::<GameClientMessages>(remote_message)
+    }
+}
+
+impl ReactiveMessagingBinarySerializer<PreGameServerMessages> for PreGameServerMessages {
+    #[inline(always)]
+    fn serialize(local_message: &PreGameServerMessages, buffer: &mut Vec<u8>) {
+        rkyv_serializer(local_message, buffer)
+            .expect("BUG in `ReactiveMessagingBinarySerializer<PreServerMessages>`");
+    }
+    #[inline(always)]
+    fn processor_error_message(_err: String) -> PreGameServerMessages {
+        PreGameServerMessages::Error(PreGameServerError::TextualProtocolProcessorParsingError)
+    }
+}
+impl ReactiveMessagingBinarySerializer<GameServerMessages> for GameServerMessages {
+    #[inline(always)]
+    fn serialize(local_message: &GameServerMessages, buffer: &mut Vec<u8>) {
+        rkyv_serializer(local_message, buffer)
+            .expect("BUG in `ReactiveMessagingBinarySerializer<ServerMessages>`");
+    }
+    #[inline(always)]
+    fn processor_error_message(_err: String) -> GameServerMessages {
+        GameServerMessages::Error(GameServerError::TextualProtocolProcessorParsingError)
+    }
+}
+
+impl ReactiveMessagingBinaryDeserializer<PreGameServerMessages> for PreGameServerMessages {
+    type DeserializedRemoteMessages = <PreGameServerMessages as rkyv::Archive>::Archived;
+    #[inline(always)]
+    fn validate(remote_message: &[u8]) -> Result<(), ()> {
+        todo!()
+    }
+    #[inline(always)]
+    fn deserialize(remote_message: &[u8]) -> &Self::DeserializedRemoteMessages {
+        rkyv_deserializer::<PreGameServerMessages>(remote_message)
+    }
+}
+impl ReactiveMessagingBinaryDeserializer<GameServerMessages> for GameServerMessages {
+    type DeserializedRemoteMessages = <GameServerMessages as rkyv::Archive>::Archived;
+    #[inline(always)]
+    fn validate(remote_message: &[u8]) -> Result<(), ()> {
+        todo!()
+    }
+    #[inline(always)]
+    fn deserialize(remote_message: &[u8]) -> &Self::DeserializedRemoteMessages {
+        rkyv_deserializer::<GameServerMessages>(remote_message)
     }
 }
