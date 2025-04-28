@@ -5,7 +5,7 @@ use futures::StreamExt;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::prelude::{Peer, SocketConnection};
-use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use crate::serde::{ReactiveMessagingTextualDeserializer, ReactiveMessagingTextualSerializer};
 use crate::socket_connection::common::ReactiveMessagingUniSender;
 use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;
 use log::{debug, error, trace, warn};
@@ -13,8 +13,8 @@ use tokio::io;
 use crate::config::ConstConfig;
 
 pub struct TextualDialog<const CONFIG:       u64,
-                         RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
-                         LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+                         RemoteMessagesType: ReactiveMessagingTextualDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+                         LocalMessagesType:  ReactiveMessagingTextualSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
                          ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
                          SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
                          StateType:                                                                                                Send + Sync + Clone     + Debug + 'static = ()
@@ -23,8 +23,8 @@ pub struct TextualDialog<const CONFIG:       u64,
 }
 
 impl<const CONFIG: u64,
-    RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
-    LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+    RemoteMessagesType: ReactiveMessagingTextualDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+    LocalMessagesType:  ReactiveMessagingTextualSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
     ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
     SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
     StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
@@ -34,8 +34,8 @@ TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, S
 }
 
 impl<const CONFIG: u64,
-     RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+     RemoteMessagesType: ReactiveMessagingTextualDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:  ReactiveMessagingTextualSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
      SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
      StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
@@ -50,8 +50,8 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
 }
 
 impl<const CONFIG: u64,
-     RemoteMessagesType: ReactiveMessagingDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:  ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
+     RemoteMessagesType: ReactiveMessagingTextualDeserializer<RemoteMessagesType>                                   + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:  ReactiveMessagingTextualSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
      SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
      StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
@@ -93,7 +93,7 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
                     match to_send {
                         Some(to_send) => {
                             // serialize
-                            LocalMessagesType::serialize_textual(&to_send, &mut serialization_buffer);
+                            LocalMessagesType::serialize(&to_send, &mut serialization_buffer);
                             serialization_buffer.push(b'\n');
                             // send
                             if let Err(err) = socket_connection.connection_mut().write_all(&serialization_buffer).await {
@@ -120,16 +120,19 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
                                 if let Some(mut eol_pos) = read_buffer[next_line_index+this_line_search_start..].iter().position(|&b| b == b'\n') {
                                     eol_pos += next_line_index+this_line_search_start;
                                     let line_bytes = &read_buffer[next_line_index..eol_pos];
-                                    match RemoteMessagesType::deserialize_textual(line_bytes) {
+                                    match RemoteMessagesType::deserialize(line_bytes) {
                                         Ok(remote_message) => {
-                                            if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
-                                                // log & send the error message to the remote peer
-                                                error!("`dialog_loop_for_textual_form()`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
-                                                if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
-                                                        warn!("dialog_loop_for_textual_form(): {error_msg_sender} -- Slow reader {:?}", peer);
-                                                    if abort_sender {
-                                                        socket_connection.report_closed();
-                                                        break 'connection
+                                            if let Err((abort_processor, processor_error_message)) = processor_sender.send(remote_message).await {
+                                                // log & send the error message to the remote peer, if desired
+                                                error!("`dialog_loop_for_textual_form()`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", processor_error_message, processor_sender.pending_items_count(), processor_sender.buffer_size());
+                                                // inform the peer?
+                                                if let Some(error_message_to_send) = LocalMessagesType::processor_error_message(processor_error_message) {
+                                                    if let Err((abort_sender, error_msg_sender)) = peer.send_async(error_message_to_send).await {
+                                                            warn!("dialog_loop_for_textual_form(): {error_msg_sender} -- Slow reader {:?}", peer);
+                                                        if abort_sender {
+                                                            socket_connection.report_closed();
+                                                            break 'connection
+                                                        }
                                                     }
                                                 }
                                                 if abort_processor {
@@ -144,12 +147,13 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniTyp
                                                                             peer.peer_address, peer.peer_id, stripped_line, err);
                                             // log & send the error message to the remote peer
                                             warn!("`dialog_loop_for_textual_form()`:  {error_message}");
-                                            let outgoing_error = LocalMessagesType::processor_error_message(error_message);
-                                            if let Err((abort, error_msg)) = peer.send_async(outgoing_error).await {
-                                                if abort {
-                                                    warn!("`dialog_loop_for_textual_form()`:  {error_msg} -- Slow reader {:?}", peer);
-                                                    socket_connection.report_closed();
-                                                    break 'connection
+                                            if let Some(outgoing_error) = LocalMessagesType::processor_error_message(error_message) {
+                                                if let Err((abort, error_msg)) = peer.send_async(outgoing_error).await {
+                                                    if abort {
+                                                        warn!("`dialog_loop_for_textual_form()`:  {error_msg} -- Slow reader {:?}", peer);
+                                                        socket_connection.report_closed();
+                                                        break 'connection
+                                                    }
                                                 }
                                             }
                                         }
@@ -264,8 +268,8 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn latency_measurements_atomic_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 18486;
-        const RELEASE_EXPECTED_COUNT: u32 = 137601;
+        const DEBUG_EXPECTED_COUNT: u32 = 77780;
+        const RELEASE_EXPECTED_COUNT: u32 = 386504;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::latency_measurements::
@@ -279,8 +283,8 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn latency_measurements_fullsync_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 18824;
-        const RELEASE_EXPECTED_COUNT: u32 = 138113;
+        const DEBUG_EXPECTED_COUNT: u32 = 77406;
+        const RELEASE_EXPECTED_COUNT: u32 = 394358;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::latency_measurements::
@@ -298,8 +302,8 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn message_flooding_throughput_atomic_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 327680;
-        const RELEASE_EXPECTED_COUNT: u32 = 425984;
+        const DEBUG_EXPECTED_COUNT: u32 = 1081344;
+        const RELEASE_EXPECTED_COUNT: u32 = 1146880;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::message_flooding_throughput::
@@ -313,8 +317,8 @@ mod tests {
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn message_flooding_throughput_fullsync_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 327680;
-        const RELEASE_EXPECTED_COUNT: u32 = 425984;
+        const DEBUG_EXPECTED_COUNT: u32 = 1081344;
+        const RELEASE_EXPECTED_COUNT: u32 = 1146880;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::message_flooding_throughput::

@@ -128,35 +128,11 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
 
 // ClientMessages SerDe
 ///////////////////////
-impl ReactiveMessagingSerializer<ClientMessages> for ClientMessages {
-    fn serialize_textual(local_message: &ClientMessages, buffer: &mut Vec<u8>) {
-        ron_serializer(local_message, buffer)
-            .expect("BUG in `ReactiveMessagingSerializer<ClientMessages>`. Is the buffer too small?");
-    }
-    fn processor_error_message(err: String) -> ClientMessages {
-        ClientMessages::Error(err)
-    }
-}
-impl ReactiveMessagingDeserializer<ClientMessages> for ClientMessages {
-    fn deserialize_textual(remote_message: &[u8]) -> Result<ClientMessages, Box<dyn Error + Sync + Send>> {
-        ron_deserializer(remote_message)
-    }
-}
+impl ReactiveMessagingRonSerializer<ClientMessages> for ClientMessages {}
+impl ReactiveMessagingRonDeserializer<ClientMessages> for ClientMessages {}
 
 
 // ServerMessages SerDe
 ///////////////////////
-impl ReactiveMessagingSerializer<ServerMessages> for ServerMessages {
-    fn serialize_textual(local_message: &ServerMessages, buffer: &mut Vec<u8>) {
-        ron_serializer(local_message, buffer)
-            .expect("BUG in `ReactiveMessagingSerializer<ServerMessages>`. Is the buffer too small?");
-    }
-    fn processor_error_message(err: String) -> ServerMessages {
-        ServerMessages::Error(err)
-    }
-}
-impl ReactiveMessagingDeserializer<ServerMessages> for ServerMessages {
-    fn deserialize_textual(remote_message: &[u8]) -> Result<ServerMessages, Box<dyn Error + Sync + Send>> {
-        ron_deserializer(remote_message)
-    }
-}
+impl ReactiveMessagingRonSerializer<ServerMessages> for ServerMessages {}
+impl ReactiveMessagingRonDeserializer<ServerMessages> for ServerMessages {}

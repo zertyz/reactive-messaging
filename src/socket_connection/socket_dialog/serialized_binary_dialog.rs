@@ -161,14 +161,17 @@ for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Proces
                                     ReadState::ReadingPayload { payload_read_buffer } => {
                                         // we finished reading the payload: emit the event and prepare to read a next payload size
                                         let remote_message = SerializedWrapperType::<RemoteMessagesType>::from_raw_unchecked(payload_read_buffer);
-                                        if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
-                                            // log & send the error message to the remote peer
-                                            error!("`dialog_loop()` for serialized binary: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", error_msg_processor, processor_sender.pending_items_count(), processor_sender.buffer_size());
-                                            if let Err((abort_sender, error_msg_sender)) = peer.send_async(LocalMessagesType::processor_error_message(error_msg_processor)).await {
+                                        if let Err((abort_processor, processor_error_message)) = processor_sender.send(remote_message).await {
+                                            // log & send the error message to the remote peer, if desired
+                                            error!("`dialog_loop()` for serialized binary: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", processor_error_message, processor_sender.pending_items_count(), processor_sender.buffer_size());
+                                            // inform the peer?
+                                            if let Some(error_message_to_send) = LocalMessagesType::processor_error_message(processor_error_message) {
+                                                if let Err((abort_sender, error_msg_sender)) = peer.send_async(error_message_to_send).await {
                                                     warn!("`dialog_loop()` for serialized binary: {error_msg_sender} -- Slow reader {:?}", peer);
-                                                if abort_sender {
-                                                    socket_connection.report_closed();
-                                                    break 'connection
+                                                    if abort_sender {
+                                                        socket_connection.report_closed();
+                                                        break 'connection
+                                                    }
                                                 }
                                             }
                                             if abort_processor {
@@ -252,10 +255,10 @@ SerializedWrapperType<MessagesType> {
     /// -- when the source might send junk binary data: you'll pay the price for the validation
     pub fn try_from_raw(raw: Vec<u8>)
                         -> Result<Self, ()> {
-        if MessagesType::validate(&raw).is_err() {
-            Err(())
-        } else {
+        if MessagesType::is_valid(&raw) {
             Ok(Self::from_raw_unchecked(raw))
+        } else {
+            Err(())
         }
     }
 }
@@ -318,7 +321,7 @@ mod tests {
     use std::sync::atomic::Ordering::Relaxed;
     use std::time::Duration;
     use super::*;
-    use crate::prelude::{ConstConfig, ServerConnectionHandler};
+    use crate::prelude::{ConstConfig, ReactiveMessagingRkyvFastDeserializer, ReactiveMessagingRkyvSerializer, ServerConnectionHandler};
     use crate::config::RetryingStrategies;
     use reactive_mutiny::prelude::advanced::{ChannelUniMoveAtomic, ChannelUniMoveFullSync, UniZeroCopyAtomic, UniZeroCopyFullSync};
     use tokio::net::TcpStream;
@@ -353,25 +356,12 @@ mod tests {
                 VariableBinary::Error(String::from("Channel slot not Initialized"))
             }
         }
-        impl ReactiveMessagingBinarySerializer<VariableBinary> for VariableBinary {
-            fn serialize(local_message: &VariableBinary, buffer: &mut Vec<u8>) {
-                crate::serde::rkyv_serializer(local_message, buffer).expect("Failed to `crate::serde::rkyv_serializer()`")
-            }
-            fn processor_error_message(err: String) -> VariableBinary {
-                VariableBinary::Error(err)
+        impl ReactiveMessagingRkyvSerializer<VariableBinary> for VariableBinary {
+            fn processor_error_message(err: String) -> Option<VariableBinary> {
+                Some(VariableBinary::Error(err))
             }
         }
-        impl ReactiveMessagingBinaryDeserializer<VariableBinary> for VariableBinary {
-            type DeserializedRemoteMessages = <VariableBinary as rkyv::Archive>::Archived;
-
-            fn validate(_remote_message: &[u8]) -> Result<(), ()> {
-                todo!()
-            }
-
-            fn deserialize(remote_message: &[u8]) -> &Self::DeserializedRemoteMessages {
-                crate::serde::rkyv_deserializer::<VariableBinary>(remote_message)
-            }
-        }
+        impl ReactiveMessagingRkyvFastDeserializer<VariableBinary> for VariableBinary {}
 
         const TIMEOUT: Duration = Duration::from_millis(1000);
         const LISTENING_INTERFACE: &str = "127.0.0.1";

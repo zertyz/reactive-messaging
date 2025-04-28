@@ -26,7 +26,7 @@ use crate::{
         socket_connection_handler::SocketConnectionHandler,
         connection_provider::{ServerConnectionHandler, ConnectionChannel},
     },
-    serde::{ ReactiveMessagingDeserializer, ReactiveMessagingSerializer},
+    serde::{ReactiveMessagingTextualDeserializer, ReactiveMessagingTextualSerializer},
 };
 use crate::socket_connection::connection::SocketConnection;
 use crate::socket_services::types::MessagingService;
@@ -80,8 +80,8 @@ pub use new_socket_server;
 ///   - `const_config`: [ConstConfig] -- the configurations for the server, enforcing const/compile time optimizations;
 ///   - `interface_ip: IntoString` -- the interface to listen to incoming connections;
 ///   - `port: u16` -- the port to listen to incoming connections;
-///   - `remote_messages`: [ReactiveMessagingDeserializer<>] -- the type of the messages produced by the clients;
-///   - `local_messages`: [ReactiveMessagingSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.
+///   - `remote_messages`: [ReactiveMessagingTextualDeserializer<>] -- the type of the messages produced by the clients;
+///   - `local_messages`: [ReactiveMessagingTextualSerializer<>] -- the type of the messages produced by this server -- should, additionally, implement the `Default` trait.
 ///   - `state_type: Default` -- The state type used by the "connection routing closure" (to be provided) to promote the "Composite Protocol Stacking" pattern
 /// 
 /// See [new_socket_server!()] if you want to use the "Composite Protocol Stacking" pattern.
@@ -224,8 +224,8 @@ for CompositeSocketServer<CONFIG, StateType> {
 
     type StateType = StateType;
 
-    async fn spawn_processor<RemoteMessages:                 ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                     + Send + Sync + PartialEq + Debug + 'static,
-                             LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                        + Send + Sync + PartialEq + Debug + 'static,
+    async fn spawn_processor<RemoteMessages:                 ReactiveMessagingTextualDeserializer<RemoteMessages>                                                                                                                                                                                     + Send + Sync + PartialEq + Debug + 'static,
+                             LocalMessages:                  ReactiveMessagingTextualSerializer<LocalMessages>                                                                                                                                                                                        + Send + Sync + PartialEq + Debug + 'static,
                              ProcessorUniType:               GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                               + Send + Sync                     + 'static,
                              SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                       + Send + Sync                     + 'static,
                              OutputStreamItemsType:                                                                                                                                                                                                                                              Send + Sync             + Debug + 'static,
@@ -465,12 +465,12 @@ mod tests {
             unresponsive_processor
         )?;
         async fn connection_events_handler<const CONFIG:  u64,
-                                           LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+                                           LocalMessages: ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
                                            SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
                                           (_event: ProtocolEvent<CONFIG, LocalMessages, SenderChannel>) {
         }
         fn unresponsive_processor<const CONFIG:   u64,
-                                  LocalMessages:  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+                                  LocalMessages:  ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
                                   SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
                                   StreamItemType: Deref<Target=DummyClientAndServerMessages>>
                                  (_client_addr:           String,
@@ -863,23 +863,8 @@ mod tests {
         }
     }
 
-    impl ReactiveMessagingSerializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {
-        #[inline(always)]
-        fn serialize_textual(remote_message: &DummyClientAndServerMessages, buffer: &mut Vec<u8>) {
-            ron_serializer(remote_message, buffer)
-                .expect("composite_socket_server.rs unit tests: No errors should have happened here!")
-        }
-        #[inline(always)]
-        fn processor_error_message(err: String) -> DummyClientAndServerMessages {
-            panic!("composite_socket_server.rs unit tests: protocol error when none should have happened: {err}");
-        }
-    }
-    impl ReactiveMessagingDeserializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {
-        #[inline(always)]
-        fn deserialize_textual(local_message: &[u8]) -> Result<DummyClientAndServerMessages, Box<dyn std::error::Error + Sync + Send>> {
-            ron_deserializer(local_message)
-        }
-    }
+    impl ReactiveMessagingRonSerializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {}
+    impl ReactiveMessagingRonDeserializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {}
     
     impl ReactiveMessagingMemoryMappable for DummyClientAndServerMessages {}
 }

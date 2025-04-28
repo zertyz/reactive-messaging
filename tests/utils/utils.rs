@@ -39,7 +39,7 @@ pub fn now_as_micros() -> u64 {
 ///          last_peer_left_notification_micros,
 ///          last_local_service_termination_notification_micros) = last_micros_probed_protocol_events_handler();
 pub fn last_micros_probed_protocol_events_handler<const CONFIG:  u64,
-                                                  LocalMessages: ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                                                  LocalMessages: ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                                   SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
                                                   StateType:                                                                                   Send + Sync + Clone     + Debug + 'static>
                                                  ()

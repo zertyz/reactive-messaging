@@ -61,23 +61,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                 future::ready(())
             },
             move |client_addr, port, peer, server_messages_stream| {
-                let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
                 let server_messages_stream = server_messages_stream
                     .inspect(move |server_message| {
                         if DEBUG {
-                            ron_serializer(server_message.as_ref(), &mut debug_serializer_buffer)
-                                .expect("`ron_serializer()` of our `ServerMessages`");
-                            println!("<<<< (PRE-GAME) {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            eprintln!("<<<< (PRE-GAME) {server_message:?}")
                         }
                     });
-                let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
                 // processor stream
                 client_processor_ref2.pre_game_dialog_processor(client_addr.clone(), port, peer.clone(), server_messages_stream)
                     .inspect(move |client_message| {
                         if DEBUG {
-                            ron_serializer(client_message, &mut debug_serializer_buffer)
-                                .expect("`ron_serializer()` of the received `ClientMessages`");
-                            println!(">>>> (PRE-GAME) {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            eprintln!(">>>> (PRE-GAME) {client_message:?}")
                         }
                     })
             }
@@ -89,23 +83,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
                 future::ready(())
             },
             move |client_addr, port, peer, server_messages_stream| {
-                let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
                 let server_messages_stream = server_messages_stream
                     .inspect(move |server_message| {
                         if DEBUG {
-                            ron_serializer(server_message.as_ref(), &mut debug_serializer_buffer)
-                                .expect("`ron_serializer()` of our `ServerMessages`");
-                            println!("<<<< (GAME) {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            eprintln!("<<<< (GAME) {server_message:?}")
                         }
                     });
-                let mut debug_serializer_buffer = Vec::<u8>::with_capacity(2048);
                 // processor stream
                 client_processor_ref4.game_dialog_processor(client_addr.clone(), port, peer.clone(), server_messages_stream)
                     .inspect(move |client_message| {
                         if DEBUG {
-                            ron_serializer(client_message, &mut debug_serializer_buffer)
-                                .expect("`ron_serializer()` of the received `ClientMessages`");
-                            println!(">>>> (GAME) {}", String::from_utf8(debug_serializer_buffer.clone()).expect("Ron should be utf-8"))
+                            println!(">>>> (GAME) {client_message:?}")
                         }
                     })
             }

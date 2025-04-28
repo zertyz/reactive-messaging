@@ -913,7 +913,7 @@ pub mod tests {
         // server -- do not answer to (flood) messages (just parses & counts them, making sure they are received in the right order)
         // message format is "DoNotAnswer(n)", where n should be sent by the client in natural order, starting from 0
         let received_messages_count = Arc::new(AtomicU32::new(0));
-        let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, will contain the last message received before the ordering went kaput
+        let unordered = Arc::new(AtomicU32::new(0));    // if non-zero, contains the last message received before the ordering went kaput
         let received_messages_count_ref = Arc::clone(&received_messages_count);
         let unordered_ref = Arc::clone(&unordered);
         let mut connection_provider = ServerConnectionHandler::new(LISTENING_INTERFACE, port, ()).await

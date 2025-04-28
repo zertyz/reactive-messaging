@@ -1,7 +1,7 @@
 //! Common types used across this submodule
 
 use std::error::Error;
-use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use crate::serde::{ReactiveMessagingTextualDeserializer, ReactiveMessagingTextualSerializer};
 use crate::prelude::Peer;
 use crate::socket_connection::connection_provider::ConnectionChannel;
 use crate::types::{ProtocolEvent, MessagingMutinyStream, ConnectionEvent};
@@ -44,8 +44,8 @@ pub trait MessagingService<const CONFIG: u64> {
     ///                 -> impl Stream<Item=ANY_TYPE> {...}
     ///     ```
     /// -- if you want the processor to produce answer messages of type `LocalMessages` to be sent to clients, see [Self::spawn_responsive_processor()]:
-    fn spawn_processor<RemoteMessages:                ReactiveMessagingDeserializer<RemoteMessages>                                                                                                                                                                                         + Send + Sync + PartialEq + Debug + 'static,
-                       LocalMessages:                 ReactiveMessagingSerializer<LocalMessages>                                                                                                                                                                                            + Send + Sync + PartialEq + Debug + 'static,
+    fn spawn_processor<RemoteMessages:                ReactiveMessagingTextualDeserializer<RemoteMessages>                                                                                                                                                                                         + Send + Sync + PartialEq + Debug + 'static,
+                       LocalMessages:                 ReactiveMessagingTextualSerializer<LocalMessages>                                                                                                                                                                                            + Send + Sync + PartialEq + Debug + 'static,
                        ProcessorUniType:              GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                                   + Send + Sync                     + 'static,
                        SenderChannel:                 FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                           + Send + Sync                     + 'static,
                        OutputStreamItemsType:                                                                                                                                                                                                                                                 Send + Sync             + Debug + 'static,

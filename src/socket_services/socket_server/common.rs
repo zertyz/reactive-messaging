@@ -2,7 +2,7 @@
 
 
 use crate::prelude::{
-    ReactiveMessagingSerializer,
+    ReactiveMessagingTextualSerializer,
     ProtocolEvent,
 };
 use std::{
@@ -19,7 +19,7 @@ use log::{warn, error};
 /// -- so the "shutdown is complete" signal may be sent
 #[inline(always)]
 pub(crate) fn upgrade_to_termination_tracking<const CONFIG:                   u64,
-                                           LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                                           LocalMessages:                  ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                            SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send,
                                            StateType:                                                                                                    Send + Sync + Clone     + Debug + 'static>

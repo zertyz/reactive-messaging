@@ -11,13 +11,13 @@ use futures::future::BoxFuture;
 use reactive_mutiny::types::FullDuplexUniChannel;
 use log::{error, warn};
 use tokio::sync::Mutex;
-use crate::serde::ReactiveMessagingSerializer;
+use crate::serde::ReactiveMessagingTextualSerializer;
 
 
 /// Upgrades the user provided `connection_events_callback` into a callback able to keep track of connect/disconnection events
 /// as well as local service termination events, so any waiters on the client processor may be notified
 pub fn upgrade_to_connection_event_tracking<const CONFIG:                   u64,
-                                            LocalMessages:                  ReactiveMessagingSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                                            LocalMessages:                  ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
                                             SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
                                             ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send,
                                             StateType:                                                                                                    Send + Sync + Clone     + Debug + 'static>

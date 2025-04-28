@@ -18,7 +18,7 @@ use futures::{Stream, StreamExt};
 use keen_retry::ExponentialJitter;
 use log::{trace, warn};
 use crate::prelude::Peer;
-use crate::serde::ReactiveMessagingSerializer;
+use crate::serde::ReactiveMessagingTextualSerializer;
 use crate::types::ResponsiveStream;
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `CONFIG`
@@ -382,7 +382,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 
 impl<const CONFIG:        u64,
      T:                   ?Sized,
-     LocalMessagesType:   ReactiveMessagingSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug,
+     LocalMessagesType:   ReactiveMessagingTextualSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug,
      SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync,
      StateType:                                                                                                 Send + Sync + Clone     + Debug>
 ResponsiveStream<CONFIG, LocalMessagesType, SenderChannel, StateType>
@@ -422,27 +422,34 @@ for T where T: Stream<Item=LocalMessagesType> {
 /// Common test code for this module
 #[cfg(any(test,doc))]
 mod tests {
-    use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+    use crate::serde::{ReactiveMessagingTextualDeserializer, ReactiveMessagingTextualSerializer};
 
     /// Test implementation for our text-only protocol as used across this module
-    impl ReactiveMessagingSerializer<String> for String {
+    impl ReactiveMessagingTextualSerializer<String> for String {
         #[inline(always)]
-        fn serialize_textual(message: &String, buffer: &mut Vec<u8>) {
+        fn serialize(message: &String, buffer: &mut Vec<u8>) {
             buffer.clear();
             buffer.extend_from_slice(message.as_bytes());
         }
         #[inline(always)]
-        fn processor_error_message(err: String) -> String {
+        fn processor_error_message(err: String) -> Option<String> {
             let msg = format!("ServerBug! Please, fix! Error: {}", err);
             panic!("SocketServerSerializer<String>::processor_error_message(): {}", msg);
+            // msg
+        }
+
+        #[inline(always)]
+        fn parsing_error_message(err: String) -> Option<String> {
+            let msg = format!("ServerBug! Please, fix! Error: {}", err);
+            panic!("SocketServerSerializer<String>::parsing_error_message(): {}", msg);
             // msg
         }
     }
 
     /// Testable implementation for our text-only protocol as used across this module
-    impl ReactiveMessagingDeserializer<String> for String {
+    impl ReactiveMessagingTextualDeserializer<String> for String {
         #[inline(always)]
-        fn deserialize_textual(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send + 'static>> {
+        fn deserialize(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send + 'static>> {
             Ok(String::from_utf8_lossy(message).to_string())
         }
     }
