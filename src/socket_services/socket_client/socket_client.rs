@@ -26,7 +26,6 @@ use crate::{
         socket_connection_handler::SocketConnectionHandler,
         connection_provider::{ClientConnectionManager, ConnectionChannel},
     },
-    serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer},
 };
 use crate::socket_connection::connection::SocketConnection;
 use crate::socket_services::types::MessagingService;
@@ -850,10 +849,9 @@ mod tests {
         let handshake_processor_greeted_ref = Arc::clone(&handshake_processor_greeted);
         let handshake_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
-                match connection_event {
-                    ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `Handshake`")).await
-                                                                    .expect("Sending failed"),
-                    _ => {},
+                if let ProtocolEvent::PeerArrived { peer  } = connection_event {
+                    peer.send_async(String::from("Client is at `Handshake`")).await
+                        .expect("Sending failed");
                 }
             },
             move |_, _, peer, server_messages_stream| {
@@ -875,10 +873,9 @@ mod tests {
         let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted);
         let welcome_authenticated_friend_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
-                match connection_event {
-                    ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `WelcomeAuthenticatedFriend`")).await
-                                                                    .expect("Sending failed"),
-                    _ => {},
+                if let ProtocolEvent::PeerArrived { peer  } = connection_event {
+                    peer.send_async(String::from("Client is at `WelcomeAuthenticatedFriend`")).await
+                        .expect("Sending failed");
                 }
             },
             move |_, _, peer, server_messages_stream| {
@@ -899,10 +896,9 @@ mod tests {
         let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted);
         let account_settings_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
-                match connection_event {
-                    ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `AccountSettings`")).await
-                                                                    .expect("Sending failed"),
-                    _ => {},
+                if let ProtocolEvent::PeerArrived { peer  } = connection_event {
+                    peer.send_async(String::from("Client is at `AccountSettings`")).await
+                        .expect("Sending failed");
                 }
             },
             move |_, _, peer, server_messages_stream| {
@@ -923,10 +919,9 @@ mod tests {
         let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted);
         let goodbye_options_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
             |connection_event| async {
-                match connection_event {
-                    ProtocolEvent::PeerArrived { peer  } => peer.send_async(String::from("Client is at `GoodbyeOptions`")).await
-                                                                    .expect("Sending failed"),
-                    _ => {},
+                if let ProtocolEvent::PeerArrived { peer  } = connection_event {
+                    peer.send_async(String::from("Client is at `GoodbyeOptions`")).await
+                        .expect("Sending failed");
                 }
             },
             move |_, _, peer, server_messages_stream| {

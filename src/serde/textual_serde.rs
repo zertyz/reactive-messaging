@@ -1,6 +1,5 @@
 use std::any::type_name;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use serde::{Serialize, Deserialize};
 use once_cell::sync::Lazy;
 use crate::prelude::Error;
@@ -45,7 +44,7 @@ where
     }
 
     #[inline(always)]
-    fn deserialize_as_ref(remote_message: &[u8]) -> Result<&Self::DeserializedRemoteMessages, Error> {
+    fn deserialize_as_ref(_remote_message: &[u8]) -> Result<&Self::DeserializedRemoteMessages, Error> {
         unreachable!("`reactive-messaging::textual_serde::ReactiveMessagingRonDeserializer<{}>::deserialize_as_ref()`: BUG! `deserialize_as_ref()` should never be called for any textual deserializer", type_name::<RemoteMessages>())
     }
 }

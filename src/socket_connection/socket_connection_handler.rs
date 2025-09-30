@@ -451,7 +451,6 @@ pub mod tests {
     use futures::stream::{self, StreamExt};
     use tokio::net::TcpStream;
     use tokio::sync::Mutex;
-    use crate::serde::{ReactiveMessagingRonDeserializer, ReactiveMessagingRonSerializer};
 
     #[cfg(debug_assertions)]
     const DEBUG: bool = true;
@@ -502,7 +501,7 @@ pub mod tests {
         // uni
         let uni = uni.spawn_non_futures_non_fallibles_executors(1,
                                                                             |stream_in| stream_in.inspect(|e| println!("Received {}", e)),
-                                                                            |_| future::ready(println!("ENDED")));
+                                                                            |_| { println!("ENDED"); future::ready(()) });
         assert!(uni.send(String::from("delivered?")).is_ok(), "`reactive-mutiny`: Uni: couldn't send");
         assert!(uni.close(Duration::from_millis(100)).await, "`reactive-mutiny` Streams being executed by an `Uni` should be reported as 'gracefully ended' as they should be promptly consumed to exhaustion");
 
@@ -519,9 +518,9 @@ pub mod tests {
             "127.0.0.1", 8579, new_connections_source, returned_connections_sink,
             |connection_event| async move {
                 match connection_event {
-                    ProtocolEvent::PeerArrived { .. }       => tokio::time::sleep(Duration::from_millis(100)).await,
-                    ProtocolEvent::PeerLeft { .. }    => tokio::time::sleep(Duration::from_millis(100)).await,
-                    ProtocolEvent::LocalServiceTermination { .. } => tokio::time::sleep(Duration::from_millis(100)).await,
+                    ProtocolEvent::PeerArrived { .. }      => tokio::time::sleep(Duration::from_millis(100)).await,
+                    ProtocolEvent::PeerLeft { .. }         => tokio::time::sleep(Duration::from_millis(100)).await,
+                    ProtocolEvent::LocalServiceTermination => tokio::time::sleep(Duration::from_millis(100)).await,
                 }
             },
             move |_client_addr, _client_port, _peer, client_messages_stream|
@@ -591,7 +590,7 @@ pub mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_clone = Arc::clone(&observed_secret);
-        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").next().unwrap()).await.expect("Error connecting");
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let client_communications_handler = SocketConnectionHandler::<CONFIG, SocketDialogType>::new(SocketDialogType::default());
         tokio::spawn(
@@ -683,7 +682,7 @@ pub mod tests {
         // client
         let client_secret = client_secret.clone();
         let observed_secret_clone = Arc::clone(&observed_secret);
-        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").next().unwrap()).await.expect("Error connecting");
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, SocketDialogType>::new(SocketDialogType::default());
         tokio::spawn(
@@ -752,7 +751,7 @@ pub mod tests {
         // wait a bit for the server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
     
-        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").next().unwrap()).await.expect("Error connecting");
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, SocketDialogType>::new(SocketDialogType::default());
     
@@ -835,7 +834,7 @@ pub mod tests {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_ref = Arc::clone(&counter);
         // client
-        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").next().unwrap()).await.expect("Error connecting");
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, SocketDialogType>::new(SocketDialogType::default());
         tokio::spawn(
@@ -848,7 +847,7 @@ pub mod tests {
                             assert!(peer.send(String::from("Ping(0)")).is_ok(), "couldn't send");
                         },
                         ProtocolEvent::PeerLeft { .. } => {},
-                        ProtocolEvent::LocalServiceTermination { .. } => {},
+                        ProtocolEvent::LocalServiceTermination => {},
                     }
                     future::ready(())
                 },
@@ -947,7 +946,7 @@ pub mod tests {
         // client
         let sent_messages_count = Arc::new(AtomicU32::new(0));
         let sent_messages_count_ref = Arc::clone(&sent_messages_count);
-        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").next().unwrap()).await.expect("Error connecting");
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_connection_handler = SocketConnectionHandler::<CONFIG, SocketDialogType>::new(SocketDialogType::default());
         tokio::spawn(
@@ -976,7 +975,7 @@ pub mod tests {
                             });
                         },
                         ProtocolEvent::PeerLeft { .. } => {},
-                        ProtocolEvent::LocalServiceTermination { .. } => {},
+                        ProtocolEvent::LocalServiceTermination => {},
                     }
                     future::ready(())
                 },

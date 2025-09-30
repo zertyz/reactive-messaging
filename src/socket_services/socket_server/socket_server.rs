@@ -26,7 +26,7 @@ use crate::{
         socket_connection_handler::SocketConnectionHandler,
         connection_provider::{ServerConnectionHandler, ConnectionChannel},
     },
-    serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer},
+    serde::ReactiveMessagingConfig,
 };
 use crate::socket_connection::connection::SocketConnection;
 use crate::socket_services::types::MessagingService;
@@ -104,7 +104,7 @@ pub use new_composite_socket_server;
 /// `Textual`, `VariableBinary` or `MmapBinary` -- being, these names, the variants of [MessageForms].
 #[macro_export]
 macro_rules! spawn_server_processor {
-    
+
     // "Textual", with the default Ron Serde
     ($const_config:                 expr,
      Textual,
@@ -118,7 +118,7 @@ macro_rules! spawn_server_processor {
         let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, $crate::prelude::ReactiveMessagingRonSerializer, $crate::prelude::ReactiveMessagingRonDeserializer, ProcessorUniType, SenderChannel, _>::default();
         $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
-    
+
     // "Textual", with custom Serde
     ($const_config:                 expr,
      Textual,
@@ -148,7 +148,7 @@ macro_rules! spawn_server_processor {
         let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, $crate::prelude::ReactiveMessagingRkyvSerializer, $crate::prelude::ReactiveMessagingRkyvFastDeserializer, ProcessorUniType, SenderChannel, _>::default();
         $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
-    
+
     // Variable Sized binaries, with custom Serde
     ($const_config:                 expr,
      VariableBinary,
@@ -164,7 +164,7 @@ macro_rules! spawn_server_processor {
         let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, $serializer, $deserializer, ProcessorUniType, SenderChannel, _>::default();
         $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
-    
+
     // Mmap Binary
     ($const_config:                 expr,
      MmapBinary,
@@ -188,7 +188,7 @@ pub use spawn_server_processor;
 /// The second parameter here can be either `Textual`, `VariableBinary` or `MmapBinary` -- being, these names, the variants of [MessageForms].
 #[macro_export]
 macro_rules! start_server_processor {
-    
+
     // use the default serializers for the given `message_form`
     ($const_config:                 expr,
      $message_form:                 tt,     // one of `Textual`, `VariableBinary` or `MmapBinary`
@@ -220,11 +220,9 @@ macro_rules! start_server_processor {
             Err(err) => Err(err),
         }
     }};
-    
+
 }
 pub use start_server_processor;
-use crate::prelude::{ReactiveMessagingConfig, ReactiveMessagingRonSerializer};
-use crate::serde::{ReactiveMessagingRkyvFastDeserializer, ReactiveMessagingRkyvSerializer, ReactiveMessagingRonDeserializer};
 
 /// Real definition & implementation for our Socket Server, full of generic parameters.\
 /// Probably you want to instantiate this structure through the sugared macros [new_socket_server!()] or [new_composite_socket_server!()] instead.
@@ -439,7 +437,6 @@ for CompositeSocketServer<CONFIG, StateType> {
 mod tests {
     use super::*;
     use crate::prelude::*;
-    use crate::serde::ReactiveMessagingMemoryMappable;
     use crate::socket_connection::socket_dialog::textual_dialog::TextualDialog;
     use std::{
         future,
@@ -786,11 +783,9 @@ mod tests {
         let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted);
         let welcome_authenticated_friend_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             |connection_event| async {
-                match connection_event {
-                    ProtocolEvent::PeerArrived { peer } =>
-                        peer.send_async(format!("`WelcomeAuthenticatedFriend`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'AccountSettings'")).await
-                            .expect("Sending failed"),
-                    _ => (),
+                if let ProtocolEvent::PeerArrived { peer } = connection_event {
+                    peer.send_async(format!("`WelcomeAuthenticatedFriend`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'AccountSettings'")).await
+                        .expect("Sending failed");
                 }
             },
             move |_, _, peer, client_messages_stream| {
@@ -811,11 +806,9 @@ mod tests {
         let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted);
         let account_settings_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             |connection_event| async {
-                match connection_event {
-                    ProtocolEvent::PeerArrived { peer } =>
-                        peer.send_async(format!("`AccountSettings`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'GoodbyeOptions'")).await
-                            .expect("Sending failed"),
-                    _ => (),
+                if let ProtocolEvent::PeerArrived { peer } = connection_event {
+                    peer.send_async(format!("`AccountSettings`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'GoodbyeOptions'")).await
+                        .expect("Sending failed");
                 }
             },
             move |_, _, peer, client_messages_stream| {
@@ -836,11 +829,9 @@ mod tests {
         let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted);
         let goodbye_options_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
             |connection_event| async {
-                match connection_event {
-                    ProtocolEvent::PeerArrived { peer } =>
-                        peer.send_async(format!("`GoodbyeOptions`: Now dealing with client {peer:?}. SAY SOMETHING and you will be DISCONNECTED, as our talking is over. Thank you.")).await
-                            .expect("Sending failed"),
-                    _ => (),
+                if let ProtocolEvent::PeerArrived { peer } = connection_event {
+                    peer.send_async(format!("`GoodbyeOptions`: Now dealing with client {peer:?}. SAY SOMETHING and you will be DISCONNECTED, as our talking is over. Thank you.")).await
+                        .expect("Sending failed");
                 }
             },
             move |_, _, peer, client_messages_stream| {

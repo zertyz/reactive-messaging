@@ -51,7 +51,7 @@ use rkyv::{
 };
 use rkyv::ser::serializers::WriteSerializer;
 use crate::prelude::Error;
-use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use crate::serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 
 /// RKYV serializer
 #[inline(always)]

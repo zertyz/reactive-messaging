@@ -245,7 +245,7 @@ async fn terminates_immediately_when_done() {
 
     assert!(termination_reported_time_diff <= threshold_micros,                    "Client code took too long to report it has terminated its duties -- {termination_reported_time_diff}µs, above the acceptable threshold of {threshold_micros}µs");
     assert!(last_peer_left_notification_micros.load(Relaxed) > 0,                  "`ProtocolEvent::PeerLeft` event wasn't fired");
-    assert!(last_local_service_termination_notification_micros.load(Relaxed) <= 0, "`ProtocolEvent::LocalServiceTermination` event was wrongly fired: no local code commanded a service termination");
+    assert!(last_local_service_termination_notification_micros.load(Relaxed) == 0, "`ProtocolEvent::LocalServiceTermination` event was wrongly fired: no local code commanded a service termination");
 }
 
 
@@ -257,7 +257,6 @@ async fn multi_protocol_server(port: u16, disconnect_at: Option<u16>) -> Result<
     start_server_processor!(CONFIG, Textual, Atomic, server, TestString, TestString,
         |_| future::ready(()),
         move |_, _, peer, client_messages_stream| {
-            let disconnect_at = disconnect_at.clone();
             client_messages_stream
                 .map(|client_message| {
                     client_message.0.parse::<u16>()

@@ -342,7 +342,7 @@ mod tests {
             let socket_connection = SocketConnection::new(tokio_connection, ());
             connection_channel.feed(socket_connection).await.unwrap_or_else(|_| panic!("Failed to send value"));
         }
-        assert_eq!(stream_ended.load(Relaxed), false, "The connections stream was prematurely closed");
+        assert!(!stream_ended.load(Relaxed), "The connections stream was prematurely closed");
         connection_channel.close().await;
         assert!(stream_ended.load(Relaxed), "The connections stream (on the receiver end) wasn't notified that closing had happened");
         assert_eq!(received_count.load(Relaxed), expected_count, "The wrong number of connections were received");
@@ -375,7 +375,7 @@ mod tests {
                 server_connection_handler.feed_connection(extra_socket_connection).await.unwrap_or_else(|_| panic!("Failed to send value"));
             }
         }
-        assert_eq!(stream_ended.load(Relaxed), false, "The connections stream was prematurely closed");
+        assert!(!stream_ended.load(Relaxed), "The connections stream was prematurely closed");
         server_connection_handler.shutdown().await;
         assert!(stream_ended.load(Relaxed), "The connections stream (on the receiver end) wasn't notified that closing had happened");
         assert_eq!(received_count.load(Relaxed), expected_count, "The wrong number of connections were received");
@@ -399,7 +399,7 @@ mod tests {
         let mut connect = connect_shareable
             .lock().await;
         let error_message = connect().await
-            .expect_fatal(&format!("Tried to connect to a non-existing host, but the result of a connection attempt was not a `Fatal` error"))
+            .expect_fatal("Tried to connect to a non-existing host, but the result of a connection attempt was not a `Fatal` error")
             .into_result()
             .expect_err("A `Result::Err` should have been issued")
             .to_string();

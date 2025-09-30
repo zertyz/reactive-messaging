@@ -11,7 +11,7 @@ use futures::future::BoxFuture;
 use reactive_mutiny::types::FullDuplexUniChannel;
 use log::{error, warn};
 use tokio::sync::Mutex;
-use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingSerializer};
+use crate::serde::ReactiveMessagingConfig;
 
 
 /// Upgrades the user provided `connection_events_callback` into a callback able to keep track of connect/disconnection events

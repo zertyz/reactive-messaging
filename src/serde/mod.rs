@@ -24,7 +24,7 @@ pub trait ReactiveMessagingConfig<LocalMessages> {
     /// as it will be sent in response to the remote party.\
     /// IMPLEMENTORS: #[inline(always)]
     #[inline(always)]
-    fn processor_error_message(err: String) -> Option<LocalMessages> {
+    fn processor_error_message(_err: String) -> Option<LocalMessages> {
         // By default, we do not inform the peer if a local processor error occurred.
         // However, implementors are encouraged to do so.
         None
@@ -34,7 +34,7 @@ pub trait ReactiveMessagingConfig<LocalMessages> {
     /// If any, the returned message (enum variant) should be as descriptive as possible, as it will be sent in response to the remote party.\
     /// IMPLEMENTORS: #[inline(always)]
     #[inline(always)]
-    fn input_error_message(err: String) -> Option<LocalMessages> {
+    fn input_error_message(_err: String) -> Option<LocalMessages> {
         // By default, we do not inform the peer if they sent a bad message.
         // However, implementors are encouraged to do so.
         None

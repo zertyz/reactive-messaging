@@ -4,8 +4,8 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
-use crate::prelude::{Peer, ReactiveMessagingSerializer, SocketConnection};
-use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingDeserializer};
+use crate::prelude::{Peer, SocketConnection};
+use crate::serde::ReactiveMessagingConfig;
 use crate::socket_connection::common::ReactiveMessagingUniSender;
 
 pub trait SocketDialog<const CONFIG: u64>: Sync + Send + Default {

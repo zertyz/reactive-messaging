@@ -1,10 +1,7 @@
 //! Contains some functions and other goodies used across this module
 
 
-use crate::prelude::{
-    ReactiveMessagingSerializer,
-    ProtocolEvent,
-};
+use crate::prelude::ProtocolEvent;
 use std::{
     fmt::Debug,
     future::Future,
@@ -36,7 +33,7 @@ pub(crate) fn upgrade_to_termination_tracking<const CONFIG:                   u6
         let shutdown_is_complete_signaler = Arc::clone(&shutdown_is_complete_signaler);
         let user_provided_connection_events_callback = Arc::clone(&user_provided_connection_events_callback);
         Box::pin(async move {
-            if let ProtocolEvent::LocalServiceTermination { } = connection_event {
+            if let ProtocolEvent::LocalServiceTermination = connection_event {
                 let Some(shutdown_is_complete_signaler) = shutdown_is_complete_signaler.lock().await.take()
                 else {
                     warn!("Socket Server: a shutdown was asked, but a previous shutdown seems to have already taken place. There is a bug in your shutdown logic. Ignoring the current shutdown request...");

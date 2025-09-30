@@ -1,7 +1,7 @@
 //! Common types used across this submodule
 
 use std::error::Error;
-use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
+use crate::serde::ReactiveMessagingConfig;
 use crate::prelude::Peer;
 use crate::socket_connection::connection_provider::ConnectionChannel;
 use crate::types::{ProtocolEvent, MessagingMutinyStream, ConnectionEvent};

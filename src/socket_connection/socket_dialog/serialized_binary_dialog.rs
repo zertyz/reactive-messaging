@@ -321,13 +321,10 @@ for SerializedWrapperType<MessagesType, Deserializer> {
     fn eq(&self, other: &Self) -> bool {
         self.raw.eq(other.raw.as_slice())
     }
-    fn ne(&self, other: &Self) -> bool {
-        self.raw.ne(other.raw.as_slice())
-    }
 }
 
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
     use std::future;
@@ -362,6 +359,7 @@ mod tests {
 
         #[derive(Debug, PartialEq, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
         #[archive_attr(derive(Debug))]
+        #[archive_attr(derive(PartialEq))]
         enum VariableBinary {
             ElementCounts(BTreeMap<String, u32>),
             Error(String),
@@ -371,12 +369,11 @@ mod tests {
                 VariableBinary::Error(String::from("Channel slot not Initialized"))
             }
         }
-        impl ReactiveMessagingRkyvSerializer<VariableBinary> for VariableBinary {
+        impl ReactiveMessagingConfig<VariableBinary> for VariableBinary {
             fn processor_error_message(err: String) -> Option<VariableBinary> {
                 Some(VariableBinary::Error(err))
             }
         }
-        impl ReactiveMessagingRkyvFastDeserializer<VariableBinary> for VariableBinary {}
 
         const TIMEOUT: Duration = Duration::from_millis(1000);
         const LISTENING_INTERFACE: &str = "127.0.0.1";
@@ -394,7 +391,7 @@ mod tests {
             .expect("Sanity Check: couldn't start the Connection Provider server event loop");
         let new_connections_source = connection_provider.connection_receiver()
             .expect("Sanity Check: couldn't move the Connection Receiver out of the Connection Provider");
-        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, SerializedBinaryDialog<DEFAULT_TEST_CONFIG_U64, VariableBinary, VariableBinary, AtomicTestUni<SerializedWrapperType<VariableBinary>>, AtomicSenderChannel<VariableBinary>, ()>>::new(SerializedBinaryDialog::default());
+        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, SerializedBinaryDialog<DEFAULT_TEST_CONFIG_U64, VariableBinary, VariableBinary, ReactiveMessagingRkyvSerializer, ReactiveMessagingRkyvFastDeserializer, AtomicTestUni<SerializedWrapperType<VariableBinary, ReactiveMessagingRkyvFastDeserializer>>, AtomicSenderChannel<VariableBinary>, ()>>::new(SerializedBinaryDialog::default());
         let (returned_connections_sink, mut _server_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
         socket_communications_handler.server_loop(
             LISTENING_INTERFACE, port, new_connections_source, returned_connections_sink,
@@ -435,7 +432,7 @@ mod tests {
         // client
         let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
         let socket_connection = SocketConnection::new(tokio_connection, ());
-        let client_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, SerializedBinaryDialog<DEFAULT_TEST_CONFIG_U64, VariableBinary, VariableBinary, AtomicTestUni<SerializedWrapperType<VariableBinary>>, AtomicSenderChannel<VariableBinary>, ()>>::new(SerializedBinaryDialog::default());
+        let client_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, SerializedBinaryDialog<DEFAULT_TEST_CONFIG_U64, VariableBinary, VariableBinary, ReactiveMessagingRkyvSerializer, ReactiveMessagingRkyvFastDeserializer, FullSyncTestUni<SerializedWrapperType<VariableBinary, ReactiveMessagingRkyvFastDeserializer>>, FullSyncSenderChannel<VariableBinary>, ()>>::new(SerializedBinaryDialog::default());
         let client_task = tokio::spawn(
             client_communications_handler.client(
                 socket_connection, client_shutdown_receiver,
@@ -483,4 +480,4 @@ mod tests {
         assert_eq!(8, min_bytes_for_usize(usize::MAX));
         assert_eq!(8, min_bytes_for_usize(1 << (64-7)));
     }
-}*/
+}

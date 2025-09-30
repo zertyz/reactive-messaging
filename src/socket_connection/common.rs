@@ -18,7 +18,7 @@ use futures::{Stream, StreamExt};
 use keen_retry::ExponentialJitter;
 use log::{trace, warn};
 use crate::prelude::Peer;
-use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingSerializer};
+use crate::serde::ReactiveMessagingConfig;
 use crate::types::ResponsiveStream;
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `CONFIG`

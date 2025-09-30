@@ -52,7 +52,7 @@ pub struct StringDeserializer;
 impl ReactiveMessagingDeserializer<String> for StringDeserializer {
     type DeserializedRemoteMessages = String;
 
-    fn validate(remote_message: &[u8]) -> Result<(), Error> {
+    fn validate(_remote_message: &[u8]) -> Result<(), Error> {
         unreachable!()
     }
 
@@ -61,7 +61,7 @@ impl ReactiveMessagingDeserializer<String> for StringDeserializer {
         Ok(String::from_utf8_lossy(message).to_string())
     }
 
-    fn deserialize_as_ref(remote_message: &[u8]) -> Result<&Self::DeserializedRemoteMessages, Error> {
+    fn deserialize_as_ref(_remote_message: &[u8]) -> Result<&Self::DeserializedRemoteMessages, Error> {
         unreachable!()
     }
 }
