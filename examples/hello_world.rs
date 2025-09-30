@@ -73,12 +73,14 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
     if start_server {
         println!("==> starting the server");
         let server = server.insert(new_socket_server!(CONFIG, LISTENING_INTERFACE, PORT));
-        let server_processor_handler = spawn_server_processor!(CONFIG, Textual, FullSync, server, ClientMessages, ServerMessages,
+        type DerivedClientMessages = ArchivedClientMessages;    // uncomment if you'll use "VariableBinary"
+        // type DerivedClientMessages = ClientMessages;    // uncomment you will use "Textual"
+        let server_processor_handler = spawn_server_processor!(CONFIG, VariableBinary, FullSync, server, ClientMessages, ServerMessages,
             |_| future::ready(()),
             |_, _, peer, client_stream| client_stream
-                .inspect(|client_message| println!(">>> {:?}", client_message.deref()))
-                .map(|client_message| match client_message.as_ref() {
-                    ClientMessages::Hello => ServerMessages::World(WORLD.to_string()),
+                .inspect(|client_message| println!(">>> {:?}", client_message.deref().deref()))
+                .map(|client_message| match client_message.deref().deref() {
+                    DerivedClientMessages::Hello => ServerMessages::World(WORLD.to_string()),
                     _ => ServerMessages::NoAnswer,
                 })
                 .to_responsive_stream(peer, |_, _| ())
@@ -89,15 +91,12 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
     if start_client {
         println!("==> starting the client");
         let mut client = new_socket_client!(CONFIG, LISTENING_INTERFACE, PORT);
-        start_client_processor!(CONFIG, Textual, FullSync, client, ServerMessages, ClientMessages,
+        start_client_processor!(CONFIG, VariableBinary, FullSync, client, ServerMessages, ClientMessages,
             |connection_event| async {
-                match connection_event {
-                    ProtocolEvent::PeerArrived { peer } => {
-                        // sends a message as soon as the connection is established
-                        peer.send_async(ClientMessages::Hello).await
-                            .expect("The client couldn't send a message");
-                    }
-                    _ => {},
+                if let ProtocolEvent::PeerArrived { peer } = connection_event {
+                    // sends a message as soon as the connection is established
+                    peer.send_async(ClientMessages::Hello).await
+                        .expect("The client couldn't send a message");
                 }
             },
             |_, _, peer, server_stream| server_stream.inspect(move |server_message| {

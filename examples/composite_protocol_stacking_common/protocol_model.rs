@@ -87,6 +87,7 @@ pub enum ProtocolStates {
 /// Client messages to set up the game in the server
 #[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum PreGameClientMessages {
 
     /// First message that the client must send, upon establishing a connection
@@ -110,6 +111,7 @@ impl Default for PreGameClientMessages {
 /// Messages coming from the clients after [PreGameClientMessages] protocol was performed, suitable to be deserialized by the server
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum GameClientMessages {
 
     /// The rally -- to be started after receiving [GameServerMessages::GameStarted]
@@ -143,6 +145,7 @@ pub enum GameClientMessages {
 /// Errors that the client may return in the `ProtocolStates::PreGame`
 #[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum PreGameClientError {
     /// Occurs only if there is a bug: reserving a slot, not filling it up and sending the message anyway
     /// (this value is set on the `default()` constructor)
@@ -161,6 +164,7 @@ pub enum PreGameClientError {
 /// Errors that the client may return in the `ProtocolStates::Game`
 #[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum GameClientError {
     /// Occurs when the client couldn't parse a message sent by the server
     /// when the `Textual` messages are being used
@@ -174,6 +178,7 @@ pub enum GameClientError {
 /// Messages coming from the server, suitable to be deserialized by the clients
 #[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum PreGameServerMessages {
 
     /// After taking notice of a new client -- after it sent [PreGameClientMessages::Config] --
@@ -199,6 +204,7 @@ impl Default for PreGameServerMessages {
 /// Messages coming from the server, suitable to be deserialized by the clients
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum GameServerMessages {
 
     /// Issued after a [PreGameClientMessages::Config] has been received, indicating both the client and server should start the game
@@ -227,6 +233,7 @@ pub enum GameServerMessages {
 /// Errors that the server may return in the `ProtocolStates::PreGame`
 #[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum PreGameServerError {
     /// Occurs when the client couldn't parse a message sent by the server
     /// when the `Textual` messages are being used
@@ -242,6 +249,7 @@ pub enum PreGameServerError {
 /// Errors that the server may return in the `ProtocolStates::Game`
 #[derive(Debug, PartialEq, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum GameServerError {
     /// Occurs when the client couldn't parse a message sent by the server
     /// when the `Textual` messages are being used

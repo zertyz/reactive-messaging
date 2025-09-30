@@ -116,7 +116,7 @@ macro_rules! spawn_server_processor {
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, $crate::prelude::ReactiveMessagingRonSerializer, $crate::prelude::ReactiveMessagingRonDeserializer, ProcessorUniType, SenderChannel, _>::default();
-        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 
     // "Textual", with custom Serde
@@ -132,7 +132,7 @@ macro_rules! spawn_server_processor {
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, $serializer, $deserializer, ProcessorUniType, SenderChannel, _>::default();
-        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 
     // Variable Sized binaries, with the default Rkyv Serde
@@ -144,9 +144,10 @@ macro_rules! spawn_server_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages>, $local_messages);
+        type _DERIVED_REMOTE_MESSAGES = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages, $crate::prelude::ReactiveMessagingRkyvFastDeserializer>;
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, _DERIVED_REMOTE_MESSAGES, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, $crate::prelude::ReactiveMessagingRkyvSerializer, $crate::prelude::ReactiveMessagingRkyvFastDeserializer, ProcessorUniType, SenderChannel, _>::default();
-        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+        $socket_server.spawn_processor::<_DERIVED_REMOTE_MESSAGES, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 
     // Variable Sized binaries, with custom Serde
@@ -160,9 +161,10 @@ macro_rules! spawn_server_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages>, $local_messages);
+        type _DERIVED_REMOTE_MESSAGES = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages, $crate::prelude::ReactiveMessagingRkyvFastDeserializer>;
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, _DERIVED_REMOTE_MESSAGES, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, $serializer, $deserializer, ProcessorUniType, SenderChannel, _>::default();
-        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+        $socket_server.spawn_processor::<_DERIVED_REMOTE_MESSAGES, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 
     // Mmap Binary
@@ -176,7 +178,7 @@ macro_rules! spawn_server_processor {
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::mmap_binary_dialog::MmapBinaryDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
-        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 }
 pub use spawn_server_processor;
@@ -289,10 +291,11 @@ for CompositeSocketServer<CONFIG, StateType> {
                              ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                + Send                            + 'static,
                              ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                 + Send                            + 'static,
                              ConnectionEventsCallback:       Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                   -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
-                             ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
+                             ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static,
+                             OriginalRemoteMessages:                                                                                                                                                                                                                                             Send + Sync + PartialEq + Debug + 'static>
 
                             (&mut self,
-                             socket_dialog:               impl SocketDialog<CONFIG, RemoteMessages=RemoteMessages, LocalMessages=LocalMessages, ProcessorUni=ProcessorUniType, SenderChannel=SenderChannel, State=StateType> + 'static,
+                             socket_dialog:               impl SocketDialog<CONFIG, RemoteMessages=OriginalRemoteMessages, LocalMessages=LocalMessages, ProcessorUni=ProcessorUniType, SenderChannel=SenderChannel, State=StateType> + 'static,
                              connection_events_callback:  ConnectionEventsCallback,
                              dialog_processor_builder_fn: ProcessorBuilderFn)
 
@@ -603,10 +606,10 @@ mod tests {
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.sender_channel_size as usize}, 1>;
         let socket_dialog_handler = TextualDialog::<{CUSTOM_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, ProcessorUniType, SenderChannelType, ()>::default();
         let connection_channel = server.spawn_processor::<DummyClientAndServerMessages,
-                                                                             DummyClientAndServerMessages,
-                                                                             ProcessorUniType,
-                                                                             SenderChannelType,
-                                                                             _, _, _, _, _ > (
+                                                                                    DummyClientAndServerMessages,
+                                                                                    ProcessorUniType,
+                                                                                    SenderChannelType,
+                                                                                    _, _, _, _, _, _ > (
             socket_dialog_handler,
             |_| future::ready(()),
             |_, _, _, client_messages_stream| client_messages_stream.map(|_payload| DummyClientAndServerMessages::FloodPing)
@@ -651,10 +654,10 @@ mod tests {
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {TEST_CONFIG.sender_channel_size as usize}, 1>;
         let socket_dialog_handler = TextualDialog::<{TEST_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, ProcessorUniType, SenderChannelType, ()>::default();
         let connection_channel = server.spawn_processor :: <DummyClientAndServerMessages,
-                                                                               DummyClientAndServerMessages,
-                                                                               ProcessorUniType,
-                                                                               SenderChannelType,
-                                                                               _, _, _, _, _> (
+                                                                                      DummyClientAndServerMessages,
+                                                                                      ProcessorUniType,
+                                                                                      SenderChannelType,
+                                                                                      _, _, _, _, _, _> (
                 socket_dialog_handler,
                 move |connection_event: ProtocolEvent<{TEST_CONFIG.into()}, DummyClientAndServerMessages, SenderChannelType>| {
                 let client_peer = Arc::clone(&client_peer_ref1);

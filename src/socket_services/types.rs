@@ -52,10 +52,11 @@ pub trait MessagingService<const CONFIG: u64> {
                        RemoteStreamType:              Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                    + Send                            + 'static,
                        ProtocolEventsCallbackFuture:  Future<Output=()>                                                                                                                                                                                                                     + Send                            + 'static,
                        ProtocolEventsCallback:        Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, Self::StateType>)                                                                                                                   -> ProtocolEventsCallbackFuture + Send + Sync                     + 'static,
-                       ProcessorBuilderFn:            Fn(/*remote_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> RemoteStreamType             + Send + Sync                     + 'static>
+                       ProcessorBuilderFn:            Fn(/*remote_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, Self::StateType>>, /*remote_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> RemoteStreamType             + Send + Sync                     + 'static,
+                       OriginalRemoteMessages:                                                                                                                                                                                                                                                Send + Sync + PartialEq + Debug + 'static>
 
                       (&mut self,
-                       socket_dialog:               impl SocketDialog<CONFIG, RemoteMessages=RemoteMessages, LocalMessages=LocalMessages, ProcessorUni=ProcessorUniType, SenderChannel=SenderChannel, State=Self::StateType> + 'static,
+                       socket_dialog:               impl SocketDialog<CONFIG, RemoteMessages=OriginalRemoteMessages, LocalMessages=LocalMessages, ProcessorUni=ProcessorUniType, SenderChannel=SenderChannel, State=Self::StateType> + 'static,
                        connection_events_callback:  ProtocolEventsCallback,
                        dialog_processor_builder_fn: ProcessorBuilderFn)
 

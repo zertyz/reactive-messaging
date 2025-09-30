@@ -31,7 +31,7 @@ keen-retry = "0.5"
 
 # to be present only in dev-dependencies, after the refactorings
 serde      = { version = "1.0", default-features = false, features = ["derive"] }      # typed serialization / deserialization
-ron        = "0.10"                                                                                 # for textual (de)serialization
+ron        = "0.10"                                                                       # for textual (de)serialization
 rkyv       = { version = "0.7", features = ["size_32", "validation"] }                   # for dynamic-sized binary (de)serialization
 
 
@@ -47,7 +47,7 @@ tokio         = { version = "1", features = ["full", "rt-multi-thread"] }
 ###############################
 
 dashmap    = "6"     # atomic hash maps & sets -- to send a shutdown message to clients
-rand       = "0.9"                                                        # random number
+rand       = "0.9" # random number
 
 
 # dependencies for benchmarks

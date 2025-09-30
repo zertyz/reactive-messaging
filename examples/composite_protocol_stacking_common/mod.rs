@@ -29,6 +29,7 @@ pub const NETWORK_CONFIG: ConstConfig = ConstConfig {
 #[macro_export]
 macro_rules! spawn_server_processor {
     ($_1: expr, $_4: expr, $_5: ty, $_6: ty, $_7: expr, $_8: expr) => {
+        // reactive_messaging::spawn_server_processor!($_1, Textual, FullSync, $_4, $_5, $_6, $_7, $_8)
         reactive_messaging::spawn_server_processor!($_1, MmapBinary, FullSync, $_4, $_5, $_6, $_7, $_8)
         // reactive_messaging::spawn_server_processor!($_1, VariableBinary, FullSync, $_4, $_5, $_6, $_7, $_8)
     }
@@ -43,7 +44,9 @@ pub use spawn_server_processor;
 #[macro_export]
 macro_rules! spawn_client_processor {
     ($_1: expr, $_4: expr, $_5: ty, $_6: ty, $_7: expr, $_8: expr) => {
+        // reactive_messaging::spawn_client_processor!($_1, Textual, FullSync, $_4, $_5, $_6, $_7, $_8)
         reactive_messaging::spawn_client_processor!($_1, MmapBinary, FullSync, $_4, $_5, $_6, $_7, $_8)
+        // reactive_messaging::spawn_client_processor!($_1, VariableBinary, FullSync, $_4, $_5, $_6, $_7, $_8)
     }
 }
 pub use spawn_client_processor;

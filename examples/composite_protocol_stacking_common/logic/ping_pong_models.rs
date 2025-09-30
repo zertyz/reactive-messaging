@@ -6,6 +6,7 @@ use serde::{Serialize, Deserialize};
 /// Events that may happen on a ping-pong match
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum PingPongEvent {
     /// The ball hit the opponent's field without any hard faults, causing the turn to flip
     /// --requiring the opponent to react to it in order not to lose the score opportunity
@@ -29,6 +30,7 @@ pub enum PingPongEvent {
 /// Events describing the result of the previous `PlayerAction`, continuing in the "rally" state
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum TurnFlipEvents {
     /// the player shot the ball, causing it to hit the opponent's field (without touching the net)
     SuccessfulService,
@@ -40,6 +42,7 @@ pub enum TurnFlipEvents {
 /// Contains details of the action taken by a player during his turn in the game
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub struct PlayerAction {
     /// Details of the ball hitting intention
     pub lucky_number: f32,
@@ -50,6 +53,7 @@ pub struct PlayerAction {
 /// when the ball touches the opponent's field or a hard fault is committed.
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum FaultEvents {
     /// occurs when the player rebates the ball before it performed a kick on his/her field -- the player should either have waited for the kick or let the ball go out
     /// (note that this event also accounts for any "opponent's field invasion" that might happen)
@@ -84,6 +88,7 @@ pub enum GameStates {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum GameOverStates {
     /// The score limit was reached and the game ended gracefully
     GracefullyEnded {
@@ -101,6 +106,7 @@ pub enum GameOverStates {
 /// The configuration used for our Ping-Pong matches
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub struct MatchConfig {
     /// ping-pong matches end when this score is reached
     pub score_limit: u32,
@@ -125,6 +131,7 @@ pub struct MatchConfig {
 /// The result of a match -- either ongoing or finished
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub struct MatchScore {
     pub limit:    u32,
     pub oneself:  u32,
@@ -133,6 +140,7 @@ pub struct MatchScore {
 
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum Players {
     Ourself,
     Opponent,
@@ -141,6 +149,7 @@ pub enum Players {
 /// Enumerates the game rules that might be broken, for referee reporting purposes
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
 #[archive_attr(derive(Debug))]
+#[archive_attr(derive(PartialEq))]
 pub enum Rules {
     /// Happens when the Umpire expects player A to react to the game event,
     /// but the reaction was actually done by player B
