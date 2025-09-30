@@ -5,9 +5,24 @@ use std::{
     fmt::Debug,
     sync::Arc,
 };
+use std::fmt::{Display, Formatter};
 use futures::Stream;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni, MutinyStream};
 use crate::prelude::SocketConnection;
+
+
+/// `reactive-messaging` error type
+#[derive(Debug)]
+pub enum Error {
+    TextualInputParsingError   { msg: String, cause: Box<dyn std::error::Error + Send + Sync> },
+    BinaryInputValidationError { msg: String, cause: Box<dyn std::error::Error + Send + Sync> },
+}
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <Self as Debug>::fmt(self, f)
+    }
+}
+impl std::error::Error for Error {}
 
 
 /// Concrete type of the `Stream`s this crate produces.\

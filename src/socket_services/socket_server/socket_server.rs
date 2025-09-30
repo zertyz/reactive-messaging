@@ -26,7 +26,7 @@ use crate::{
         socket_connection_handler::SocketConnectionHandler,
         connection_provider::{ServerConnectionHandler, ConnectionChannel},
     },
-    serde::{ReactiveMessagingTextualDeserializer, ReactiveMessagingTextualSerializer},
+    serde::{ReactiveMessagingDeserializer, ReactiveMessagingSerializer},
 };
 use crate::socket_connection::connection::SocketConnection;
 use crate::socket_services::types::MessagingService;
@@ -104,6 +104,8 @@ pub use new_composite_socket_server;
 /// `Textual`, `VariableBinary` or `MmapBinary` -- being, these names, the variants of [MessageForms].
 #[macro_export]
 macro_rules! spawn_server_processor {
+    
+    // "Textual", with the default Ron Serde
     ($const_config:                 expr,
      Textual,
      $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
@@ -113,9 +115,27 @@ macro_rules! spawn_server_processor {
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
-        let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, $crate::prelude::ReactiveMessagingRonSerializer, $crate::prelude::ReactiveMessagingRonDeserializer, ProcessorUniType, SenderChannel, _>::default();
         $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
+    
+    // "Textual", with custom Serde
+    ($const_config:                 expr,
+     Textual,
+     $serializer:                   tt,     // a type implementing `ReactiveMessagingSerializer`
+     $deserializer:                 tt,     // a type implementing `ReactiveMessagingDeserializer`
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
+     $socket_server:                expr,
+     $remote_messages:              ty,
+     $local_messages:               ty,
+     $connection_events_handler_fn: expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
+        let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, $serializer, $deserializer, ProcessorUniType, SenderChannel, _>::default();
+        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+    }};
+
+    // Variable Sized binaries, with the default Rkyv Serde
     ($const_config:                 expr,
      VariableBinary,
      $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
@@ -125,9 +145,27 @@ macro_rules! spawn_server_processor {
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages>, $local_messages);
-        let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, $crate::prelude::ReactiveMessagingRkyvSerializer, $crate::prelude::ReactiveMessagingRkyvFastDeserializer, ProcessorUniType, SenderChannel, _>::default();
         $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
+    
+    // Variable Sized binaries, with custom Serde
+    ($const_config:                 expr,
+     VariableBinary,
+     $serializer:                   tt,     // a type implementing `ReactiveMessagingSerializer`
+     $deserializer:                 tt,     // a type implementing `ReactiveMessagingDeserializer`
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
+     $socket_server:                expr,
+     $remote_messages:              ty,
+     $local_messages:               ty,
+     $connection_events_handler_fn: expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages>, $local_messages);
+        let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, $serializer, $deserializer, ProcessorUniType, SenderChannel, _>::default();
+        $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
+    }};
+    
+    // Mmap Binary
     ($const_config:                 expr,
      MmapBinary,
      $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
@@ -150,6 +188,8 @@ pub use spawn_server_processor;
 /// The second parameter here can be either `Textual`, `VariableBinary` or `MmapBinary` -- being, these names, the variants of [MessageForms].
 #[macro_export]
 macro_rules! start_server_processor {
+    
+    // use the default serializers for the given `message_form`
     ($const_config:                 expr,
      $message_form:                 tt,     // one of `Textual`, `VariableBinary` or `MmapBinary`
      $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
@@ -162,10 +202,29 @@ macro_rules! start_server_processor {
             Ok(connection_channel) => $socket_server.start_single_protocol(connection_channel).await,
             Err(err) => Err(err),
         }
-    }}
+    }};
+
+    // use the custom serializers for the given `message_form`
+    ($const_config:                 expr,
+     $message_form:                 tt,     // one of `Textual`, `VariableBinary` or `MmapBinary`
+     $serializer:                   tt,     // a type implementing `ReactiveMessagingSerializer`
+     $deserializer:                 tt,     // a type implementing `ReactiveMessagingDeserializer`
+     $channel_type:                 tt,     // one of `Atomic`, `FullSync`, `Crossbeam`
+     $socket_server:                expr,
+     $remote_messages:              ty,
+     $local_messages:               ty,
+     $connection_events_handler_fn: expr,
+     $dialog_processor_builder_fn:  expr) => {{
+        match spawn_server_processor!($const_config, $message_form, $serializer, $deserializer, $channel_type, $socket_server, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+            Ok(connection_channel) => $socket_server.start_single_protocol(connection_channel).await,
+            Err(err) => Err(err),
+        }
+    }};
+    
 }
 pub use start_server_processor;
-
+use crate::prelude::{ReactiveMessagingConfig, ReactiveMessagingRonSerializer};
+use crate::serde::{ReactiveMessagingRkyvFastDeserializer, ReactiveMessagingRkyvSerializer, ReactiveMessagingRonDeserializer};
 
 /// Real definition & implementation for our Socket Server, full of generic parameters.\
 /// Probably you want to instantiate this structure through the sugared macros [new_socket_server!()] or [new_composite_socket_server!()] instead.
@@ -224,14 +283,14 @@ for CompositeSocketServer<CONFIG, StateType> {
 
     type StateType = StateType;
 
-    async fn spawn_processor<RemoteMessages:                 ReactiveMessagingTextualDeserializer<RemoteMessages>                                                                                                                                                                                     + Send + Sync + PartialEq + Debug + 'static,
-                             LocalMessages:                  ReactiveMessagingTextualSerializer<LocalMessages>                                                                                                                                                                                        + Send + Sync + PartialEq + Debug + 'static,
+    async fn spawn_processor<RemoteMessages:                                                                                                                                                                                                                                                     Send + Sync + PartialEq + Debug + 'static,
+                             LocalMessages:                  ReactiveMessagingConfig<LocalMessages>                                                                                                                                                                                            + Send + Sync + PartialEq + Debug + 'static,
                              ProcessorUniType:               GenericUni<ItemType=RemoteMessages>                                                                                                                                                                                               + Send + Sync                     + 'static,
                              SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages>                                                                                                                                                       + Send + Sync                     + 'static,
                              OutputStreamItemsType:                                                                                                                                                                                                                                              Send + Sync             + Debug + 'static,
                              ServerStreamType:               Stream<Item=OutputStreamItemsType>                                                                                                                                                                                                + Send                            + 'static,
                              ConnectionEventsCallbackFuture: Future<Output=()>                                                                                                                                                                                                                 + Send                            + 'static,
-                             ConnectionEventsCallback:       Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                 -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
+                             ConnectionEventsCallback:       Fn(/*event: */ProtocolEvent<CONFIG, LocalMessages, SenderChannel, StateType>)                                                                                                                   -> ConnectionEventsCallbackFuture + Send + Sync                     + 'static,
                              ProcessorBuilderFn:             Fn(/*client_addr: */String, /*connected_port: */u16, /*peer: */Arc<Peer<CONFIG, LocalMessages, SenderChannel, StateType>>, /*client_messages_stream: */MessagingMutinyStream<ProcessorUniType>) -> ServerStreamType               + Send + Sync                     + 'static>
 
                             (&mut self,
@@ -465,12 +524,12 @@ mod tests {
             unresponsive_processor
         )?;
         async fn connection_events_handler<const CONFIG:  u64,
-                                           LocalMessages: ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+                                           LocalMessages: ReactiveMessagingConfig<LocalMessages>                                      + Send + Sync + PartialEq + Debug,
                                            SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync>
                                           (_event: ProtocolEvent<CONFIG, LocalMessages, SenderChannel>) {
         }
         fn unresponsive_processor<const CONFIG:   u64,
-                                  LocalMessages:  ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug,
+                                  LocalMessages:  ReactiveMessagingConfig<LocalMessages>                                      + Send + Sync + PartialEq + Debug,
                                   SenderChannel:  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
                                   StreamItemType: Deref<Target=DummyClientAndServerMessages>>
                                  (_client_addr:           String,
@@ -545,7 +604,7 @@ mod tests {
                                                                        :: new(LISTENING_INTERFACE, PORT);
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.receiver_channel_size as usize}, 1, {CUSTOM_CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {CUSTOM_CONFIG.sender_channel_size as usize}, 1>;
-        let socket_dialog_handler = TextualDialog::<{CUSTOM_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ProcessorUniType, SenderChannelType, ()>::default();
+        let socket_dialog_handler = TextualDialog::<{CUSTOM_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, ProcessorUniType, SenderChannelType, ()>::default();
         let connection_channel = server.spawn_processor::<DummyClientAndServerMessages,
                                                                              DummyClientAndServerMessages,
                                                                              ProcessorUniType,
@@ -593,7 +652,7 @@ mod tests {
                                                                        :: new(LISTENING_INTERFACE, PORT);
         type ProcessorUniType = UniZeroCopyFullSync<DummyClientAndServerMessages, {TEST_CONFIG.receiver_channel_size as usize}, 1, {TEST_CONFIG.executor_instruments.into()}>;
         type SenderChannelType = ChannelUniMoveFullSync<DummyClientAndServerMessages, {TEST_CONFIG.sender_channel_size as usize}, 1>;
-        let socket_dialog_handler = TextualDialog::<{TEST_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ProcessorUniType, SenderChannelType, ()>::default();
+        let socket_dialog_handler = TextualDialog::<{TEST_CONFIG.into()}, DummyClientAndServerMessages, DummyClientAndServerMessages, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, ProcessorUniType, SenderChannelType, ()>::default();
         let connection_channel = server.spawn_processor :: <DummyClientAndServerMessages,
                                                                                DummyClientAndServerMessages,
                                                                                ProcessorUniType,
@@ -856,6 +915,8 @@ mod tests {
         FloodPing,
     }
 
+    impl ReactiveMessagingConfig<DummyClientAndServerMessages> for DummyClientAndServerMessages {}
+
     impl Deref for DummyClientAndServerMessages {
         type Target = DummyClientAndServerMessages;
         fn deref(&self) -> &Self::Target {
@@ -863,8 +924,4 @@ mod tests {
         }
     }
 
-    impl ReactiveMessagingRonSerializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {}
-    impl ReactiveMessagingRonDeserializer<DummyClientAndServerMessages> for DummyClientAndServerMessages {}
-    
-    impl ReactiveMessagingMemoryMappable for DummyClientAndServerMessages {}
 }

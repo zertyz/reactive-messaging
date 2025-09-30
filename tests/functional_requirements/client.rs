@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 use crate::utils::*;
 use reactive_messaging::prelude::*;
 use std::sync::atomic::Ordering::Relaxed;
+use std::time::Duration;
 use futures::stream::StreamExt;
 
 
@@ -219,7 +220,7 @@ async fn terminates_immediately_when_done() {
     let (probed_protocol_processor_builder,
          last_server_message_micros) = last_micros_probed_protocol_processor_builder();
 
-    start_client_processor!(CONFIG, Textual, Atomic, client, TestString, TestString,
+    start_client_processor!(CONFIG, Textual, PlainTextSerializer, PlainTextDeserializer, Atomic, client, TestString, TestString,
         move |event| {
             if let ProtocolEvent::PeerArrived { peer } = &event {
                 let result = peer.send(TestString(String::from("GET / HTTP/1.0\n\n")));
@@ -235,7 +236,11 @@ async fn terminates_immediately_when_done() {
         }
     ).expect("Cannot start client processor");
 
-    client.termination_waiter()().await.expect("Error waiting for the client to finish");
+    let async_wait_for_termination = client.termination_waiter();
+    tokio::time::timeout(Duration::from_secs(10), async_wait_for_termination()).await
+        .expect("Timed out waiting for client termination")
+        .expect("TFailure in the client `wait_for_termination()` closure");
+
     let termination_reported_time_diff = last_server_message_micros.load(Relaxed).abs_diff(now_as_micros());
 
     assert!(termination_reported_time_diff <= threshold_micros,                    "Client code took too long to report it has terminated its duties -- {termination_reported_time_diff}µs, above the acceptable threshold of {threshold_micros}µs");

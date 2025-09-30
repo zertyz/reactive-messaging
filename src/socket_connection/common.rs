@@ -18,7 +18,7 @@ use futures::{Stream, StreamExt};
 use keen_retry::ExponentialJitter;
 use log::{trace, warn};
 use crate::prelude::Peer;
-use crate::serde::ReactiveMessagingTextualSerializer;
+use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingSerializer};
 use crate::types::ResponsiveStream;
 
 /// Upgrades a standard `GenericUni` to a version able to retry, as dictated by `CONFIG`
@@ -38,16 +38,16 @@ pub fn upgrade_processor_uni_retrying_logic<const CONFIG: u64,
 /// retrying logic & connection control return values
 /// -- used to "send" messages from the remote peer to the local processor `Stream`
 pub struct ReactiveMessagingUniSender<const CONFIG: u64,
-                                      RemoteMessages:         Send + Sync + Debug + 'static,
-                                      ConsumedRemoteMessages: Send + Sync + Debug + 'static,
-                                      OriginalUni:            GenericUni<ItemType=RemoteMessages, DerivedItemType=ConsumedRemoteMessages> + Send + Sync> {
+                                      DeserializedRemoteMessages: Send + Sync + Debug + 'static,
+                                      ConsumedRemoteMessages:     Send + Sync + Debug + 'static,
+                                      OriginalUni:                GenericUni<ItemType=DeserializedRemoteMessages, DerivedItemType=ConsumedRemoteMessages> + Send + Sync> {
     uni: Arc<OriginalUni>,
 }
 impl<const CONFIG: u64,
-     RemoteMessages:         Send + Sync + Debug + 'static,
-     ConsumedRemoteMessages: Send + Sync + Debug + 'static,
-     OriginalUni:            GenericUni<ItemType=RemoteMessages, DerivedItemType=ConsumedRemoteMessages> + Send + Sync>
-ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, OriginalUni> {
+    DeserializedRemoteMessages: Send + Sync + Debug + 'static,
+     ConsumedRemoteMessages:    Send + Sync + Debug + 'static,
+     OriginalUni:               GenericUni<ItemType=DeserializedRemoteMessages, DerivedItemType=ConsumedRemoteMessages> + Send + Sync>
+ReactiveMessagingUniSender<CONFIG, DeserializedRemoteMessages, ConsumedRemoteMessages, OriginalUni> {
 
     const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
 
@@ -73,7 +73,7 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
     ///   - `(abort?, error_message, unsent_message)`
     #[inline(always)]
     pub async fn send(&self,
-                      message: RemoteMessages)
+                      message: DeserializedRemoteMessages)
                      -> Result<(), (/*abort?*/bool, /*error_message: */String)> {
 
         let retryable = self.uni.send(message);
@@ -145,17 +145,17 @@ ReactiveMessagingUniSender<CONFIG, RemoteMessages, ConsumedRemoteMessages, Origi
     }
 
     #[inline(always)]
-    pub fn reserve_slot(&self) -> Option<&mut RemoteMessages> {
+    pub fn reserve_slot(&self) -> Option<&mut DeserializedRemoteMessages> {
         self.uni.reserve_slot()
     }
 
     #[inline(always)]
-    pub fn try_send_reserved(&self, slot: &mut RemoteMessages) -> bool {
+    pub fn try_send_reserved(&self, slot: &mut DeserializedRemoteMessages) -> bool {
         self.uni.try_send_reserved(slot)
     }
 
     #[inline(always)]
-    pub fn try_cancel_reservation(&self, slot: &mut RemoteMessages) -> bool {
+    pub fn try_cancel_reservation(&self, slot: &mut DeserializedRemoteMessages) -> bool {
         self.uni.try_cancel_slot_reserve(slot)
     }
 
@@ -382,7 +382,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
 
 impl<const CONFIG:        u64,
      T:                   ?Sized,
-     LocalMessagesType:   ReactiveMessagingTextualSerializer<LocalMessagesType>                                      + Send + Sync + PartialEq + Debug,
+     LocalMessagesType:   ReactiveMessagingConfig<LocalMessagesType>                                          + Send + Sync + PartialEq + Debug,
      SenderChannel:       FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync,
      StateType:                                                                                                 Send + Sync + Clone     + Debug>
 ResponsiveStream<CONFIG, LocalMessagesType, SenderChannel, StateType>
@@ -422,36 +422,4 @@ for T where T: Stream<Item=LocalMessagesType> {
 /// Common test code for this module
 #[cfg(any(test,doc))]
 mod tests {
-    use crate::serde::{ReactiveMessagingTextualDeserializer, ReactiveMessagingTextualSerializer};
-
-    /// Test implementation for our text-only protocol as used across this module
-    impl ReactiveMessagingTextualSerializer<String> for String {
-        #[inline(always)]
-        fn serialize(message: &String, buffer: &mut Vec<u8>) {
-            buffer.clear();
-            buffer.extend_from_slice(message.as_bytes());
-        }
-        #[inline(always)]
-        fn processor_error_message(err: String) -> Option<String> {
-            let msg = format!("ServerBug! Please, fix! Error: {}", err);
-            panic!("SocketServerSerializer<String>::processor_error_message(): {}", msg);
-            // msg
-        }
-
-        #[inline(always)]
-        fn parsing_error_message(err: String) -> Option<String> {
-            let msg = format!("ServerBug! Please, fix! Error: {}", err);
-            panic!("SocketServerSerializer<String>::parsing_error_message(): {}", msg);
-            // msg
-        }
-    }
-
-    /// Testable implementation for our text-only protocol as used across this module
-    impl ReactiveMessagingTextualDeserializer<String> for String {
-        #[inline(always)]
-        fn deserialize(message: &[u8]) -> Result<String, Box<dyn std::error::Error + Sync + Send + 'static>> {
-            Ok(String::from_utf8_lossy(message).to_string())
-        }
-    }
-
 }

@@ -1,35 +1,10 @@
 use std::any::type_name;
 use std::fmt::Debug;
 
-/// Partial implementation of [ReactiveMessagingBinarySerializer<>] able to serialize `LocalMessages` in a binary blob with the `rkyv` crate 
-pub trait ReactiveMessagingRkyvSerializer<LocalMessages: for<'r> rkyv::Serialize<WriteSerializer<&'r mut Vec<u8>>>> {
-    
-    // NOTE: the methods in this trait are a copy of the ones in `ReactiveMessagingBinarySerializer`
-    //       -- please, keep them in sync
-    
-    /// Called whenever the local processor found an error -- such as "we are too busy to process your request at the moment".
-    /// If any, the returned message (enum variant) should be as descriptive as possible,
-    /// as it will be sent in response to the remote party.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn processor_error_message(_err: String) -> Option<LocalMessages> {
-        // By default, we do not inform the peer if a local error occurred.
-        // However, implementors are encouraged to do so.
-        None
-    }
-
-    /// Called when the local processor detects that the received binary blob is invalid and could cause the program to crash.
-    /// If any, the returned message (enum variant) should be as descriptive as possible,
-    /// as it will be sent in response to the remote party.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn verification_error_message(_err: String) -> Option<LocalMessages> {
-        // By default, we do not inform the peer if they sent a bad message.
-        // However, implementors are encouraged to do so.
-        None
-    }
-}
-impl<T, LocalMessages> ReactiveMessagingBinarySerializer<LocalMessages> for T
+/// Serializer for `LocalMessages` in binary blobs using the `rkyv` crate
+pub struct ReactiveMessagingRkyvSerializer {}
+impl<LocalMessages> ReactiveMessagingSerializer<LocalMessages> for ReactiveMessagingRkyvSerializer
 where
-    T:             ReactiveMessagingRkyvSerializer<LocalMessages>,
     LocalMessages: for<'r> rkyv::Serialize<WriteSerializer<&'r mut Vec<u8>>> {
 
     #[inline(always)]
@@ -38,92 +13,34 @@ where
             .unwrap_or_else(|err| panic!("`reactive_messaging::ReactiveMessagingRkyvSerializer<{}>::serialize()` Failed to serialize with RKYV: {err}",
                                                                 type_name::<LocalMessages>()))
     }
-
-    #[inline(always)]
-    fn processor_error_message(err: String) -> Option<LocalMessages> {
-        T::processor_error_message(err)
-    }
-
-    #[inline(always)]
-    fn verification_error_message(err: String) -> Option<LocalMessages> {
-        T::verification_error_message(err)
-    }
 }
 
-/// Partial implementation of [ReactiveMessagingBinaryDeserializer<>] able to deserialize a `rkyv` binary blob back into `RemoteMessages::Archived` 
-pub trait ReactiveMessagingRkyvFastDeserializer<RemoteMessages: rkyv::Archive> {}
-impl<T, RemoteMessages> ReactiveMessagingBinaryDeserializer<RemoteMessages> for T
+/// Deserializer for `RemoteMessages` in binary blobs using the `rkyv` crate -- bringing back objects of type `RemoteMessages::Archived`
+pub struct ReactiveMessagingRkyvFastDeserializer {}
+impl<RemoteMessages> ReactiveMessagingDeserializer<RemoteMessages> for ReactiveMessagingRkyvFastDeserializer
 where
-    T:              ReactiveMessagingRkyvFastDeserializer<RemoteMessages>,
     RemoteMessages: rkyv::Archive,
-    RemoteMessages::Archived: Debug /* NOTE: to satisfy this condition, use '#[archive_attr(derive(Debug))]' in your type */ {
+    RemoteMessages::Archived: Debug + PartialEq + Send + Sync + 'static /* NOTE: to satisfy this condition, use '#[archive_attr(derive(Debug, PartialEq))]' in your type */ {
     
     type DeserializedRemoteMessages = RemoteMessages::Archived;
 
-    /// This implementation is "fast" because it never validates the input.
-    /// The downside is that the program may crash if the input is not valid.
-    #[inline(always)]
-    fn is_valid(_remote_message: &[u8]) -> bool {
-        true
+    fn validate(_remote_message: &[u8]) -> Result<(), Error> {
+        // the RKYV fast deserializer doesn't validate the input
+        Ok(())
     }
 
     /// IMPORTANT: this implementation may crash if `remote_messages` contains invalid data.
     /// Use [ReactiveMessagingRkyvSafeDeserializer<>] instead if the remote party is not trusty.
     #[inline(always)]
-    fn deserialize(remote_message: &[u8]) -> &Self::DeserializedRemoteMessages {
-        rkyv_deserializer::<RemoteMessages>(remote_message)
+    fn deserialize(_remote_message: &[u8]) -> Result<Self::DeserializedRemoteMessages, crate::prelude::Error> {
+        unreachable!("`reactive-messaging::variable_binary_serde::ReactiveMessagingRkyvFastDeserializer<{}>::deserialize()`: BUG! `deserialize()` should never be called for `rkyv` deserializer", type_name::<RemoteMessages>())
+    }
+
+    fn deserialize_as_ref(remote_message: &[u8]) -> Result<&Self::DeserializedRemoteMessages, Error> {
+        Ok(rkyv_deserializer::<RemoteMessages>(remote_message))
     }
 }
 
-/// NOTE: Users of this crate are likely not to want to use this trait directly. See, instead: [ReactiveMessagingRkyvSerializer<>].
-/// 
-/// Trait that should be implemented by enums that model the "local messages" to be sent to the remote peer --
-/// "local messages" may either be messages generated by the server or by the client, depending on if you're building a server or client.\
-/// This trait, therefore, specifies how to:
-///   * `serialize()` enum variants into a binary blob (possibly through RKYV) to be sent to the remote peer
-///   * if input validation is implemented, inform the peer if any wrong input was sent -- the network processor will handle that special case.
-pub trait ReactiveMessagingBinarySerializer<LocalMessages> {
-
-    /// Local messages serializer: transforms a strong typed `local_message` into a sequence of bytes, putting it in `buffer`.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn serialize(local_message: &LocalMessages, buffer: &mut Vec<u8>);
-
-    /// Called whenever the local processor found an error -- such as "we are too busy to process your request at the moment".
-    /// If any, the returned message (enum variant) should be as descriptive as possible,
-    /// as it will be sent in response to the remote party.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn processor_error_message(err: String) -> Option<LocalMessages>;
-
-    /// Called when the local processor detects that the received binary blob is invalid and could cause the program to crash.
-    /// If any, the returned message (enum variant) should be as descriptive as possible,
-    /// as it will be sent in response to the remote party.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn verification_error_message(err: String) -> Option<LocalMessages>;
-}
-
-/// NOTE: Users of this crate are likely not to want to use this trait directly. See, instead:
-///  - [ReactiveMessagingRkyvFastDeserializer<>]
-///  - [ReactiveMessagingRkyvSafeDeserializer<>].
-///
-/// Trait that should be implemented by enums that model the "remote messages" to be consumed by a "Responsive Processor" --
-/// "remote messages" may either be messages produced by the remote server or by the remote client (when we are implementing the opposite peer).\
-/// This trait, therefore, specifies how to `deserialize()` enum variants received by the remote peer (possibly through RKYV).
-pub trait ReactiveMessagingBinaryDeserializer<RemoteMessages> {
-
-    /// This is a version of `RemoteMessages` after it is deserialized.
-    /// Needed by some safe zero-copy deserializers such as `rkyv`
-    /// NOTE: to satisfy this condition, use '#[archive_attr(derive(Debug))]' in your type
-    type DeserializedRemoteMessages: Debug;
-
-    /// Verifies if applying the [Self::deserialize()] on `remote_message` will produce valid results.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn is_valid(remote_message: &[u8]) -> bool;
-
-    /// Remote messages deserializer: transforms the binary-serialized `remote_message` into a reference valid as long as the given buffer.\
-    /// IMPLEMENTORS: #[inline(always)]
-    fn deserialize(remote_message: &[u8]) -> &Self::DeserializedRemoteMessages;
-
-}
 
 // RKYV SerDe helpers
 /////////////////////
@@ -133,6 +50,8 @@ use rkyv::{
     ser::Serializer as RkyvSerializer,
 };
 use rkyv::ser::serializers::WriteSerializer;
+use crate::prelude::Error;
+use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 
 /// RKYV serializer
 #[inline(always)]

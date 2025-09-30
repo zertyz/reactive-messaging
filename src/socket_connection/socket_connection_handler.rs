@@ -108,8 +108,8 @@ impl<const CONFIG:        u64,
                                                                        warn!("{executor_name} (in execution for {execution_duration:?}) left with {unsent_messages} unsent messages to {peer_ref3:?}, even after flushing with a timeout of {flush_timeout_millis}ms after, probably, its `Stream` being dropped. Consider increasing `CONST_CONFIG.flush_timeout_millis` or revisiting the processor logic.");
                                                                    }
                                                                });
-                let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, SocketDialogType::RemoteMessages, <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, SocketDialogType::ProcessorUni>
-                    (processor_sender);
+                let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, SocketDialogType::DeserializedRemoteMessages, <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, SocketDialogType::ProcessorUni>
+                                                                                                        (processor_sender);
                 // spawn a task to handle communications with that client
                 let cloned_self = Arc::clone(&arc_self);
                 let listening_interface_and_port = listening_interface_and_port.clone();
@@ -187,8 +187,8 @@ impl<const CONFIG:        u64,
                                                             warn!("{executor_name} (in execution for {execution_duration:?}) left with {unsent_messages} unsent messages to {peer_ref3:?}, even after flushing with a timeout of {flush_timeout_millis}ms after, probably, its `Stream` being dropped. Consider increasing `CONST_CONFIG.flush_timeout_millis` or revisiting the processor logic.");
                                                         }
                                                     });
-        let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, SocketDialogType::RemoteMessages, <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, SocketDialogType::ProcessorUni>
-                                                                                               (processor_sender);
+        let processor_sender = upgrade_processor_uni_retrying_logic::<CONFIG, SocketDialogType::DeserializedRemoteMessages, <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, SocketDialogType::ProcessorUni>
+                                                                                                (processor_sender);
 
         // spawn the shutdown listener
         let addr = addr.to_string();
@@ -219,7 +219,7 @@ impl<const CONFIG:        u64,
     async fn dialog_loop(self: Arc<Self>,
                          mut socket_connection: SocketConnection<SocketDialogType::State>,
                          peer:                  Arc<Peer<CONFIG, SocketDialogType::LocalMessages, SocketDialogType::SenderChannel, SocketDialogType::State>>,
-                         processor_sender:      ReactiveMessagingUniSender<CONFIG, SocketDialogType::RemoteMessages, <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, SocketDialogType::ProcessorUni>)
+                         processor_sender:      ReactiveMessagingUniSender<CONFIG, SocketDialogType::DeserializedRemoteMessages, <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, SocketDialogType::ProcessorUni>)
 
                         -> Result<SocketConnection<SocketDialogType::State>, Box<dyn Error + Sync + Send>> {
 
@@ -432,7 +432,7 @@ impl<const CONFIG:        u64,
 #[cfg(any(test,doc))]
 pub mod tests {
     use super::*;
-    use crate::unit_test_utils::next_server_port;
+    use crate::unit_test_utils::{next_server_port, StringDeserializer, StringSerializer};
     use crate::socket_connection::{
         socket_dialog::textual_dialog::TextualDialog,
         connection_provider::ServerConnectionHandler,
@@ -451,6 +451,7 @@ pub mod tests {
     use futures::stream::{self, StreamExt};
     use tokio::net::TcpStream;
     use tokio::sync::Mutex;
+    use crate::serde::{ReactiveMessagingRonDeserializer, ReactiveMessagingRonSerializer};
 
     #[cfg(debug_assertions)]
     const DEBUG: bool = true;
@@ -513,7 +514,7 @@ pub mod tests {
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
         let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
-        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, DefaultTestUni, SenderChannel, ()>>::new(TextualDialog::default());
+        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, StringSerializer, StringDeserializer, DefaultTestUni, SenderChannel, ()>>::new(TextualDialog::default());
         socket_communications_handler.server_loop(
             "127.0.0.1", 8579, new_connections_source, returned_connections_sink,
             |connection_event| async move {

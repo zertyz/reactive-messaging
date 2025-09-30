@@ -58,7 +58,7 @@
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
 use super::logic::ping_pong_models::*;
-use reactive_messaging::prelude::{ReactiveMessagingMemoryMappable, ReactiveMessagingRkyvFastDeserializer, ReactiveMessagingRkyvSerializer, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer};
+use reactive_messaging::prelude::{ReactiveMessagingMemoryMappable, ReactiveMessagingDeserializer, ReactiveMessagingSerializer, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, ReactiveMessagingConfig};
 use serde::{Serialize, Deserialize};
 
 
@@ -267,21 +267,18 @@ impl AsRef<PreGameClientMessages> for PreGameClientMessages {
     }
 }
 
-impl ReactiveMessagingRonSerializer<PreGameClientMessages> for PreGameClientMessages {
+impl ReactiveMessagingConfig<PreGameClientMessages> for PreGameClientMessages {
     #[inline(always)]
     fn processor_error_message(_err: String) -> Option<PreGameClientMessages> {
         Some(PreGameClientMessages::Error(PreGameClientError::InternalProcessorError))
     }
 }
-impl ReactiveMessagingRonSerializer<GameClientMessages> for GameClientMessages {
+impl ReactiveMessagingConfig<GameClientMessages> for GameClientMessages {
     #[inline(always)]
     fn processor_error_message(_err: String) -> Option<GameClientMessages> {
         Some(GameClientMessages::Error(GameClientError::InternalProcessorError))
     }
 }
-
-impl ReactiveMessagingRonDeserializer<PreGameClientMessages> for PreGameClientMessages {}
-impl ReactiveMessagingRonDeserializer<GameClientMessages> for GameClientMessages {}
 
 impl AsRef<PreGameServerMessages> for PreGameServerMessages {
     #[inline(always)]
@@ -296,57 +293,21 @@ impl AsRef<GameServerMessages> for GameServerMessages {
     }
 }
 
-impl ReactiveMessagingRonSerializer<PreGameServerMessages> for PreGameServerMessages {
+impl ReactiveMessagingConfig<PreGameServerMessages> for PreGameServerMessages {
     #[inline(always)]
     fn processor_error_message(_err: String) -> Option<PreGameServerMessages> {
         Some(PreGameServerMessages::Error(PreGameServerError::TextualProtocolProcessorParsingError))
     }
 }
-impl ReactiveMessagingRonSerializer<GameServerMessages> for GameServerMessages {
+impl ReactiveMessagingConfig<GameServerMessages> for GameServerMessages {
     #[inline(always)]
     fn processor_error_message(_err: String) -> Option<GameServerMessages> {
         Some(GameServerMessages::Error(GameServerError::TextualProtocolProcessorParsingError))
     }
 }
 
-impl ReactiveMessagingRonDeserializer<PreGameServerMessages> for PreGameServerMessages {}
-impl ReactiveMessagingRonDeserializer<GameServerMessages> for GameServerMessages {}
-
 
 impl ReactiveMessagingMemoryMappable for PreGameClientMessages {}
 impl ReactiveMessagingMemoryMappable for GameClientMessages {}
 impl ReactiveMessagingMemoryMappable for PreGameServerMessages {}
 impl ReactiveMessagingMemoryMappable for GameServerMessages {}
-
-
-impl ReactiveMessagingRkyvSerializer<PreGameClientMessages> for PreGameClientMessages {
-    #[inline(always)]
-    fn processor_error_message(_err: String) -> Option<PreGameClientMessages> {
-        Some(PreGameClientMessages::Error(PreGameClientError::InternalProcessorError))
-    }
-}
-impl ReactiveMessagingRkyvSerializer<GameClientMessages> for GameClientMessages {
-    #[inline(always)]
-    fn processor_error_message(_err: String) -> Option<GameClientMessages> {
-        Some(GameClientMessages::Error(GameClientError::InternalProcessorError))
-    }
-}
-
-impl ReactiveMessagingRkyvFastDeserializer<PreGameClientMessages> for PreGameClientMessages {}
-impl ReactiveMessagingRkyvFastDeserializer<GameClientMessages> for GameClientMessages {}
-
-impl ReactiveMessagingRkyvSerializer<PreGameServerMessages> for PreGameServerMessages {
-    #[inline(always)]
-    fn processor_error_message(_err: String) -> Option<PreGameServerMessages> {
-        Some(PreGameServerMessages::Error(PreGameServerError::InternalProcessorError))
-    }
-}
-impl ReactiveMessagingRkyvSerializer<GameServerMessages> for GameServerMessages {
-    #[inline(always)]
-    fn processor_error_message(_err: String) -> Option<GameServerMessages> {
-        Some(GameServerMessages::Error(GameServerError::InternalProcessorError))
-    }
-}
-
-impl ReactiveMessagingRkyvFastDeserializer<PreGameServerMessages> for PreGameServerMessages {}
-impl ReactiveMessagingRkyvFastDeserializer<GameServerMessages> for GameServerMessages {}

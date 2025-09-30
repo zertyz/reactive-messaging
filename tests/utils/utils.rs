@@ -39,7 +39,7 @@ pub fn now_as_micros() -> u64 {
 ///          last_peer_left_notification_micros,
 ///          last_local_service_termination_notification_micros) = last_micros_probed_protocol_events_handler();
 pub fn last_micros_probed_protocol_events_handler<const CONFIG:  u64,
-                                                  LocalMessages: ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                                                  LocalMessages: ReactiveMessagingConfig<LocalMessages>                                      + Send + Sync + PartialEq + Debug + 'static,
                                                   SenderChannel: FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync,
                                                   StateType:                                                                                   Send + Sync + Clone     + Debug + 'static>
                                                  ()
@@ -85,7 +85,7 @@ pub fn last_micros_probed_protocol_events_handler<const CONFIG:  u64,
 /// ```nocompile
 ///     let (probed_protocol_processor_builder,
 ///          last_remote_message_micros) = last_micros_probed_protocol_processor_builder();
-pub fn last_micros_probed_protocol_processor_builder<StreamItemType,
+pub fn last_micros_probed_protocol_processor_builder<StreamItemType: Debug,
                                                      InputStreamType: Stream<Item=StreamItemType> + Send + 'static>
                                                     ()
                                                     -> (/*probed_protocol_processor_builder*/ impl Fn(/*remote_messages_stream: */InputStreamType) -> Pin<Box<dyn Stream<Item=StreamItemType> + Send>> + Send + Sync,

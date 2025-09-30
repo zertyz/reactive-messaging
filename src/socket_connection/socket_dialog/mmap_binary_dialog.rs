@@ -9,14 +9,14 @@ use reactive_mutiny::uni::GenericUni;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::config::ConstConfig;
 use crate::prelude::{Peer, SocketConnection};
-use crate::serde::ReactiveMessagingMemoryMappable;
+use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingMemoryMappable};
 use crate::socket_connection::common::ReactiveMessagingUniSender;
 use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;
 
 
 pub struct MmapBinaryDialog<const CONFIG:       u64,
                             RemoteMessagesType: ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
-                            LocalMessagesType:  ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
+                            LocalMessagesType:  ReactiveMessagingMemoryMappable + ReactiveMessagingConfig<LocalMessagesType>        + Send + Sync + PartialEq + Debug + 'static,
                             ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
                             SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
                             StateType:                                                                                                Send + Sync + Clone     + Debug + 'static = ()
@@ -24,9 +24,9 @@ pub struct MmapBinaryDialog<const CONFIG:       u64,
     _phantom_data: PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType)>,
 }
 
-impl<const CONFIG:       u64,
+impl<const CONFIG:      u64,
     RemoteMessagesType: ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
-    LocalMessagesType:  ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
+    LocalMessagesType:  ReactiveMessagingMemoryMappable + ReactiveMessagingConfig<LocalMessagesType>        + Send + Sync + PartialEq + Debug + 'static,
     ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
     SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
     StateType:                                                                                                Send + Sync + Clone     + Debug + 'static
@@ -37,7 +37,7 @@ MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType
 
 impl<const CONFIG:       u64,
      RemoteMessagesType: ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:  ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:  ReactiveMessagingMemoryMappable + ReactiveMessagingConfig<LocalMessagesType>        + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
      SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
      StateType:                                                                                                Send + Sync + Clone     + Debug + 'static
@@ -53,7 +53,7 @@ for MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUni
 
 impl<const CONFIG:       u64,
      RemoteMessagesType: ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:  ReactiveMessagingMemoryMappable                                                     + Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:  ReactiveMessagingMemoryMappable + ReactiveMessagingConfig<LocalMessagesType>        + Send + Sync + PartialEq + Debug + 'static,
      ProcessorUniType:   GenericUni<ItemType=RemoteMessagesType>                                             + Send + Sync                     + 'static,
      SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
      StateType:                                                                                                Send + Sync + Clone     + Debug + 'static
@@ -61,6 +61,7 @@ impl<const CONFIG:       u64,
 SocketDialog<CONFIG>
 for MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType> {
     type RemoteMessages = RemoteMessagesType;
+    type DeserializedRemoteMessages = RemoteMessagesType;
     type LocalMessages = LocalMessagesType;
     type ProcessorUni  = ProcessorUniType;
     type SenderChannel = SenderChannelType;
@@ -218,6 +219,7 @@ mod tests {
             count: u32,
         }
         impl ReactiveMessagingMemoryMappable for Mmappable {}
+        impl ReactiveMessagingConfig<Mmappable> for Mmappable {}
     
         const TIMEOUT: Duration = Duration::from_millis(1000);
         const LISTENING_INTERFACE: &str = "127.0.0.1";

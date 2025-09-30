@@ -2,7 +2,7 @@
 
 
 use crate::prelude::{
-    ReactiveMessagingTextualSerializer,
+    ReactiveMessagingSerializer,
     ProtocolEvent,
 };
 use std::{
@@ -14,12 +14,13 @@ use std::{
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use tokio::sync::Mutex;
 use log::{warn, error};
+use crate::serde::ReactiveMessagingConfig;
 
 /// Upgrades the user provided `connection_events_callback()` into a callback able to keep track of the shutdown event
 /// -- so the "shutdown is complete" signal may be sent
 #[inline(always)]
 pub(crate) fn upgrade_to_termination_tracking<const CONFIG:                   u64,
-                                           LocalMessages:                  ReactiveMessagingTextualSerializer<LocalMessages>                                  + Send + Sync + PartialEq + Debug + 'static,
+                                           LocalMessages:                  ReactiveMessagingConfig<LocalMessages>                                      + Send + Sync + PartialEq + Debug + 'static,
                                            SenderChannel:                  FullDuplexUniChannel<ItemType=LocalMessages, DerivedItemType=LocalMessages> + Send + Sync                     + 'static,
                                            ConnectionEventsCallbackFuture: Future<Output=()>                                                           + Send,
                                            StateType:                                                                                                    Send + Sync + Clone     + Debug + 'static>

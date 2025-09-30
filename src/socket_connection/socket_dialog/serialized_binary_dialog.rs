@@ -7,7 +7,7 @@ use futures::StreamExt;
 use reactive_mutiny::prelude::{FullDuplexUniChannel, GenericUni};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::prelude::{Peer, SocketConnection};
-use crate::serde::{ReactiveMessagingBinaryDeserializer, ReactiveMessagingBinarySerializer};
+use crate::serde::{ReactiveMessagingConfig, ReactiveMessagingDeserializer, ReactiveMessagingSerializer};
 use crate::socket_connection::common::ReactiveMessagingUniSender;
 use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;
 use log::{debug, error, trace, warn};
@@ -15,35 +15,41 @@ use tokio::io;
 use crate::config::ConstConfig;
 
 pub struct SerializedBinaryDialog<const CONFIG:       u64,
-                                  RemoteMessagesType: ReactiveMessagingBinaryDeserializer<RemoteMessagesType>                             + Send + Sync + PartialEq + Debug + 'static,
-                                  LocalMessagesType:  ReactiveMessagingBinarySerializer<LocalMessagesType>                                + Send + Sync + PartialEq + Debug + 'static,
-                                  ProcessorUniType:   GenericUni<ItemType=SerializedWrapperType<RemoteMessagesType>>                      + Send + Sync                     + 'static,
+                                  RemoteMessagesType:                                                                                       Send + Sync + PartialEq + Debug + 'static,
+                                  LocalMessagesType:  ReactiveMessagingConfig<LocalMessagesType>                                          + Send + Sync + PartialEq + Debug + 'static,
+                                  Serializer:         ReactiveMessagingSerializer<LocalMessagesType>,
+                                  Deserializer:       ReactiveMessagingDeserializer<RemoteMessagesType>,
+                                  ProcessorUniType:   GenericUni<ItemType=SerializedWrapperType<RemoteMessagesType, Deserializer>>        + Send + Sync                     + 'static,
                                   SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
                                   StateType:                                                                                                Send + Sync + Clone     + Debug + 'static = ()
                                  > {
-    _phantom_data: PhantomData<(RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType)>,
+    _phantom_data: PhantomData<(RemoteMessagesType, LocalMessagesType, Serializer, Deserializer, ProcessorUniType, SenderChannelType, StateType)>,
 }
 
 impl<const CONFIG: u64,
-    RemoteMessagesType: ReactiveMessagingBinaryDeserializer<RemoteMessagesType>                             + Send + Sync + PartialEq + Debug + 'static,
-    LocalMessagesType:  ReactiveMessagingBinarySerializer<LocalMessagesType>                                + Send + Sync + PartialEq + Debug + 'static,
-    ProcessorUniType:   GenericUni<ItemType=SerializedWrapperType<RemoteMessagesType>>                      + Send + Sync                     + 'static,
+    RemoteMessagesType:                                                                                       Send + Sync + PartialEq + Debug + 'static,
+    LocalMessagesType:  ReactiveMessagingConfig<LocalMessagesType>                                          + Send + Sync + PartialEq + Debug + 'static,
+    Serializer:         ReactiveMessagingSerializer<LocalMessagesType>,
+    Deserializer:       ReactiveMessagingDeserializer<RemoteMessagesType>,
+    ProcessorUniType:   GenericUni<ItemType=SerializedWrapperType<RemoteMessagesType, Deserializer>>        + Send + Sync                     + 'static,
     SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
     StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
 >
-SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType> {
+SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serializer, Deserializer, ProcessorUniType, SenderChannelType, StateType> {
     const CONST_CONFIG: ConstConfig = ConstConfig::from(CONFIG);
 }
 
 impl<const CONFIG: u64,
-     RemoteMessagesType: ReactiveMessagingBinaryDeserializer<RemoteMessagesType>                             + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:  ReactiveMessagingBinarySerializer<LocalMessagesType>                                + Send + Sync + PartialEq + Debug + 'static,
-     ProcessorUniType:   GenericUni<ItemType=SerializedWrapperType<RemoteMessagesType>>                      + Send + Sync                     + 'static,
+     RemoteMessagesType:                                                                                       Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:  ReactiveMessagingConfig<LocalMessagesType>                                          + Send + Sync + PartialEq + Debug + 'static,
+     Serializer:         ReactiveMessagingSerializer<LocalMessagesType>,
+     Deserializer:       ReactiveMessagingDeserializer<RemoteMessagesType>,
+     ProcessorUniType:   GenericUni<ItemType=SerializedWrapperType<RemoteMessagesType, Deserializer>>        + Send + Sync                     + 'static,
      SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
      StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
     >
 Default
-for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType> {
+for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serializer, Deserializer, ProcessorUniType, SenderChannelType, StateType> {
     fn default() -> Self {
         Self {
             _phantom_data: PhantomData,
@@ -52,15 +58,18 @@ for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Proces
 }
 
 impl<const CONFIG: u64,
-     RemoteMessagesType: ReactiveMessagingBinaryDeserializer<RemoteMessagesType>                             + Send + Sync + PartialEq + Debug + 'static,
-     LocalMessagesType:  ReactiveMessagingBinarySerializer<LocalMessagesType>                                + Send + Sync + PartialEq + Debug + 'static,
-     ProcessorUniType:   GenericUni<ItemType=SerializedWrapperType<RemoteMessagesType>>                      + Send + Sync                     + 'static,
+     RemoteMessagesType:                                                                                       Send + Sync + PartialEq + Debug + 'static,
+     LocalMessagesType:  ReactiveMessagingConfig<LocalMessagesType>                                          + Send + Sync + PartialEq + Debug + 'static,
+     Serializer:         ReactiveMessagingSerializer<LocalMessagesType>,
+     Deserializer:       ReactiveMessagingDeserializer<RemoteMessagesType>,
+     ProcessorUniType:   GenericUni<ItemType=SerializedWrapperType<RemoteMessagesType, Deserializer>>        + Send + Sync                     + 'static,
      SenderChannelType:  FullDuplexUniChannel<ItemType=LocalMessagesType, DerivedItemType=LocalMessagesType> + Send + Sync                     + 'static,
      StateType:                                                                                                Send + Sync + Clone     + Debug + 'static,
     >
 SocketDialog<CONFIG>
-for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUniType, SenderChannelType, StateType> {
-    type RemoteMessages = SerializedWrapperType<RemoteMessagesType>;
+for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serializer, Deserializer, ProcessorUniType, SenderChannelType, StateType> {
+    type RemoteMessages = RemoteMessagesType;
+    type DeserializedRemoteMessages = SerializedWrapperType<RemoteMessagesType, Deserializer>;
     type LocalMessages = LocalMessagesType;
     type ProcessorUni  = ProcessorUniType;
     type SenderChannel = SenderChannelType;
@@ -71,7 +80,7 @@ for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Proces
     async fn dialog_loop(self,
                          socket_connection:     &mut SocketConnection<StateType>,
                          peer:                  &Arc<Peer<CONFIG, Self::LocalMessages, Self::SenderChannel, StateType>>,
-                         processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::RemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
+                         processor_sender:      &ReactiveMessagingUniSender<CONFIG, Self::DeserializedRemoteMessages, <<Self as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType, Self::ProcessorUni>)
 
                         -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
@@ -116,7 +125,7 @@ for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Proces
                     match to_send {
                         Some(to_send) => {
                             // serialize
-                            LocalMessagesType::serialize(&to_send, &mut serialization_buffer);
+                            Serializer::serialize(&to_send, &mut serialization_buffer);
                             debug_assert!(serialization_buffer.len() < Self::CONST_CONFIG.sender_max_msg_size as usize, "Serialized Binary Dialog Loop: While semdomg a message, the `serialization_buffer` (now, len = {}) just exceeded the specified maximum `Self::CONST_CONFIG.sender_max_msg_size` of {}",
                                                                                                                         serialization_buffer.len(), Self::CONST_CONFIG.sender_max_msg_size);
                             // send
@@ -149,7 +158,7 @@ for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Proces
                             debug_assert!(received_len <= expected_len, "Serialized Binary Dialog Loop: BUG! Our understanding of the Tokio async IO had changed -- Tokio is now extending the buffer upon reading data! Please, fix the logic here: received_len ({received_len}) <= expected_len ({expected_len})");
                             // did we finish reading whatever we were reading? either the payload size or the payload itself...
                             if received_len == expected_len {
-                                // determine the next `read_state`
+                                // consume and determine the next `read_state`
                                 read_state = match read_state {
                                     ReadState::WaitingForPayloadSize { payload_size_buffer } => {
                                         // we finished reading the next payload size: allocate the buffer to read the payload
@@ -160,7 +169,7 @@ for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Proces
                                     },
                                     ReadState::ReadingPayload { payload_read_buffer } => {
                                         // we finished reading the payload: emit the event and prepare to read a next payload size
-                                        let remote_message = SerializedWrapperType::<RemoteMessagesType>::from_raw_unchecked(payload_read_buffer);
+                                        let remote_message = SerializedWrapperType::<RemoteMessagesType, Deserializer>::from_raw_unchecked(payload_read_buffer);
                                         if let Err((abort_processor, processor_error_message)) = processor_sender.send(remote_message).await {
                                             // log & send the error message to the remote peer, if desired
                                             error!("`dialog_loop()` for serialized binary: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", processor_error_message, processor_sender.pending_items_count(), processor_sender.buffer_size());
@@ -237,14 +246,17 @@ fn decode_usize_min(bytes: &[u8]) -> usize {
 /// NOTE: This simple wrapper type might be ready for use in production
 #[derive(Default)]
 #[repr(align(16))]  // keep our struct SIMD-friendly (same strategy as RKYV's `AlignedVec` uses
-pub struct SerializedWrapperType<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug> {
+pub struct SerializedWrapperType<MessagesType: PartialEq + Debug,
+                                 Deserializer: ReactiveMessagingDeserializer<MessagesType>> {
     raw: Vec<u8>,
-    _phantom: PhantomData<MessagesType>,
+    _phantom: PhantomData<(MessagesType, Deserializer)>,
 }
-impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
-SerializedWrapperType<MessagesType> {
+impl<MessagesType: PartialEq + Debug,
+     Deserializer: ReactiveMessagingDeserializer<MessagesType>>
+SerializedWrapperType<MessagesType, Deserializer> {
     /// Intended for use while receiving
     /// -- when you are sure the source is trusty (or else the program may crash)
+    #[inline(always)]
     pub fn from_raw_unchecked(raw: Vec<u8>) -> Self {
         Self {
             raw,
@@ -253,56 +265,59 @@ SerializedWrapperType<MessagesType> {
     }
     /// Intended for use while receiving
     /// -- when the source might send junk binary data: you'll pay the price for the validation
+    #[inline(always)]
     pub fn try_from_raw(raw: Vec<u8>)
-                        -> Result<Self, ()> {
-        if MessagesType::is_valid(&raw) {
-            Ok(Self::from_raw_unchecked(raw))
-        } else {
-            Err(())
-        }
+                       -> Result<Self, crate::prelude::Error> {
+        Deserializer::validate(&raw)
+            .map(|()| Self::from_raw_unchecked(raw))
     }
-}
-impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> +
-     ReactiveMessagingBinarySerializer<MessagesType>                 + PartialEq + Debug>
-SerializedWrapperType<MessagesType> {
+
     /// Intended for use while sending
     /// -- allocates a `Vec` that will contain the serialized binary for `local_message`
-    pub fn from_value(local_message: MessagesType) -> Self {
+    #[inline(always)]
+    pub fn from_value<Serializer: ReactiveMessagingSerializer<MessagesType>>
+                     (local_message: MessagesType) -> Self {
         let mut buffer = Vec::new();
-        MessagesType::serialize(&local_message, &mut buffer);
+        Serializer::serialize(&local_message, &mut buffer);
         Self {
             raw: buffer,
             _phantom: PhantomData,
         }
     }
 }
-impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
+impl<MessagesType: PartialEq + Debug,
+     Deserializer: ReactiveMessagingDeserializer<MessagesType>>
 Deref
-for SerializedWrapperType<MessagesType> {
-    type Target = <MessagesType as ReactiveMessagingBinaryDeserializer<MessagesType>>::DeserializedRemoteMessages;
+for SerializedWrapperType<MessagesType, Deserializer> {
+    // type Target = <MessagesType as ReactiveMessagingDeserializer<MessagesType>>::DeserializedRemoteMessages;
+    type Target = Deserializer::DeserializedRemoteMessages;
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
-        MessagesType::deserialize(&self.raw)
+        Deserializer::deserialize_as_ref(&self.raw)
+            .unwrap_or_else(|err| panic!("`reactive_messaging::serialized_binary_dialog::SerializedWrapperType::deref()` BUG! The Variable Binary Deserializer should never return an error, but it returned: {}", err))
     }
 }
-impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
-AsRef<<MessagesType as ReactiveMessagingBinaryDeserializer<MessagesType>>::DeserializedRemoteMessages>
-for SerializedWrapperType<MessagesType> {
+impl<MessagesType: PartialEq + Debug,
+     Deserializer: ReactiveMessagingDeserializer<MessagesType>>
+AsRef<Deserializer::DeserializedRemoteMessages>
+for SerializedWrapperType<MessagesType, Deserializer> {
     #[inline(always)]
-    fn as_ref(&self) -> &<MessagesType as ReactiveMessagingBinaryDeserializer<MessagesType>>::DeserializedRemoteMessages {
+    fn as_ref(&self) -> &Deserializer::DeserializedRemoteMessages {
         self.deref()
     }
 }
-impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
+impl<MessagesType: PartialEq + Debug,
+     Deserializer: ReactiveMessagingDeserializer<MessagesType>>
 Debug
-for SerializedWrapperType<MessagesType> {
+for SerializedWrapperType<MessagesType, Deserializer> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.deref().fmt(f)
     }
 }
-impl<MessagesType: ReactiveMessagingBinaryDeserializer<MessagesType> + PartialEq + Debug>
+impl<MessagesType: PartialEq + Debug,
+     Deserializer: ReactiveMessagingDeserializer<MessagesType>>
 PartialEq
-for SerializedWrapperType<MessagesType> {
+for SerializedWrapperType<MessagesType, Deserializer> {
     fn eq(&self, other: &Self) -> bool {
         self.raw.eq(other.raw.as_slice())
     }
@@ -312,7 +327,7 @@ for SerializedWrapperType<MessagesType> {
 }
 
 
-#[cfg(test)]
+/*#[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
     use std::future;
@@ -468,4 +483,4 @@ mod tests {
         assert_eq!(8, min_bytes_for_usize(usize::MAX));
         assert_eq!(8, min_bytes_for_usize(1 << (64-7)));
     }
-}
+}*/

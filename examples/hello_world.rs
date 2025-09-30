@@ -25,7 +25,8 @@ const WORLD: &str = "Earth";
 
 
 /// The messages issued by the client
-#[derive(Debug,PartialEq,Serialize,Deserialize,Default)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug, PartialEq))]
 enum ClientMessages {
     #[default]
     Hello,
@@ -33,7 +34,8 @@ enum ClientMessages {
 }
 
 /// The messages issued by the server
-#[derive(Debug,PartialEq,Serialize,Deserialize,Default)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Default, rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)]
+#[archive_attr(derive(Debug, PartialEq))]
 enum ServerMessages {
     World(String),
     #[default]
@@ -75,7 +77,7 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
             |_| future::ready(()),
             |_, _, peer, client_stream| client_stream
                 .inspect(|client_message| println!(">>> {:?}", client_message.deref()))
-                .map(|client_message| match *client_message {
+                .map(|client_message| match client_message.as_ref() {
                     ClientMessages::Hello => ServerMessages::World(WORLD.to_string()),
                     _ => ServerMessages::NoAnswer,
                 })
@@ -128,11 +130,23 @@ async fn logic(start_server: bool, start_client: bool) -> Result<(), Box<dyn Err
 
 // ClientMessages SerDe
 ///////////////////////
-impl ReactiveMessagingRonSerializer<ClientMessages> for ClientMessages {}
-impl ReactiveMessagingRonDeserializer<ClientMessages> for ClientMessages {}
+impl ReactiveMessagingConfig<ClientMessages> for ClientMessages {
+    fn processor_error_message(err: String) -> Option<ClientMessages> {
+        Some(ClientMessages::Error(err))
+    }
+    fn input_error_message(err: String) -> Option<ClientMessages> {
+        Some(ClientMessages::Error(err))
+    }
+}
 
 
 // ServerMessages SerDe
 ///////////////////////
-impl ReactiveMessagingRonSerializer<ServerMessages> for ServerMessages {}
-impl ReactiveMessagingRonDeserializer<ServerMessages> for ServerMessages {}
+impl ReactiveMessagingConfig<ServerMessages> for ServerMessages {
+    fn processor_error_message(err: String) -> Option<ServerMessages> {
+        Some(ServerMessages::Error(err))
+    }
+    fn input_error_message(err: String) -> Option<ServerMessages> {
+        Some(ServerMessages::Error(err))
+    }
+}
