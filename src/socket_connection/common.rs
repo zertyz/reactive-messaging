@@ -83,7 +83,7 @@ ReactiveMessagingUniSender<CONFIG, DeserializedRemoteMessages, ConsumedRemoteMes
                     .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
-                            Self::retry_error_mapper(false, format!("Relaying received message '{:?}' to the internal processor failed. Won't retry (ignoring the error) due to retrying config {:?}",
+                            Self::retry_error_mapper(false, format!("Relaying received message '{:?}' to the internal processor failed. Won't retry (upstreaming the error) due to retrying config {:?}",
                                                                                     message, Self::CONST_CONFIG.retrying_strategy)) )
                     .into_result()
             },
@@ -242,7 +242,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                     .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
-                            Self::retry_error_mapper(false, format!("sync-Sending '{:?}' failed. Won't retry (ignoring the error) due to retrying config {:?}",
+                            Self::retry_error_mapper(false, format!("sync-Sending '{:?}' failed. Won't retry (upstreaming the error) due to retrying config {:?}",
                                                                                     message, Self::CONST_CONFIG.retrying_strategy)) )
                     .into_result()
             },
@@ -275,6 +275,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                     .into()
             },
             RetryingStrategies::RetryYieldingForUpToMillis(millis) => {
+                // note: since we are in a synchronous method, here yielding = spinning
                 retryable
                     .map_input(|message| ( message, SystemTime::now()) )
                     .retry_with(|(message, retry_start)|
@@ -313,7 +314,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                     .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
-                            Self::retry_error_mapper(false, format!("async-Sending '{:?}' failed. Won't retry (ignoring the error) due to retrying config {:?}",
+                            Self::retry_error_mapper(false, format!("async-Sending '{:?}' failed. Won't retry (upstreaming the error) due to retrying config {:?}",
                                                                                     message, Self::CONST_CONFIG.retrying_strategy)) )
                     .into_result()
             },

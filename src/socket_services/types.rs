@@ -5,7 +5,10 @@ use crate::serde::ReactiveMessagingConfig;
 use crate::prelude::Peer;
 use crate::socket_connection::connection_provider::ConnectionChannel;
 use crate::types::{ProtocolEvent, MessagingMutinyStream, ConnectionEvent};
-use crate::socket_connection::connection::SocketConnection;
+use crate::socket_connection::{
+    socket_dialog::dialog_types::SocketDialog,
+    connection::SocketConnection,
+};
 use std::fmt::Debug;
 use std::future;
 use std::future::Future;
@@ -134,8 +137,8 @@ macro_rules! _define_processor_uni_and_sender_channel_types {
         const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
         const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
-        type ProcessorUniType = UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
-        type SenderChannel = ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>;
+        type ProcessorUniType = $crate::prelude::UniZeroCopyAtomic<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
+        type SenderChannel = $crate::prelude::ChannelUniMoveAtomic<$local_messages, _SENDER_BUFFER, 1>;
     };
     ($const_config: expr, FullSync, $remote_messages: ty, $local_messages: ty) => {
         const _CONST_CONFIG:              ConstConfig  = $const_config;
@@ -143,8 +146,8 @@ macro_rules! _define_processor_uni_and_sender_channel_types {
         const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
         const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
-        type ProcessorUniType = UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
-        type SenderChannel = ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>;
+        type ProcessorUniType = $crate::prelude::UniZeroCopyFullSync<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
+        type SenderChannel = $crate::prelude::ChannelUniMoveFullSync<$local_messages, _SENDER_BUFFER, 1>;
     };
     ($const_config: expr, Crossbeam, $remote_messages: ty, $local_messages: ty) => {
         const _CONST_CONFIG:              ConstConfig  = $const_config;
@@ -152,9 +155,8 @@ macro_rules! _define_processor_uni_and_sender_channel_types {
         const _PROCESSOR_BUFFER:          usize        = _CONST_CONFIG.receiver_channel_size as usize;
         const _PROCESSOR_UNI_INSTRUMENTS: usize        = _CONST_CONFIG.executor_instruments.into();
         const _SENDER_BUFFER:             usize        = _CONST_CONFIG.sender_channel_size   as usize;
-        type ProcessorUniType = UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
-        type SenderChannel = ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>;
+        type ProcessorUniType = $crate::prelude::UniMoveCrossbeam<$remote_messages, _PROCESSOR_BUFFER, 1, _PROCESSOR_UNI_INSTRUMENTS>;
+        type SenderChannel = $crate::prelude::ChannelUniMoveCrossbeam<$local_messages, _SENDER_BUFFER, 1>;
     };
 }
 pub use _define_processor_uni_and_sender_channel_types;
-use crate::socket_connection::socket_dialog::dialog_types::SocketDialog;

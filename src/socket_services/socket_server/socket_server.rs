@@ -93,7 +93,7 @@ macro_rules! new_composite_socket_server {
      $state_type:      ty) => {{
         const _CONST_CONFIG: ConstConfig = $const_config;
         const _CONFIG:      u64          = _CONST_CONFIG.into();
-        CompositeSocketServer::<_CONFIG, $state_type>::new($interface_ip, $port)
+        $crate::prelude::CompositeSocketServer::<_CONFIG, $state_type>::new($interface_ip, $port)
     }}
 }
 pub use new_composite_socket_server;
@@ -114,8 +114,9 @@ macro_rules! spawn_server_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
+        $crate::_define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, $crate::prelude::ReactiveMessagingRonSerializer, $crate::prelude::ReactiveMessagingRonDeserializer, ProcessorUniType, SenderChannel, _>::default();
+        use $crate::prelude::MessagingService;
         $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 
@@ -130,8 +131,9 @@ macro_rules! spawn_server_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
+        $crate::_define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::textual_dialog::TextualDialog::<_CONFIG, $remote_messages, $local_messages, $serializer, $deserializer, ProcessorUniType, SenderChannel, _>::default();
+        use $crate::prelude::MessagingService;
         $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 
@@ -145,8 +147,9 @@ macro_rules! spawn_server_processor {
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         type _DERIVED_REMOTE_MESSAGES = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages, $crate::prelude::ReactiveMessagingRkyvFastDeserializer>;
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, _DERIVED_REMOTE_MESSAGES, $local_messages);
+        $crate::_define_processor_uni_and_sender_channel_types!($const_config, $channel_type, _DERIVED_REMOTE_MESSAGES, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, $crate::prelude::ReactiveMessagingRkyvSerializer, $crate::prelude::ReactiveMessagingRkyvFastDeserializer, ProcessorUniType, SenderChannel, _>::default();
+        use $crate::prelude::MessagingService;
         $socket_server.spawn_processor::<_DERIVED_REMOTE_MESSAGES, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 
@@ -162,8 +165,9 @@ macro_rules! spawn_server_processor {
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
         type _DERIVED_REMOTE_MESSAGES = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedWrapperType::<$remote_messages, $crate::prelude::ReactiveMessagingRkyvFastDeserializer>;
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, _DERIVED_REMOTE_MESSAGES, $local_messages);
+        $crate::_define_processor_uni_and_sender_channel_types!($const_config, $channel_type, _DERIVED_REMOTE_MESSAGES, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::serialized_binary_dialog::SerializedBinaryDialog::<_CONFIG, $remote_messages, $local_messages, $serializer, $deserializer, ProcessorUniType, SenderChannel, _>::default();
+        use $crate::prelude::MessagingService;
         $socket_server.spawn_processor::<_DERIVED_REMOTE_MESSAGES, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 
@@ -176,8 +180,9 @@ macro_rules! spawn_server_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        _define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
+        $crate::_define_processor_uni_and_sender_channel_types!($const_config, $channel_type, $remote_messages, $local_messages);
         let socket_dialog = $crate::socket_connection::socket_dialog::mmap_binary_dialog::MmapBinaryDialog::<_CONFIG, $remote_messages, $local_messages, ProcessorUniType, SenderChannel, _>::default();
+        use $crate::prelude::MessagingService;
         $socket_server.spawn_processor::<$remote_messages, $local_messages, ProcessorUniType, SenderChannel, _, _, _, _, _, _>(socket_dialog, $connection_events_handler_fn, $dialog_processor_builder_fn).await
     }};
 }
@@ -200,7 +205,8 @@ macro_rules! start_server_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        match spawn_server_processor!($const_config, $message_form, $channel_type, $socket_server, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+        use $crate::prelude::MessagingService;
+        match $crate::spawn_server_processor!($const_config, $message_form, $channel_type, $socket_server, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
             Ok(connection_channel) => $socket_server.start_single_protocol(connection_channel).await,
             Err(err) => Err(err),
         }
@@ -217,7 +223,8 @@ macro_rules! start_server_processor {
      $local_messages:               ty,
      $connection_events_handler_fn: expr,
      $dialog_processor_builder_fn:  expr) => {{
-        match spawn_server_processor!($const_config, $message_form, $serializer, $deserializer, $channel_type, $socket_server, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
+        use $crate::prelude::MessagingService;
+        match $crate::spawn_server_processor!($const_config, $message_form, $serializer, $deserializer, $channel_type, $socket_server, $remote_messages, $local_messages, $connection_events_handler_fn, $dialog_processor_builder_fn) {
             Ok(connection_channel) => $socket_server.start_single_protocol(connection_channel).await,
             Err(err) => Err(err),
         }

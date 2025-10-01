@@ -23,7 +23,7 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 3) Opting between binary or textual should be done easily via `ConstConfig` -- provided the protocol / model types implement the appropriate trait.
   - A field should be introduced with the enum for `MessageForm`: Textual(READ_BUFFER_SIZE, WRITE_BUFFER_SIZE), VarBinary, FixedBinary(size)
   - The previous READ & WRITE buffer sizes in `ConstConfig` can be dropped
-  - The `VarBinary` format will have a `u32` -- with the payload size -- preceeding the payload
+  - The `VarBinary` format will have a `u32` -- with the payload size -- preceding the payload
   - For Docs: Fixed binary works better for enums with primitive types (or sub-types containing primitive types only) and do not require RKYV;
               On the other hand, RKYV allows Strings, vectors, hash maps, hashsets, etc.
   - `FixedBinary` allows zero-copy for both serialization & deserialization, if the machines involved share the same Endian -- and RKYV is not needed in this case

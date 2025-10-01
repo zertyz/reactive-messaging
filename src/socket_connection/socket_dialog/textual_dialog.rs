@@ -274,12 +274,12 @@ mod tests {
     ////////////////////////////////////
 
     /// Performs the measured test [socket_connection_handler::tests::latency_measurements()] with the Atomic Uni channel.\
-    /// The values here are for a `12th Gen Intel(R) Core(TM) i7-1265U (12) @ 4,80 GHz` machine
+    /// The values here are for a `AMD Ryzen 7 5825U (16) @ 4.547GHz` machine
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn latency_measurements_atomic_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 77780;
-        const RELEASE_EXPECTED_COUNT: u32 = 386504;
+        const DEBUG_EXPECTED_COUNT: u32 = 41002;
+        const RELEASE_EXPECTED_COUNT: u32 = 360403;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::latency_measurements::
@@ -289,12 +289,12 @@ mod tests {
     }
 
     /// Performs the measured test [socket_connection_handler::tests::latency_measurements()] with the FullSync Uni channel.\
-    /// The values here are for a `12th Gen Intel(R) Core(TM) i7-1265U (12) @ 4,80 GHz` machine
+    /// The values here are for a `AMD Ryzen 7 5825U (16) @ 4.547GHz` machine
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
-    async fn latency_measurements_fullsync_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 77406;
-        const RELEASE_EXPECTED_COUNT: u32 = 394358;
+    async fn latency_measurements_full_sync_channel() {
+        const DEBUG_EXPECTED_COUNT: u32 = 40797;
+        const RELEASE_EXPECTED_COUNT: u32 = 358916;
         const TOLERANCE: f64 = 0.10;
 
         socket_connection_handler::tests::latency_measurements::
@@ -308,11 +308,11 @@ mod tests {
     ///////////////////////////////////////////
 
     /// Performs the measured test [socket_connection_handler::tests::message_flooding_throughput()] with the Atomic Uni channel.\
-    /// The values here are for a `12th Gen Intel(R) Core(TM) i7-1265U (12) @ 4,80 GHz` machine
+    /// The values here are for a `AMD Ryzen 7 5825U (16) @ 4.547GHz` machine
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
     async fn message_flooding_throughput_atomic_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 1081344;
+        const DEBUG_EXPECTED_COUNT: u32 = 524288;
         const RELEASE_EXPECTED_COUNT: u32 = 1146880;
         const TOLERANCE: f64 = 0.10;
 
@@ -323,11 +323,11 @@ mod tests {
     }
 
     /// Performs the measured test [socket_connection_handler::tests::message_flooding_throughput()] with the FullSync Uni channel.\
-    /// The values here are for a `12th Gen Intel(R) Core(TM) i7-1265U (12) @ 4,80 GHz` machine
+    /// The values here are for a `AMD Ryzen 7 5825U (16) @ 4.547GHz` machine
     #[cfg_attr(not(doc),tokio::test(flavor = "multi_thread"))]
     #[ignore]   // convention for this project: ignored tests are to be run by a single thread
-    async fn message_flooding_throughput_fullsync_channel() {
-        const DEBUG_EXPECTED_COUNT: u32 = 1081344;
+    async fn message_flooding_throughput_full_sync_channel() {
+        const DEBUG_EXPECTED_COUNT: u32 = 524288;
         const RELEASE_EXPECTED_COUNT: u32 = 1146880;
         const TOLERANCE: f64 = 0.10;
 

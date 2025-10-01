@@ -86,8 +86,11 @@ for MmapBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, ProcessorUni
 
         let (mut sender_stream, _) = peer.create_stream();
 
+        // helper functions
+        ///////////////////
+
         let allocate_reader_slot = || {
-            let slot = processor_sender.reserve_slot().unwrap_or_else(|| panic!("Add retrying code here, bailing out if it fails. PROCESSOR SENDER buffer size is {} and {} are used", processor_sender.buffer_size(), processor_sender.pending_items_count()));
+            let slot = processor_sender.reserve_slot().unwrap_or_else(|| panic!("Add retrying code here, bailing out because no more slots left. PROCESSOR SENDER buffer size is {} and {} are used", processor_sender.buffer_size(), processor_sender.pending_items_count()));
 /*
             if let Err((abort_processor, error_msg_processor)) = processor_sender.send(remote_message).await {
                 // log & send the error message to the remote peer
