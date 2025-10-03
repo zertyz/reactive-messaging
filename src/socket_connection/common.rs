@@ -92,8 +92,8 @@ ReactiveMessagingUniSender<CONFIG, DeserializedRemoteMessages, ConsumedRemoteMes
                     .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
-                            Self::retry_error_mapper(false, format!("Relaying received message '{:?}' to the internal processor failed. Connection will be aborted (without retrying) due to retrying config {:?}",
-                                                                                    message, Self::CONST_CONFIG.retrying_strategy)) )
+                            Self::retry_error_mapper(true, format!("Relaying received message '{:?}' to the internal processor failed. Connection will be aborted due to retrying config {:?}",
+                                                                                  message, Self::CONST_CONFIG.retrying_strategy)) )
                     .into_result()
             },
             RetryingStrategies::RetryWithBackoffUpTo(attempts) => {
@@ -104,7 +104,7 @@ ReactiveMessagingUniSender<CONFIG, DeserializedRemoteMessages, ConsumedRemoteMes
                             .map_input(|message| (message, retry_start) )
                     ))
                     .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
-                        backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+                        backoff_range_millis: 0..=(1.468935_f32.powi(attempts as i32 - 1) as u32),
                         re_attempts: attempts,
                         jitter_ratio: 0.2,
                     })
@@ -113,7 +113,7 @@ ReactiveMessagingUniSender<CONFIG, DeserializedRemoteMessages, ConsumedRemoteMes
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("Relaying received message '{:?}' to the internal processor failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
-                        |_| (false, String::with_capacity(0)) )
+                        |_| (false, String::new()) )
                     .into()
             },
             RetryingStrategies::RetryYieldingForUpToMillis(millis) => {
@@ -129,7 +129,7 @@ ReactiveMessagingUniSender<CONFIG, DeserializedRemoteMessages, ConsumedRemoteMes
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("Relaying received message '{:?}' to the internal processor failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
-                        |_| (false, String::with_capacity(0)) )
+                        |_| (false, String::new()) )
                     .into()
             },
             RetryingStrategies::RetrySpinningForUpToMillis(_millis) => {
@@ -144,14 +144,99 @@ ReactiveMessagingUniSender<CONFIG, DeserializedRemoteMessages, ConsumedRemoteMes
         // TODO 2024-02-26: self.uni.send_derived... search for other 2024-02-26 TODOs
     }
 
+    /// Reserves a slot for a new `message` to be received (from a remote peer), for later [Self::try_send_reserved()] to the local processor.
+    /// Here, the configured retrying options is honored.\
+    /// Returns `Ok` if reserved, `Err(details)` if reserving was not possible, where `details` contain:
+    ///   - `(abort?, error_message)`
     #[inline(always)]
-    pub fn reserve_slot(&self) -> Option<&mut DeserializedRemoteMessages> {
-        self.uni.reserve_slot()
+    pub async fn reserve_slot(&self) -> Result<&mut DeserializedRemoteMessages, (/*abort?*/bool, /*error_message: */String)> {
+
+        // TODO: 2025-10-02: `reactive-mutiny` is missing some retry logic... adding here for now
+        let retryable_reserve_slot = || -> keen_retry::RetryProducerResult<&mut DeserializedRemoteMessages, ()> {
+            match self.uni.reserve_slot() {
+                Some(slot) => keen_retry::RetryProducerResult::Ok { reported_input: (), output: slot },
+                None => keen_retry::RetryProducerResult::Transient { input: (), error: () },
+            }
+        };
+
+        let retryable = retryable_reserve_slot();
+        match Self::CONST_CONFIG.retrying_strategy {
+            RetryingStrategies::DoNotRetry => {
+                retryable
+                    .map_input_and_errors(
+                        Self::first_attempt_error_mapper,
+                        |(), _err|
+                            Self::retry_error_mapper(false, format!("Reserving a slot to receive & relay the next message to the internal processor failed. Won't retry (upstreaming the error) due to retrying config {:?}",
+                                                                           Self::CONST_CONFIG.retrying_strategy)) )
+                    .into_result()
+            },
+            RetryingStrategies::EndCommunications => {
+                retryable
+                    .map_input_and_errors(
+                        Self::first_attempt_error_mapper,
+                        |(), _err|
+                            Self::retry_error_mapper(true, format!("Reserving a slot to receive & relay the next message to the internal processor failed. Connection will be aborted due to retrying config {:?}",
+                                                                                  Self::CONST_CONFIG.retrying_strategy)) )
+                    .into_result()
+            },
+            RetryingStrategies::RetryWithBackoffUpTo(attempts) => {
+                retryable
+                    .map_input(|()| ( (), SystemTime::now()) )
+                    .retry_with_async(|((), retry_start)| future::ready(
+                        retryable_reserve_slot()
+                            .map_input(|()| ((), retry_start) )
+                    ))
+                    .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
+                        backoff_range_millis: 0..=(1.468935_f32.powi(attempts as i32 - 1) as u32),
+                        re_attempts: attempts,
+                        jitter_ratio: 0.2,
+                    })
+                    .await
+                    .map_input_and_errors(
+                        |((), retry_start), _fatal_err|
+                            Self::retry_error_mapper(true, format!("Reserving a slot to receive & relay the next message to the internal processor failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
+                                                                                  retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
+                        |_| (false, String::new()) )
+                    .into()
+            },
+            RetryingStrategies::RetryYieldingForUpToMillis(millis) => {
+                retryable
+                    .map_input(|()| ( (), SystemTime::now()) )
+                    .retry_with_async(|((), retry_start)| future::ready(
+                        retryable_reserve_slot()
+                            .map_input(|()| ((), retry_start) )
+                    ))
+                    .yielding_until_timeout(Duration::from_millis(millis as u64), || ())
+                    .await
+                    .map_input_and_errors(
+                        |((), retry_start), _fatal_err|
+                            Self::retry_error_mapper(true, format!("Reserving a slot to receive & relay the next message to the internal processor failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
+                                                                                  retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
+                        |_| (false, String::new()) )
+                    .into()
+            },
+            RetryingStrategies::RetrySpinningForUpToMillis(_millis) => {
+                // this option is deprecated
+                unreachable!()
+            },
+        }
     }
 
     #[inline(always)]
-    pub fn try_send_reserved(&self, slot: &mut DeserializedRemoteMessages) -> bool {
-        self.uni.try_send_reserved(slot)
+    pub fn send_reserved(&self, slot: &mut DeserializedRemoteMessages) {
+        // As of now, our understanding is that this method can never return false.
+        // Even though `reactive-mutiny` says false may be returned as part of the
+        // normal operation (in which case you may retry), sending might only fail
+        // for `zero copy` channels, which -- internally -- uses 2 queues:
+        // * One for the bounded allocator (zero-copy)
+        // * Another for publishing entries from the bounded allocator (movable).
+        //
+        // Since our Uni channels are defined to have both the allocator and
+        // publishing queues to have the same size, there is no possibility
+        // this method will fail and, therefore, we can safely bail out from
+        // retrying.
+        let result = self.uni.try_send_reserved(slot);
+        debug_assert!(result, "`reactive-messaging`: bug in the `.try_send_reserver()` logic. Please inspect the comments at this location to fix it");
     }
 
     #[inline(always)]
@@ -251,7 +336,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                     .map_input_and_errors(
                         Self::first_attempt_error_mapper,
                         |message, _err|
-                            Self::retry_error_mapper(true, format!("sync-Sending '{:?}' failed. Connection will be aborted (without retrying) due to retrying config {:?}",
+                            Self::retry_error_mapper(true, format!("sync-Sending '{:?}' failed. Connection will be aborted due to retrying config {:?}",
                                                                                    message, Self::CONST_CONFIG.retrying_strategy)) )
                     .into_result()
             },
@@ -263,7 +348,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                             .map_input(|message| (message, retry_start) )
                     )
                     .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
-                        backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+                        backoff_range_millis: 0..=(1.468935_f32.powi(attempts as i32 - 1) as u32),
                         re_attempts: attempts,
                         jitter_ratio: 0.2,
                     })
@@ -335,7 +420,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                             .map_input(|message| (message, retry_start) )
                     ))
                     .with_exponential_jitter(|| ExponentialJitter::FromBackoffRange {
-                        backoff_range_millis: 1..=(2.526_f32.powi(attempts as i32) as u32),
+                        backoff_range_millis: 0..=(1.468935_f32.powi(attempts as i32 - 1) as u32),
                         re_attempts: attempts,
                         jitter_ratio: 0.2,
                     })
@@ -344,7 +429,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("async-Sending '{:?}' failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
-                        |_| (false, String::with_capacity(0)) )
+                        |_| (false, String::new()) )
                     .into()
             },
             RetryingStrategies::RetryYieldingForUpToMillis(millis) => {
@@ -360,7 +445,7 @@ ReactiveMessagingSender<CONFIG, LocalMessages, OriginalChannel> {
                         |(message, retry_start), _fatal_err|
                             Self::retry_error_mapper(true, format!("async-Sending '{:?}' failed. Connection will be aborted (after exhausting all retries in {:?}) due to retrying config {:?}",
                                                                                    message, retry_start.elapsed(), Self::CONST_CONFIG.retrying_strategy)),
-                        |_| (false, String::with_capacity(0)) )
+                        |_| (false, String::new()) )
                     .into()
             },
             RetryingStrategies::RetrySpinningForUpToMillis(_millis) => {

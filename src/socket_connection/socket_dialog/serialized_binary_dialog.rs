@@ -126,7 +126,7 @@ for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serial
                         Some(to_send) => {
                             // serialize
                             Serializer::serialize(&to_send, &mut serialization_buffer);
-                            debug_assert!(serialization_buffer.len() < Self::CONST_CONFIG.sender_max_msg_size as usize, "Serialized Binary Dialog Loop: While semdomg a message, the `serialization_buffer` (now, len = {}) just exceeded the specified maximum `Self::CONST_CONFIG.sender_max_msg_size` of {}",
+                            debug_assert!(serialization_buffer.len() < Self::CONST_CONFIG.sender_max_msg_size as usize, "Serialized Binary Dialog Loop: While sending a message, the `serialization_buffer` (now, len = {}) just exceeded the specified maximum `Self::CONST_CONFIG.sender_max_msg_size` of {}",
                                                                                                                         serialization_buffer.len(), Self::CONST_CONFIG.sender_max_msg_size);
                             // send
                             let serialized_payload_len_buffer = &serialization_buffer.len().to_le_bytes()[..payload_size_len];
@@ -174,7 +174,7 @@ for SerializedBinaryDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serial
                                             // log & send the error message to the remote peer, if desired
                                             error!("`dialog_loop()` for serialized binary: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", processor_error_message, processor_sender.pending_items_count(), processor_sender.buffer_size());
                                             // inform the peer?
-                                            if let Some(error_message_to_send) = LocalMessagesType::processor_error_message(processor_error_message) {
+                                            if let Some(error_message_to_send) = LocalMessagesType::processor_error_message(processor_error_message.clone()) {
                                                 if let Err((abort_sender, error_msg_sender)) = peer.send_async(error_message_to_send).await {
                                                     warn!("`dialog_loop()` for serialized binary: {error_msg_sender} -- Slow reader {:?}", peer);
                                                     if abort_sender {

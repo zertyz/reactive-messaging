@@ -32,11 +32,11 @@ use reactive_mutiny::prelude::{ChannelCommon, ChannelUni, ChannelProducer};
 /// Represents a reasonably sized message, similar to production needs
 #[derive(Debug)]
 struct MessageType {
-    _data:  [u8; 128],
+    _data:  [u8; 255],
 }
 impl Default for MessageType {
     fn default() -> Self {
-        MessageType { _data: [0; 128] }
+        MessageType { _data: [0; 255] }
     }
 }
 
@@ -339,6 +339,8 @@ fn round_trip_latencies(criterion: &mut Criterion) {
         .enable_all()
         .build()
         .unwrap();
+
+    // TODO: if we ever revisit this, is there a way to improve this code so no copy & paste are needed?
 
     let mut group = criterion.benchmark_group("Client/Server LATENCY");
 

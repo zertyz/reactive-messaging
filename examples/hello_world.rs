@@ -46,8 +46,8 @@ enum ServerMessages {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!("Welcome to the `reactive-messaging` Hello World example");
-    let possible_options = vec!["server-only", "client-only"];
-    println!("Usage: hello_world [{}]", possible_options.iter().fold(String::new(), |mut acc, item| { if acc.len() > 0 {acc.push('|')}; acc.push_str(item); acc } ));
+    let possible_options = ["server-only", "client-only"];
+    println!("Usage: hello_world [{}]", possible_options.iter().fold(String::new(), |mut acc, item| { if !acc.is_empty() {acc.push('|')}; acc.push_str(item); acc } ));
 
     // command line options
     let args: Vec<String> = env::args().collect();

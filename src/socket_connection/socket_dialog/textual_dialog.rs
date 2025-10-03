@@ -135,7 +135,7 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serializer, Des
                                                 // log & send the error message to the remote peer, if desired
                                                 error!("`dialog_loop_for_textual_form()`: {} -- `dialog_processor` is full of unprocessed messages ({}/{})", processor_error_message, processor_sender.pending_items_count(), processor_sender.buffer_size());
                                                 // inform the peer?
-                                                if let Some(error_message_to_send) = LocalMessagesType::processor_error_message(processor_error_message) {
+                                                if let Some(error_message_to_send) = LocalMessagesType::processor_error_message(processor_error_message.clone()) {
                                                     if let Err((abort_sender, error_msg_sender)) = peer.send_async(error_message_to_send).await {
                                                             warn!("dialog_loop_for_textual_form(): {error_msg_sender} -- Slow reader {:?}", peer);
                                                         if abort_sender {
@@ -249,7 +249,7 @@ mod tests {
 
     /// Performs the test [socket_connection_handler::tests::responsive_dialogs()] with the FullSync Uni channel
     #[cfg_attr(not(doc),tokio::test)]
-    async fn responsive_dialogs_fullsync_channel() {
+    async fn responsive_dialogs_full_sync_channel() {
         socket_connection_handler::tests::responsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>>().await
     }
 
@@ -265,7 +265,7 @@ mod tests {
 
     /// Performs the test [socket_connection_handler::tests::client_termination()] with the FullSync Uni channel
     #[cfg_attr(not(doc),tokio::test)]
-    async fn client_termination_fullsync_channel() {
+    async fn client_termination_full_sync_channel() {
         socket_connection_handler::tests::client_termination::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, AtomicSenderChannel, ()>>().await
     }
 

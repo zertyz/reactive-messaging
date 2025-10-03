@@ -68,10 +68,10 @@ pub enum RetryingStrategies {
     EndCommunications,
 
     /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieved.\
-    /// Uses an Exponential Backoff strategy with factor 2.526 and 20% jitter, giving the milliseconds to sleep between,
+    /// Uses an Exponential Backoff strategy with factor 1.468935 and 20% jitter, giving the milliseconds to sleep between,
     /// at most, the given number of attempts.\
-    /// The total retrying time would be the sum of the geometric progression: (-1+2.526^n)/(1.526) -- in milliseconds.\
-    /// Example: for up to 5 minutes retrying, use 14 attempts.
+    /// The total retrying time would be the sum of the geometric progression: (-1+1.468935^n)/0.468935 -- in milliseconds.\
+    /// Example: for up to 1 second retrying, use 16 attempts; for up to ~5 minutes, use 31 attempts.
     RetryWithBackoffUpTo(u8),
 
     /// Retries, in case of "buffer is full" errors, ending the communications if success still can't be achieved
@@ -88,8 +88,8 @@ impl RetryingStrategies {
     /// requires 3+8=11 bits to represent the data; reverse of [Self::from_repr()]
     const fn as_repr(&self) -> u16 {
         match self {
-            Self::DoNotRetry => 0,
-            Self::EndCommunications                    => 1,
+            Self::DoNotRetry                          => 0,
+            Self::EndCommunications                   => 1,
             Self::RetryWithBackoffUpTo(n)        => 2 | (*n as u16) << 3,
             Self::RetryYieldingForUpToMillis(n)  => 3 | (*n as u16) << 3,
             Self::RetrySpinningForUpToMillis(n)  => 4 | (*n as u16) << 3,

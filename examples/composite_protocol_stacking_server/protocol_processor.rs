@@ -89,10 +89,10 @@ impl ServerProtocolProcessor {
                     PreGameClientMessages::Config(match_config) => {
                         // instantiate the game
                         let umpire_option = unsafe { &mut * (session.umpire.get()) };
-                        let umpire = Umpire::new(&match_config, Players::Opponent);
+                        let umpire = Umpire::new(match_config, Players::Opponent);
                         umpire_option.replace(umpire);
                         _ = peer.try_set_state(ProtocolStates::Game);
-                        PreGameServerMessages::Version(PROTOCOL_VERSION.clone())
+                        PreGameServerMessages::Version(PROTOCOL_VERSION)
                     },
                     PreGameClientMessages::Error(err) => {
                         warn!("Pre-game Client {peer:?} errored. Closing the connection after receiving: {err:?}");
