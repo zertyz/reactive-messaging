@@ -14,7 +14,7 @@ The methodology for the new benchmarks are as follows:
   * Compilation: `export RUSTFLAGS="-C target-cpu=native"; cargo test --release`
   * Execution: with a freshly booted machine, without any other running processes, the following is executed:
 ```
-clear; sudo sync; ./target/release/examples/composite_protocol_stacking_server & sleep 3; ./target/release/examples/composite_protocol_stacking_client; fg
+clear; sudo sync; ../target/release/examples/composite_protocol_stacking_server >/dev/null & sleep 3; ../target/release/examples/composite_protocol_stacking_client | grep --line-buffered 'messages IN & OUT' | sed 's|.*\(with .* messages IN & OUT.*\)|\1|' | tee /tmp/benches; wc -l /tmp/benches; fg
 ```
     NOTE 1: edit the examples/composite_protocol_stacking_client/protocol_processor.rs file and make sure `score_limit` is set to 15000
     NOTE 2: edit the examples/composite_protocol_stacking_client/main.rs file to adjust the number of concurrent clients. You should find the number which gives the most messages per second combined.

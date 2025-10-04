@@ -139,11 +139,6 @@ ReactiveMessagingUniSender<CONFIG, DeserializedRemoteMessages, ConsumedRemoteMes
         }
     }
 
-    #[inline(always)]
-    pub async fn send_derived(&self) {
-        // TODO 2024-02-26: self.uni.send_derived... search for other 2024-02-26 TODOs
-    }
-
     /// Reserves a slot for a new `message` to be received (from a remote peer), for later [Self::try_send_reserved()] to the local processor.
     /// Here, the configured retrying options is honored.\
     /// Returns `Ok` if reserved, `Err(details)` if reserving was not possible, where `details` contain:

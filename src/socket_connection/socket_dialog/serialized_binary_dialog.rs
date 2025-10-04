@@ -430,7 +430,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         // client
-        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").into_iter().next().unwrap()).await.expect("Error connecting");
+        let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").next().unwrap()).await.expect("Error connecting");
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let client_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, SerializedBinaryDialog<DEFAULT_TEST_CONFIG_U64, VariableBinary, VariableBinary, ReactiveMessagingRkyvSerializer, ReactiveMessagingRkyvFastDeserializer, FullSyncTestUni<SerializedWrapperType<VariableBinary, ReactiveMessagingRkyvFastDeserializer>>, FullSyncSenderChannel<VariableBinary>, ()>>::new(SerializedBinaryDialog::default());
         let client_task = tokio::spawn(

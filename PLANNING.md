@@ -17,21 +17,6 @@ Issues contain a *prefix* letter and a sequence number, possibly followed by a d
 
 # Under Execution
 
-**(n8)** 2024-01-04: Introduce binary messages:
-1) Use RKYV for serialization (the fastest & more flexible among current options, after a ChatGPT & bard research)
-2) Formats will be textual (with \n separating messages) or binary (fixed or variable -- in the last case, a u32 will prefix each message)
-3) Opting between binary or textual should be done easily via `ConstConfig` -- provided the protocol / model types implement the appropriate trait.
-  - A field should be introduced with the enum for `MessageForm`: Textual(READ_BUFFER_SIZE, WRITE_BUFFER_SIZE), VarBinary, FixedBinary(size)
-  - The previous READ & WRITE buffer sizes in `ConstConfig` can be dropped
-  - The `VarBinary` format will have a `u32` -- with the payload size -- preceding the payload
-  - For Docs: Fixed binary works better for enums with primitive types (or sub-types containing primitive types only) and do not require RKYV;
-              On the other hand, RKYV allows Strings, vectors, hash maps, hashsets, etc.
-  - `FixedBinary` allows zero-copy for both serialization & deserialization, if the machines involved share the same Endian -- and RKYV is not needed in this case
-4) Adjust the traits
-  - the binary form may require an allocator (when deserializing, to viabilize zero-copy)
-  - the serializer may return a reference to internal data (or a pointer? whatever reactive-mutiny does) -- allowing zero-copy (or not) serializing patterns
-5) Build benchmarks comparing RON vs var size RKYV vs fixed size bin
-
 **(n12)** 2024-10-04: Address the `IMPORTANT` and `CRITICALLY IMPORTANT` comments of `ReactiveMessagingMemoryMappable` and, of course, delete the comments.
 
 **(r13)** 2024-10-04: Follow the `ReactiveMessagingMemoryMappable` example for the other serializers: some traits are always required to be implemented.
@@ -77,6 +62,21 @@ This is to be exposed on the connection event via a non-hashed, stable string co
 
 
 # Done
+
+**(n8)** 2024-01-04: Introduce binary messages:
+1) Added Fixed and Variable sized binary support, with `mmap` and `rkyv` default implementations;
+2) Support for additional custom `serde`s
+3) Opting between binary or textual should be done easily via `ConstConfig` -- provided the protocol / model types implement the appropriate trait.
+- A field should be introduced with the enum for `MessageForm`: Textual(READ_BUFFER_SIZE, WRITE_BUFFER_SIZE), VarBinary, FixedBinary(size)
+- The previous READ & WRITE buffer sizes in `ConstConfig` can be dropped
+- The `VarBinary` format will have a `u32` -- with the payload size -- preceding the payload
+- For Docs: Fixed binary works better for enums with primitive types (or sub-types containing primitive types only) and do not require RKYV;
+  On the other hand, RKYV allows Strings, vectors, hash maps, hashsets, etc.
+- `FixedBinary` allows zero-copy for both serialization & deserialization, if the machines involved share the same Endian -- and RKYV is not needed in this case
+4) Adjust the traits
+- the binary form may require an allocator (when deserializing, to viabilize zero-copy)
+- the serializer may return a reference to internal data (or a pointer? whatever reactive-mutiny does) -- allowing zero-copy serialization patterns
+5) Build benchmarks comparing RON vs var size RKYV vs fixed size bin
 
 **(n11)** 2024-02-07: Simplify our API: REMOVE `ResponsiveMessages`, as it is completely not needed!! The reason is:
   * `is_disconnect_message()` can be done on the processor logic with `stream.take_until(|outgoing_message| outgoing_message == DISCONNECT_MESSAGE)`
@@ -126,7 +126,7 @@ Suggested Steps:
 4) Update the test socket_client::composite_protocol_stacking_pattern on every `PeerConnected` event to assert that the peer state
    (which is, actually, the connection state) matches the hard coded values
 5) Idem for the server version of this test
-_6) Address all the TODO 2024-01-03 comments (allowing clients to reuse previous states, which is not currently possible today)_
+_6) Addressed all the TODO 2024-01-03 comments (allowing clients to reuse previous states)_
 7) Move `peer.id` to the connection and refactor all related code
 
 

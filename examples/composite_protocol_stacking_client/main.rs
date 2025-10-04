@@ -20,7 +20,7 @@ use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMes
 
 const SERVER_IP:      &str = "127.0.0.1";
 const PORT:           u16  = 1234;
-const INSTANCES:      u16  = 22;
+const INSTANCES:      u16  = 36;
 
 
 #[cfg(debug_assertions)]
@@ -29,7 +29,7 @@ const DEBUG: bool = true;
 const DEBUG: bool = false;
 
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 6)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
     simple_logger::SimpleLogger::new().with_utc_timestamps().init().unwrap_or_else(|_| eprintln!("--> LOGGER WAS ALREADY STARTED"));

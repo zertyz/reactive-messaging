@@ -21,18 +21,18 @@ license       = "Unlicense"
 
 [dependencies]
 tokio             = { version = "1", default-features = false }
-log               = "0.4"
-reactive-mutiny   = "1.3"      # for reactive programming in Rust
-futures           = "0.3"     # brings in "Streams" / async iterators
-once_cell         = "1"       # lazy statics
+log               = { version = "0.4", default-features = false }
+reactive-mutiny   = { version = "1.3", default-features = false }      # for reactive programming in Rust
+futures           = { version = "0.3", default-features = false }     # brings in "Streams" / async iterators
+once_cell         = { version = "1", default-features = false }       # lazy statics
 
 # for the retrying mechanism
-keen-retry = "0.5"
+keen-retry = { version = "0.5", default-features = false, features = ["async"] }
 
 # to be present only in dev-dependencies, after the refactorings
-serde      = { version = "1", default-features = false, features = ["derive"] }                   # typed serialization / deserialization
-ron        = "0.11"                                                                                 # for textual (de)serialization
-rkyv       = { version = "0.7", features = ["size_32", "validation"] }                  # for dynamic-sized binary (de)serialization
+serde      = { version = "1", default-features = false, features = ["derive"] }                                     # typed serialization / deserialization
+ron        = { version = "0.11", default-features = false }                                                          # for textual (de)serialization
+rkyv       = { version = "0.7", default-features = false, features = ["std", "size_32", "validation"] }   # for dynamic-sized binary (de)serialization
 
 
 [dev-dependencies]
@@ -40,7 +40,7 @@ ctor          = "0.5"  # setup and teardown for modules
 simple_logger = "5"    # a dirty console logger
 log           = { version = "0.4", features = ["max_level_trace", "release_max_level_info"] }
 
-tokio         = { version = "1", features = ["full", "rt-multi-thread"] }
+tokio         = { version = "1", features = ["full"] }
 
 
 # dependencies for the examples

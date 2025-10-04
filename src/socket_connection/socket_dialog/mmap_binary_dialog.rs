@@ -206,7 +206,7 @@ mod tests {
     use std::sync::atomic::Ordering::Relaxed;
     use std::time::{Duration, Instant};
     use super::*;
-    use crate::prelude::{ConstConfig, ServerConnectionHandler};
+    use crate::prelude::{ConstConfig, ResponsiveStream, ServerConnectionHandler};
     use crate::config::RetryingStrategies;
     use reactive_mutiny::prelude::advanced::{ChannelUniMoveAtomic, ChannelUniMoveFullSync, UniZeroCopyAtomic, UniZeroCopyFullSync};
     use tokio::net::TcpStream;
@@ -227,9 +227,10 @@ mod tests {
 
         // this is a ping test, so no buffers nor retrying is necessary
         const TEST_CONFIG: ConstConfig = ConstConfig {
-            receiver_channel_size: 2,   // TODO: this dialog seem to really need at least 2 buffers for each leg,
-            sender_channel_size: 2,     //       as one slot is for work (flushing out or being read) and the other is for the processors. Add this as an assertion (not just debug)
+            receiver_channel_size: 2,   // by using 2 on both we are sure never to be denied sending messages
+            sender_channel_size: 2,     // to the client & server output & stream processors
             retrying_strategy: RetryingStrategies::DoNotRetry,
+            // retrying_strategy: RetryingStrategies::RetryWithBackoffUpTo(3),    // Allow the above channel sizes to be 1
             ..ConstConfig::default()
         };
         const TEST_CONFIG_U64:      u64   = TEST_CONFIG.into();
@@ -265,12 +266,9 @@ mod tests {
                 }
             },
             move |_client_addr, _client_port, peer, client_messages_stream| {
-                client_messages_stream.then(move |client_message| {
-                    let peer = peer.clone();
-                    async move {
-                        assert!(peer.send_async(Mmappable { n: client_message.n + 1 }).await.is_ok(), "server couldn't send");
-                    }
-                })
+                client_messages_stream
+                    .map(|client_message| Mmappable { n: client_message.n + 1 })
+                    .to_responsive_stream(peer, |_, _| ())
             }
         ).await.expect("Starting the server");
     
@@ -287,19 +285,11 @@ mod tests {
                 move |_connection_event| future::ready(()),
                 move |_client_addr, _client_port, peer, server_messages_stream| {
                     let observed_sum = observed_sum_clone.clone();
-                    server_messages_stream.then(move |server_message| {
-                        let peer = peer.clone();
-                        let observed_sum = observed_sum.clone();
-                        async move {
-                            println!("Server said: {:?}", server_message);
-                            observed_sum.fetch_add(server_message.n, Relaxed);
-                            if server_message.n >= COUNT_LIMIT {
-                                peer.cancel_and_close();
-                            } else {
-                                assert!(peer.send_async(Mmappable { n: server_message.n }).await.is_ok(), "client couldn't send");
-                            }
-                        }
-                    })
+                    server_messages_stream
+                        .inspect(move |server_message| { observed_sum.fetch_add(server_message.n, Relaxed); })
+                        .take_while(|server_message| future::ready(server_message.n < COUNT_LIMIT))
+                        .map(|server_message| Mmappable { n: server_message.n })
+                        .to_responsive_stream(peer, |_, _| ())
                 }
             )
         );
@@ -382,7 +372,7 @@ mod tests {
                                 }
                                 let elapsed = start.elapsed();
                                 assert!(elapsed.as_millis() > SLOW_READER_MILLIS as u128, "Test bug: it seems the burst happened instantly -- we didn't see the 'slow reader' effects, as all the sending was done in only {elapsed:?}. Are the sender buffer too big?");
-                                eprintln!("### All the sending was performed in {elapsed:?} -- {}/{}", peer.pending_items_count(), peer.buffer_size());
+                                println!("### All the sending was performed in {elapsed:?} -- {}/{}", peer.pending_items_count(), peer.buffer_size());
                             }));
                         },
                         ProtocolEvent::PeerLeft { peer: _, stream_stats: _ } => {},
@@ -394,9 +384,7 @@ mod tests {
             },
             move |_client_addr, _client_port, _peer, client_messages_stream| {
                 let server_observed_sum = server_observed_sum_clone.clone();
-                client_messages_stream.inspect(move |client_message| {
-                    server_observed_sum.fetch_add(client_message.n, Relaxed);
-                })
+                client_messages_stream.inspect(move |client_message| { server_observed_sum.fetch_add(client_message.n, Relaxed); })
             }
         ).await.expect("Starting the server");
 

@@ -177,7 +177,7 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serializer, Des
                                     if next_line_index > 0 {
                                         read_buffer.drain(0..next_line_index);
                                     }
-                                    // TODO: can we break the server (or client) if the message is too big / don't have a '\n'? TEST IT!
+                                    // TODO: can we break the server (or client) if the message is too big / don't have a '\n'? TEST that the `max_received_message` is honored
                                     break
                                 }
                             }
