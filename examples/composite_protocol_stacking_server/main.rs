@@ -18,7 +18,7 @@ use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMes
 
 
 const LISTENING_INTERFACE: &str = "0.0.0.0";
-const LISTENING_PORT:      u16  = 1234;
+const LISTENING_PORT:      u16  = 443;
 
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 8)]
@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut socket_server = new_composite_socket_server!(NETWORK_CONFIG, LISTENING_INTERFACE, LISTENING_PORT, ProtocolStates);
     // pre-game protocol processor
-    let pre_game_processor = spawn_server_processor!(NETWORK_CONFIG, socket_server, PreGameClientMessages, PreGameServerMessages,
+    let pre_game_processor = spawn_server_processor!(NETWORK_CONFIG, Textual, Atomic, socket_server, PreGameClientMessages, PreGameServerMessages,
         move |connection_event| {
             server_processor_ref1.pre_game_connection_events_handler(connection_event);
             future::ready(())
@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         move |client_addr, port, peer, client_messages_stream| server_processor_ref2.pre_game_dialog_processor(client_addr, port, peer, client_messages_stream)
     )?;
     // game protocol processor
-    let game_processor = spawn_server_processor!(NETWORK_CONFIG, socket_server, GameClientMessages, GameServerMessages,
+    let game_processor = spawn_server_processor!(NETWORK_CONFIG, MmapBinary, Atomic, socket_server, GameClientMessages, GameServerMessages,
         move |connection_event| {
             server_processor_ref3.game_connection_events_handler(connection_event);
             future::ready(())
@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let wait_for_termination = socket_server.termination_waiter();
     tokio::spawn( async move {
-        tokio::time::sleep(Duration::from_secs(300)).await;
+        tokio::time::sleep(Duration::from_secs(86400)).await;
         socket_server.terminate().await.expect("Failed to Terminate the server");
     });
     wait_for_termination().await?;

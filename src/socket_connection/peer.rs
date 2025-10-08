@@ -80,10 +80,28 @@ Peer<CONFIG, LocalMessages, SenderChannel, StateType> {
         *self.state.lock().await = Some(state);
     }
 
+    /// Same as [set_state()], but for sync contexts.
+    /// Important: this will busy wait until it can set the new value
+    pub fn blocking_set_state(&self, state: StateType) {
+        loop {
+            if let Ok(mut locked_state) = self.state.try_lock() {
+                locked_state.replace(state);
+                break
+            } else {
+                std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop();
+                std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop();
+                std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop();
+                std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop();
+                std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop(); std::hint::spin_loop();
+            }
+        }
+    }
+
     /// Use [set_state()] (async) if possible
+    #[must_use = "This operation is not guaranteed to succeed. You must retry or propagate the status. If you can't use async `set_state()`, use `blocking_set_state()` instead."]
     pub fn try_set_state(&self, state: StateType) -> bool {
         if let Ok(mut locked_state) = self.state.try_lock() {
-            *locked_state = Some(state);
+            locked_state.replace(state);
             true
         } else {
             false

@@ -558,6 +558,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use crate::{new_socket_server, start_server_processor};
     use crate::socket_connection::socket_dialog::textual_dialog::TextualDialog;
+    use crate::unit_test_utils::TestString;
 
     const REMOTE_SERVER: &str = "66.45.249.218";
 
@@ -740,7 +741,7 @@ mod tests {
         let connected_to_client = Arc::new(AtomicBool::new(false));
         let connected_to_client_ref = Arc::clone(&connected_to_client);
         let mut server = new_socket_server!(TEST_CONFIG, IP, PORT);
-        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, TestString, TestString,
             move |event| {
                 let connected_to_client_ref = Arc::clone(&connected_to_client_ref);
                 async move {
@@ -756,7 +757,7 @@ mod tests {
             |_, _, _, stream| stream
         ).expect("Error starting the server");
         let mut client = new_socket_client!(TEST_CONFIG, IP, PORT);
-        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, TestString, TestString,
             |_| future::ready(()),
             |_, _, _, stream| stream
         ).expect("Error starting the client");
@@ -774,14 +775,14 @@ mod tests {
         let connected_to_client = Arc::new(AtomicBool::new(false));
         let connected_to_client_ref = Arc::clone(&connected_to_client);
         let mut server = new_socket_server!(TEST_CONFIG, IP, PORT);
-        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, TestString, TestString,
             move |event| {
                 let connected_to_client_ref = Arc::clone(&connected_to_client_ref);
                 async move {
                     match event {
                         ProtocolEvent::PeerArrived { peer } => {
                             connected_to_client_ref.store(true, Relaxed);
-                            peer.send(String::from("Goodbye")).expect("Couldn't send");
+                            peer.send(TestString::from("Goodbye")).expect("Couldn't send");
                         },
                         ProtocolEvent::PeerLeft { .. } => {},
                         ProtocolEvent::LocalServiceTermination => {},
@@ -791,7 +792,7 @@ mod tests {
             |_, _, _, stream| stream
         ).expect("Error starting the server");
         let mut client = new_socket_client!(TEST_CONFIG, IP, PORT);
-        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, TestString, TestString,
             |_| future::ready(()),
             |_, _, peer, stream| stream.map(move |_msg| peer.cancel_and_close())     // close the connection when any message arrives
         ).expect("Error starting the client");
@@ -827,12 +828,12 @@ mod tests {
             TEST_CONFIG,
             IP,
             PORT);
-        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
+        start_server_processor!(TEST_CONFIG, Textual, Atomic, server, TestString, TestString,
             |_| future::ready(()),
             move |_, _, peer, client_messages| client_messages
                 .map(|msg| {
                     println!("SERVER RECEIVED: {msg} -- answering with 'OK'");
-                    String::from("OK")
+                    TestString::from("OK")
                 })
                 .to_responsive_stream(peer, |_, _| ())
 
@@ -857,10 +858,10 @@ mod tests {
         // first level processors shouldn't do anything until the client says something meaningful -- newcomers must know, a priori, who they are talking to (a security measure)
         let handshake_processor_greeted = Arc::new(AtomicBool::new(false));
         let handshake_processor_greeted_ref = Arc::clone(&handshake_processor_greeted);
-        let handshake_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
+        let handshake_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, TestString, TestString,
             |connection_event| async {
                 if let ProtocolEvent::PeerArrived { peer  } = connection_event {
-                    peer.send_async(String::from("Client is at `Handshake`")).await
+                    peer.send_async(TestString::from("Client is at `Handshake`")).await
                         .expect("Sending failed");
                 }
             },
@@ -881,10 +882,10 @@ mod tests {
         // deeper processors should inform the server that they are now subjected to a new processor / protocol, so they may adjust accordingly
         let welcome_authenticated_friend_processor_greeted = Arc::new(AtomicBool::new(false));
         let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted);
-        let welcome_authenticated_friend_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
+        let welcome_authenticated_friend_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, TestString, TestString,
             |connection_event| async {
                 if let ProtocolEvent::PeerArrived { peer  } = connection_event {
-                    peer.send_async(String::from("Client is at `WelcomeAuthenticatedFriend`")).await
+                    peer.send_async(TestString::from("Client is at `WelcomeAuthenticatedFriend`")).await
                         .expect("Sending failed");
                 }
             },
@@ -904,10 +905,10 @@ mod tests {
 
         let account_settings_processor_greeted = Arc::new(AtomicBool::new(false));
         let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted);
-        let account_settings_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
+        let account_settings_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, TestString, TestString,
             |connection_event| async {
                 if let ProtocolEvent::PeerArrived { peer  } = connection_event {
-                    peer.send_async(String::from("Client is at `AccountSettings`")).await
+                    peer.send_async(TestString::from("Client is at `AccountSettings`")).await
                         .expect("Sending failed");
                 }
             },
@@ -927,10 +928,10 @@ mod tests {
 
         let goodbye_options_processor_greeted = Arc::new(AtomicBool::new(false));
         let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted);
-        let goodbye_options_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
+        let goodbye_options_processor = spawn_client_processor!(TEST_CONFIG, Textual, Atomic, client, TestString, TestString,
             |connection_event| async {
                 if let ProtocolEvent::PeerArrived { peer  } = connection_event {
-                    peer.send_async(String::from("Client is at `GoodbyeOptions`")).await
+                    peer.send_async(TestString::from("Client is at `GoodbyeOptions`")).await
                         .expect("Sending failed");
                 }
             },

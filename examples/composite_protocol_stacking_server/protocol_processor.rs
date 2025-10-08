@@ -81,24 +81,28 @@ impl ServerProtocolProcessor {
                                                                            self.sessions.len()))
                                                  .value()
                                                  .clone();     // .clone() the Arc, so we are free to move it to the next closure (and drop it after the Stream closes)
-        let peer_ref = Arc::clone(&peer);
+        let peer_ref = peer.clone();
         client_messages_stream
-            .map(move |client_message| {
-                // crate an umpire for the new game
-                match client_message.as_ref() {
-                    PreGameClientMessages::Config(match_config) => {
-                        // instantiate the game
-                        let umpire_option = unsafe { &mut * (session.umpire.get()) };
-                        let umpire = Umpire::new(match_config, Players::Opponent);
-                        umpire_option.replace(umpire);
-                        _ = peer.try_set_state(ProtocolStates::Game);
-                        PreGameServerMessages::Version(PROTOCOL_VERSION)
-                    },
-                    PreGameClientMessages::Error(err) => {
-                        warn!("Pre-game Client {peer:?} errored. Closing the connection after receiving: {err:?}");
-                        _ = peer.try_set_state(ProtocolStates::Disconnect);
-                        PreGameServerMessages::Error(PreGameServerError::AbortingDueToPeerError)
-                    },
+            .then(move |client_message| {
+                let peer = peer.clone();
+                let session = session.clone();
+                async move {
+                    // crate an umpire for the new game
+                    match client_message.as_ref() {
+                        PreGameClientMessages::Config(match_config) => {
+                            // instantiate the game
+                            let umpire_option = unsafe { &mut * (session.umpire.get()) };
+                            let umpire = Umpire::new(match_config, Players::Opponent);
+                            umpire_option.replace(umpire);
+                            peer.set_state(ProtocolStates::Game).await;
+                            PreGameServerMessages::Version(PROTOCOL_VERSION)
+                        },
+                        PreGameClientMessages::Error(err) => {
+                            warn!("Pre-game Client {peer:?} errored. Closing the connection after receiving: {err:?}");
+                            peer.set_state(ProtocolStates::Disconnect).await;
+                            PreGameServerMessages::Error(PreGameServerError::AbortingDueToPeerError)
+                        },
+                    }
                 }
             })
             .to_responsive_stream(peer_ref, |_, _| ())
@@ -133,11 +137,12 @@ impl ServerProtocolProcessor {
                                  peer:                   Arc<Peer<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>>,
                                  client_messages_stream: impl Stream<Item=StreamItemType>)
 
-                                 -> impl Stream<Item=bool> {
+                                -> impl Stream<Item=bool> {
 
-        _ = peer.try_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
-        _ = peer.send(GameServerMessages::GameStarted);
-        let peer_ref = Arc::clone(&peer);
+        peer.blocking_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
+        peer.send(GameServerMessages::GameStarted)
+            .expect("Couldn't send the GameStarted message");
+        let peer_ref = peer.clone();
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
                                                                            self.sessions.len()))

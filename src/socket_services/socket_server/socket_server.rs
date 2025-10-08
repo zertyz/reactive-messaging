@@ -458,6 +458,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
     use futures::StreamExt;
     use tokio::sync::Mutex;
+    use crate::unit_test_utils::TestString;
 
     /// The interface for listening to connections
     const LISTENING_INTERFACE: &str = "127.0.0.1";
@@ -690,11 +691,8 @@ mod tests {
             move |_, _, peer, client_messages: MessagingMutinyStream<ProcessorUniType>| {
                 let server_received_messages_count = Arc::clone(&server_received_messages_count_ref1);
                 client_messages
-                    .map(move |client_message| {
-                        std::mem::forget(client_message);   // TODO 2023-07-15: investigate this reactive-mutiny/rust related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
-                        server_received_messages_count.fetch_add(1, Relaxed);
-                        DummyClientAndServerMessages::FloodPing
-                    })
+                    .inspect(move |_| { server_received_messages_count.fetch_add(1, Relaxed); })
+                    .map(move |client_message| DummyClientAndServerMessages::FloodPing )
                     .to_responsive_stream(peer, |_, _| ())
             }
         ).await.expect("Spawning a server processor");
@@ -705,18 +703,15 @@ mod tests {
             TEST_CONFIG,
             LISTENING_INTERFACE,
             PORT);
-        start_client_processor!(TEST_CONFIG, Textual, Atomic, client,
+        start_client_processor!(TEST_CONFIG, Textual, FullSync, client,
             DummyClientAndServerMessages,
             DummyClientAndServerMessages,
             |_| async {},
             move |_, _, peer, server_messages| {
                 let client_received_messages_count = Arc::clone(&client_received_messages_count_ref1);
                 server_messages
-                    .map(move |server_message| {
-                        std::mem::forget(server_message);   // TODO 2023-07-15: investigate this reactive-mutiny/rust related bug: it seems OgreUnique doesn't like the fact that this type doesn't need dropping? (no internal strings)... or is it a reactive-messaging bug?
-                        client_received_messages_count.fetch_add(1, Relaxed);
-                        DummyClientAndServerMessages::FloodPing
-                    })
+                    .inspect(move |_| { client_received_messages_count.fetch_add(1, Relaxed); } )
+                    .map(move |server_message| DummyClientAndServerMessages::FloodPing)
                     .to_responsive_stream(peer, |_, _| ())
             }
         ).expect("Starting the client");
@@ -770,7 +765,7 @@ mod tests {
         // first level processors shouldn't do anything until the client says something meaningful -- newcomers must know, a priori, who they are talking to (a security measure)
         let incoming_client_processor_greeted = Arc::new(AtomicBool::new(false));
         let incoming_client_processor_greeted_ref = Arc::clone(&incoming_client_processor_greeted);
-        let incoming_client_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
+        let incoming_client_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, TestString, TestString,
             |_| future::ready(()),
             move |_, _, peer, client_messages_stream| {
                 assert_eq!(peer.try_take_state(), Some(Some(Protocols::IncomingClient)), "Connection is in a wrong state");
@@ -779,7 +774,7 @@ mod tests {
                     let peer = Arc::clone(&peer);
                     incoming_client_processor_greeted_ref.store(true, Relaxed);
                     async move {
-                        peer.send_async(format!("`IncomingClient`: New peer {peer:?} ended up initial authentication proceedings. SAY SOMETHING and you will be routed to 'WelcomeAuthenticatedFriend'")).await
+                        peer.send_async(TestString::from(format!("`IncomingClient`: New peer {peer:?} ended up initial authentication proceedings. SAY SOMETHING and you will be routed to 'WelcomeAuthenticatedFriend'"))).await
                             .expect("Sending failed");
                         peer.set_state(Protocols::WelcomeAuthenticatedFriend).await;
                         peer.flush_and_close(Duration::from_secs(1)).await;
@@ -791,10 +786,10 @@ mod tests {
         // deeper processors should inform the client that they are now subjected to a new processor / protocol, so they may adjust accordingly
         let welcome_authenticated_friend_processor_greeted = Arc::new(AtomicBool::new(false));
         let welcome_authenticated_friend_processor_greeted_ref = Arc::clone(&welcome_authenticated_friend_processor_greeted);
-        let welcome_authenticated_friend_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
+        let welcome_authenticated_friend_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, TestString, TestString,
             |connection_event| async {
                 if let ProtocolEvent::PeerArrived { peer } = connection_event {
-                    peer.send_async(format!("`WelcomeAuthenticatedFriend`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'AccountSettings'")).await
+                    peer.send_async(TestString::from(format!("`WelcomeAuthenticatedFriend`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'AccountSettings'"))).await
                         .expect("Sending failed");
                 }
             },
@@ -814,10 +809,10 @@ mod tests {
 
         let account_settings_processor_greeted = Arc::new(AtomicBool::new(false));
         let account_settings_processor_greeted_ref = Arc::clone(&account_settings_processor_greeted);
-        let account_settings_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
+        let account_settings_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, TestString, TestString,
             |connection_event| async {
                 if let ProtocolEvent::PeerArrived { peer } = connection_event {
-                    peer.send_async(format!("`AccountSettings`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'GoodbyeOptions'")).await
+                    peer.send_async(TestString::from(format!("`AccountSettings`: Now dealing with client {peer:?}. SAY SOMETHING and you will be routed to 'GoodbyeOptions'"))).await
                         .expect("Sending failed");
                 }
             },
@@ -837,10 +832,10 @@ mod tests {
 
         let goodbye_options_processor_greeted = Arc::new(AtomicBool::new(false));
         let goodbye_options_processor_greeted_ref = Arc::clone(&goodbye_options_processor_greeted);
-        let goodbye_options_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, String, String,
+        let goodbye_options_processor = spawn_server_processor!(TEST_CONFIG, Textual, Atomic, server, TestString, TestString,
             |connection_event| async {
                 if let ProtocolEvent::PeerArrived { peer } = connection_event {
-                    peer.send_async(format!("`GoodbyeOptions`: Now dealing with client {peer:?}. SAY SOMETHING and you will be DISCONNECTED, as our talking is over. Thank you.")).await
+                    peer.send_async(TestString::from(format!("`GoodbyeOptions`: Now dealing with client {peer:?}. SAY SOMETHING and you will be DISCONNECTED, as our talking is over. Thank you."))).await
                         .expect("Sending failed");
                 }
             },
@@ -876,10 +871,10 @@ mod tests {
             TEST_CONFIG,
             LISTENING_INTERFACE,
             PORT);
-        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, String, String,
+        start_client_processor!(TEST_CONFIG, Textual, Atomic, client, TestString, TestString,
             |connection_event| async {
                 match connection_event {
-                    ProtocolEvent::PeerArrived { peer }           => peer.send_async(String::from("Hello! Am I in?")).await.expect("Sending failed"),
+                    ProtocolEvent::PeerArrived { peer }           => peer.send_async(TestString::from("Hello! Am I in?")).await.expect("Sending failed"),
                     ProtocolEvent::PeerLeft { peer: _, stream_stats: _ } => (),
                     ProtocolEvent::LocalServiceTermination                       => (),
                 }
@@ -887,7 +882,7 @@ mod tests {
             move |_, _, peer, server_messages| server_messages
                 .map(|msg| {
                     println!("RECEIVED: {msg} -- answering with 'OK'");
-                    String::from("OK")
+                    TestString::from("OK")
                 })
                 .to_responsive_stream(peer, |_, _| ())
         )?;
@@ -914,15 +909,9 @@ mod tests {
     enum DummyClientAndServerMessages {
         #[default]
         FloodPing,
+        AnythingElse,   // note: this unused enum is just to make this a non-zero sized enum, as reactive-mutiny (more precisely, the `OgreArrayPoolAllocator` logic) seem not to like it
     }
 
     impl ReactiveMessagingConfig<DummyClientAndServerMessages> for DummyClientAndServerMessages {}
-
-    impl Deref for DummyClientAndServerMessages {
-        type Target = DummyClientAndServerMessages;
-        fn deref(&self) -> &Self::Target {
-            self
-        }
-    }
 
 }

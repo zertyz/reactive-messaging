@@ -19,7 +19,7 @@ use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMes
 
 
 const SERVER_IP:      &str = "127.0.0.1";
-const PORT:           u16  = 1234;
+const PORT:           u16  = 443;
 const INSTANCES:      u16  = 36;
 
 
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
 
         let mut socket_client = new_composite_socket_client!(NETWORK_CONFIG, SERVER_IP, PORT, ProtocolStates);
         // pre-game protocol processor
-        let pre_game_processor = spawn_client_processor!(NETWORK_CONFIG, socket_client, PreGameServerMessages, PreGameClientMessages,
+        let pre_game_processor = spawn_client_processor!(NETWORK_CONFIG, Textual, Atomic, socket_client, PreGameServerMessages, PreGameClientMessages,
             move |connection_event| {
                 client_processor_ref1.pre_game_connection_events_handler(connection_event);
                 future::ready(())
@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
             }
         )?;
         // game protocol processor
-        let game_processor = spawn_client_processor!(NETWORK_CONFIG, socket_client, GameServerMessages, GameClientMessages,
+        let game_processor = spawn_client_processor!(NETWORK_CONFIG, MmapBinary, Atomic, socket_client, GameServerMessages, GameClientMessages,
             move |connection_event| {
                 client_processor_ref3.game_connection_events_handler(connection_event);
                 future::ready(())
@@ -110,9 +110,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         socket_clients.push(socket_client);
     }
 
-    tokio::time::sleep(Duration::from_secs(290)).await;
-    for socket_client in socket_clients.into_iter() {
-        socket_client.terminate().await.expect("FAILED TO SHUTDOWN THE CLIENT")
+    for mut socket_client in socket_clients.into_iter() {
+        socket_client.termination_waiter()().await.expect("FAILED TO SHUTDOWN THE CLIENT")
     }
 
     Ok(())

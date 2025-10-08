@@ -74,33 +74,37 @@ impl ClientProtocolProcessor {
                             
         let cloned_self1 = Arc::clone(self);
         let cloned_self2 = Arc::clone(self);
-        let peer_ref = Arc::clone(&peer);
-        _ = peer.send(PreGameClientMessages::Config(MATCH_CONFIG));
+        let peer_ref = peer.clone();
+        peer.send(PreGameClientMessages::Config(MATCH_CONFIG))
+            .expect("Couldn't send the pre-game MATCH_CONFIG message");
         server_messages_stream
             .inspect(move |_| {cloned_self1.in_messages_count.fetch_add(1, Relaxed);})  // increment the incoming messages metrics
-            .map(move |server_message| {
-                match server_message.as_ref() {
-                    PreGameServerMessages::Version(server_protocol_version) => {
-                        if server_protocol_version == &PROTOCOL_VERSION {
-                            // Upgrade to the next protocol
-                            _ = peer.try_set_state(ProtocolStates::Game);
-                            None
-                        } else {
-                            warn!("Aborting Connection: Client protocol version is {:?} while server is {server_protocol_version:?}", PROTOCOL_VERSIONS.get_key_value(&PROTOCOL_VERSION));
-                            _ = peer.try_set_state(ProtocolStates::Disconnect);
-                            Some(PreGameClientMessages::Error(PreGameClientError::IncompatibleProtocols))
-                        }
-                    },
-                    PreGameServerMessages::Error(err) => {
-                        warn!("Server (pre game) answered with error {err:?} -- closing the connection");
-                        _ = peer.try_set_state(ProtocolStates::Disconnect);
-                        Some(PreGameClientMessages::Error(PreGameClientError::TextualProtocolProcessorParsingError))
-                    },
+            .then(move |server_message| {
+                let peer = peer.clone();
+                async move {
+                    match server_message.as_ref() {
+                        PreGameServerMessages::Version(server_protocol_version) => {
+                            if server_protocol_version == &PROTOCOL_VERSION {
+                                // Upgrade to the next protocol
+                                peer.set_state(ProtocolStates::Game).await;
+                                None
+                            } else {
+                                warn!("Aborting Connection: Client protocol version is {:?} while server is {server_protocol_version:?}", PROTOCOL_VERSIONS.get_key_value(&PROTOCOL_VERSION));
+                                peer.set_state(ProtocolStates::Disconnect).await;
+                                Some(PreGameClientMessages::Error(PreGameClientError::IncompatibleProtocols))
+                            }
+                        },
+                        PreGameServerMessages::Error(err) => {
+                            warn!("Server (pre game) answered with error {err:?} -- closing the connection");
+                            peer.set_state(ProtocolStates::Disconnect).await;
+                            Some(PreGameClientMessages::Error(PreGameClientError::TextualProtocolProcessorParsingError))
+                        },
+                    }
                 }
             })
             .take_while(|server_message| future::ready(server_message.is_some()))    // stop if the protocol was upgraded
+            .filter_map(future::ready)
             .inspect(move |_| { cloned_self2.out_messages_count.fetch_add(1, Relaxed); })        // increment the outgoing messages metrics
-            .map(|server_message| server_message.unwrap())
             .to_responsive_stream(peer_ref, |server_message, _peer| matches!(server_message, PreGameClientMessages::Error(..)) )
             .take_while(|stop| future::ready(!stop))    // stop if an error happened (after sending the error message)
     }
@@ -137,8 +141,7 @@ impl ClientProtocolProcessor {
 
                                 -> impl Stream<Item=bool> {
 
-        _ = peer.try_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
-                                                                // TODO 2024-01-27: this may be moved to the connection event handler after the new state is added
+        peer.blocking_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
         let cloned_self1 = Arc::clone(self);
         let cloned_self2 = Arc::clone(self);
         let peer_ref = Arc::clone(&peer);

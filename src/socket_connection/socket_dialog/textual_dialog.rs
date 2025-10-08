@@ -203,23 +203,27 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serializer, Des
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Formatter;
+    use std::ops::Deref;
     use super::*;
     use super::super::super::socket_connection_handler;
-    use reactive_mutiny::prelude::advanced::{ChannelUniMoveAtomic, ChannelUniMoveFullSync, UniZeroCopyAtomic, UniZeroCopyFullSync};
+    use reactive_mutiny::prelude::advanced::{AllocatorAtomicArray, ChannelUniMoveAtomic, ChannelUniMoveFullSync, OgreUnique, UniZeroCopyAtomic, UniZeroCopyFullSync};
+    use serde::{Deserialize, Serialize};
     use crate::config::{ConstConfig, RetryingStrategies};
     use crate::serde::{ReactiveMessagingRonDeserializer, ReactiveMessagingRonSerializer};
+    use crate::unit_test_utils::TestString;
 
     const DEFAULT_TEST_CONFIG: ConstConfig = ConstConfig {
         //retrying_strategy: RetryingStrategies::DoNotRetry,    // uncomment to see `message_flooding_throughput()` fail due to unsent messages
         retrying_strategy: RetryingStrategies::RetryYieldingForUpToMillis(30),
         ..ConstConfig::default()
     };
-    const DEFAULT_TEST_CONFIG_U64:  u64              = DEFAULT_TEST_CONFIG.into();
-    const DEFAULT_TEST_UNI_INSTRUMENTS: usize        = DEFAULT_TEST_CONFIG.executor_instruments.into();
-    type AtomicTestUni<PayloadType = String>         = UniZeroCopyAtomic<PayloadType, {DEFAULT_TEST_CONFIG.receiver_channel_size as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
-    type AtomicSenderChannel<PayloadType = String>   = ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_channel_size as usize}, 1>;
-    type FullSyncTestUni<PayloadType = String>       = UniZeroCopyFullSync<PayloadType, {DEFAULT_TEST_CONFIG.receiver_channel_size as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
-    type FullSyncSenderChannel<PayloadType = String> = ChannelUniMoveFullSync<PayloadType, {DEFAULT_TEST_CONFIG.sender_channel_size as usize}, 1>;
+    const DEFAULT_TEST_CONFIG_U64:  u64                  = DEFAULT_TEST_CONFIG.into();
+    const DEFAULT_TEST_UNI_INSTRUMENTS: usize            = DEFAULT_TEST_CONFIG.executor_instruments.into();
+    type AtomicTestUni<PayloadType = TestString>         = UniZeroCopyAtomic<PayloadType, {DEFAULT_TEST_CONFIG.receiver_channel_size as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
+    type AtomicSenderChannel<PayloadType = TestString>   = ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_channel_size as usize}, 1>;
+    type FullSyncTestUni<PayloadType = TestString>       = UniZeroCopyFullSync<PayloadType, {DEFAULT_TEST_CONFIG.receiver_channel_size as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
+    type FullSyncSenderChannel<PayloadType = TestString> = ChannelUniMoveFullSync<PayloadType, {DEFAULT_TEST_CONFIG.sender_channel_size as usize}, 1>;
 
 
     // "unresponsive dialogs" tests
@@ -228,13 +232,13 @@ mod tests {
     /// Performs the test [socket_connection_handler::tests::unresponsive_dialogs()] with the Atomic Uni channel
     #[cfg_attr(not(doc),tokio::test)]
     async fn unresponsive_dialogs_atomic_channel() {
-        socket_connection_handler::tests::unresponsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>>().await
+        socket_connection_handler::tests::unresponsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>, TestString>().await
     }
 
     /// Performs the test [socket_connection_handler::tests::unresponsive_dialogs()] with the FullSync Uni channel
     #[cfg_attr(not(doc),tokio::test)]
     async fn unresponsive_dialogs_fullsync_channel() {
-        socket_connection_handler::tests::unresponsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>>().await
+        socket_connection_handler::tests::unresponsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>, TestString>().await
     }
 
 
@@ -244,13 +248,13 @@ mod tests {
     /// Performs the test [socket_connection_handler::tests::responsive_dialogs()] with the Atomic Uni channel
     #[cfg_attr(not(doc),tokio::test)]
     async fn responsive_dialogs_atomic_channel() {
-        socket_connection_handler::tests::responsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>>().await
+        socket_connection_handler::tests::responsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>, TestString>().await;
     }
 
     /// Performs the test [socket_connection_handler::tests::responsive_dialogs()] with the FullSync Uni channel
     #[cfg_attr(not(doc),tokio::test)]
     async fn responsive_dialogs_full_sync_channel() {
-        socket_connection_handler::tests::responsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>>().await
+        socket_connection_handler::tests::responsive_dialogs::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>, TestString>().await;
     }
 
 
@@ -260,13 +264,13 @@ mod tests {
     /// Performs the test [socket_connection_handler::tests::client_termination()] with the Atomic Uni channel
     #[cfg_attr(not(doc),tokio::test)]
     async fn client_termination_atomic_channel() {
-        socket_connection_handler::tests::client_termination::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>>().await
+        socket_connection_handler::tests::client_termination::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>, TestString>().await;
     }
 
     /// Performs the test [socket_connection_handler::tests::client_termination()] with the FullSync Uni channel
     #[cfg_attr(not(doc),tokio::test)]
     async fn client_termination_full_sync_channel() {
-        socket_connection_handler::tests::client_termination::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, AtomicSenderChannel, ()>>().await
+        socket_connection_handler::tests::client_termination::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, AtomicSenderChannel, ()>, TestString>().await
     }
 
 
@@ -284,7 +288,8 @@ mod tests {
 
         socket_connection_handler::tests::latency_measurements::
             <DEFAULT_TEST_CONFIG_U64,
-             TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>
+             TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>,
+             TestString,
             > (TOLERANCE, DEBUG_EXPECTED_COUNT, RELEASE_EXPECTED_COUNT).await
     }
 
@@ -299,7 +304,8 @@ mod tests {
 
         socket_connection_handler::tests::latency_measurements::
             <DEFAULT_TEST_CONFIG_U64,
-             TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>
+             TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>,
+             TestString,
             > (TOLERANCE, DEBUG_EXPECTED_COUNT, RELEASE_EXPECTED_COUNT).await
     }
     
@@ -318,7 +324,8 @@ mod tests {
 
         socket_connection_handler::tests::message_flooding_throughput::
             <DEFAULT_TEST_CONFIG_U64,
-             TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>
+             TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, AtomicTestUni, AtomicSenderChannel, ()>,
+             TestString,
             > (TOLERANCE, DEBUG_EXPECTED_COUNT, RELEASE_EXPECTED_COUNT).await
     }
 
@@ -333,7 +340,8 @@ mod tests {
 
         socket_connection_handler::tests::message_flooding_throughput::
             <DEFAULT_TEST_CONFIG_U64,
-             TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>
+             TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, ReactiveMessagingRonSerializer, ReactiveMessagingRonDeserializer, FullSyncTestUni, FullSyncSenderChannel, ()>,
+             TestString,
             > (TOLERANCE, DEBUG_EXPECTED_COUNT, RELEASE_EXPECTED_COUNT).await
     }
 

@@ -262,7 +262,7 @@ impl<const CONFIG:        u64,
 #[cfg(any(test,doc))]
 pub mod tests {
     use super::*;
-    use crate::unit_test_utils::{next_server_port, StringDeserializer, StringSerializer};
+    use crate::unit_test_utils::{next_server_port, TestString, TestStringDeserializer, TestStringSerializer};
     use crate::socket_connection::{
         socket_dialog::textual_dialog::TextualDialog,
         connection_provider::ServerConnectionHandler,
@@ -276,6 +276,8 @@ pub mod tests {
         },
         net::ToSocketAddrs,
     };
+    use std::fmt::Display;
+    use std::ops::Deref;
     use std::time::Instant;
     use reactive_mutiny::{prelude::advanced::{UniZeroCopyAtomic, ChannelUniMoveAtomic, ChannelUniZeroCopyAtomic}, types::{ChannelCommon, ChannelUni, ChannelProducer}};
     use futures::stream::{self, StreamExt};
@@ -299,8 +301,8 @@ pub mod tests {
         };
         const DEFAULT_TEST_CONFIG_U64:  u64            = DEFAULT_TEST_CONFIG.into();
         const DEFAULT_TEST_UNI_INSTRUMENTS: usize      = DEFAULT_TEST_CONFIG.executor_instruments.into();
-        type DefaultTestUni<PayloadType = String>      = UniZeroCopyAtomic<PayloadType, {DEFAULT_TEST_CONFIG.receiver_channel_size as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
-        type SenderChannel<PayloadType = String>       = ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_channel_size as usize}, 1>;
+        type DefaultTestUni<PayloadType = TestString>      = UniZeroCopyAtomic<PayloadType, {DEFAULT_TEST_CONFIG.receiver_channel_size as usize}, 1, DEFAULT_TEST_UNI_INSTRUMENTS>;
+        type SenderChannel<PayloadType = TestString>       = ChannelUniMoveAtomic<PayloadType, {DEFAULT_TEST_CONFIG.sender_channel_size as usize}, 1>;
 
         // check configs
         ////////////////
@@ -308,8 +310,8 @@ pub mod tests {
         println!("Reconverted:     {:#?}", ConstConfig::from(DEFAULT_TEST_CONFIG_U64));
         assert_eq!(ConstConfig::from(DEFAULT_TEST_CONFIG_U64), DEFAULT_TEST_CONFIG, "Configs don't match");
         // try to create the objects based on the config (a compilation error is expected if wrong const generic parameters are provided to the `Uni` type)
-        let uni    = DefaultTestUni::<String>::new("Can it be instantiated?");
-        let sender = SenderChannel::<String>::new("Can it be instantiated?");
+        let uni    = DefaultTestUni::new("Can it be instantiated?");
+        let sender = SenderChannel::new("Can it be instantiated?");
 
         // `reactive-mutiny` checks
         ///////////////////////////
@@ -343,7 +345,7 @@ pub mod tests {
         let new_connections_source = connection_provider.connection_receiver()
             .expect("couldn't move the Connection Receiver out of the Connection Provider");
         let (returned_connections_sink, _returned_connections_source) = tokio::sync::mpsc::channel::<SocketConnection<()>>(2);
-        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, String, String, StringSerializer, StringDeserializer, DefaultTestUni, SenderChannel, ()>>::new(TextualDialog::default());
+        let socket_communications_handler = SocketConnectionHandler::<DEFAULT_TEST_CONFIG_U64, TextualDialog<DEFAULT_TEST_CONFIG_U64, TestString, TestString, TestStringSerializer, TestStringDeserializer, DefaultTestUni, SenderChannel, ()>>::new(TextualDialog::default());
         socket_communications_handler.server_loop(
             "127.0.0.1", 8579, new_connections_source, returned_connections_sink,
             |connection_event| async move {
@@ -366,9 +368,11 @@ pub mod tests {
 
     /// Assures connection & dialogs work for either the server and client, using the "unresponsive" flavours of the `Stream` processors
     pub async fn unresponsive_dialogs<const CONFIG:     u64,
-                                      SocketDialogType: SocketDialog<CONFIG, RemoteMessages = String, LocalMessages = String, State = ()> + 'static>
+                                      SocketDialogType: SocketDialog<CONFIG, State = ()> + 'static,
+                                      DerivedType: Debug + PartialEq<String>>
                                      ()
-                                     where <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: PartialEq<String> {
+                                     where SocketDialogType::LocalMessages: From<&'static str> + From<String>,
+                                           <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: std::ops::Deref<Target=DerivedType> {
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         let port = next_server_port();
         let client_secret = String::from("open, sesame");
@@ -391,7 +395,7 @@ pub mod tests {
             |connection_event| {
                  match connection_event {
                      ProtocolEvent::PeerArrived { peer } => {
-                         assert!(peer.send(String::from("Welcome! State your business!")).is_ok(), "couldn't send");
+                         assert!(peer.send(SocketDialogType::LocalMessages::from("Welcome! State your business!")).is_ok(), "couldn't send");
                      },
                      ProtocolEvent::PeerLeft { peer: _, stream_stats: _ } => {},
                      ProtocolEvent::LocalServiceTermination => {
@@ -404,9 +408,9 @@ pub mod tests {
                 let client_secret_clone = client_secret_clone.clone();
                 let server_secret_clone = server_secret_clone.clone();
                 client_messages_stream.inspect(move |client_message| {
-                    assert!(peer.send(format!("Client just sent {:?}", client_message)).is_ok(), "couldn't send");
-                    if *client_message == client_secret_clone {
-                        assert!(peer.send(server_secret_clone.clone()).is_ok(), "couldn't send");
+                    assert!(peer.send(SocketDialogType::LocalMessages::from(format!("Client just sent {:?}", client_message))).is_ok(), "couldn't send");
+                    if client_message.deref() == &client_secret_clone {
+                        assert!(peer.send(SocketDialogType::LocalMessages::from(server_secret_clone.clone())).is_ok(), "couldn't send");
                     } else {
                         panic!("Client sent the wrong secret: {:?} -- I was expecting '{}'", client_message, client_secret_clone);
                     }
@@ -429,7 +433,7 @@ pub mod tests {
                 move |connection_event| {
                     match connection_event {
                         ProtocolEvent::PeerArrived { peer } => {
-                            assert!(peer.send(client_secret.clone()).is_ok(), "couldn't send");
+                            assert!(peer.send(SocketDialogType::LocalMessages::from(client_secret.clone())).is_ok(), "couldn't send");
                         },
                         ProtocolEvent::PeerLeft { peer, stream_stats: _ } => {
                             println!("Test Client: connection with {} (peer_id #{}) was dropped -- should not happen in this test", peer.peer_address, peer.peer_id);
@@ -460,15 +464,17 @@ pub mod tests {
 
         let locked_observed_secret = observed_secret.lock().await;
         let observed_secret = locked_observed_secret.as_ref().expect("Server secret has not been computed");
-        assert_eq!(*observed_secret, server_secret, "Communications didn't go according the plan");
+        assert_eq!(observed_secret.deref(), &server_secret, "Communications didn't go according the plan");
     }
     
     /// Assures connection & dialogs work for either the server and client, using the "responsive" flavours of the `Stream` processors
     pub async fn responsive_dialogs<const CONFIG:     u64,
-                                    SocketDialogType: SocketDialog<CONFIG, RemoteMessages = String, LocalMessages = String, State = ()> + 'static>
+                                    SocketDialogType: SocketDialog<CONFIG, State = ()> + 'static,
+                                    DerivedType: Debug + PartialEq<String>>
                                    ()
-                                   where <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: PartialEq<String> {
-        
+                                   where SocketDialogType::LocalMessages: From<&'static str> + From<String>,
+                                         <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: std::ops::Deref<Target=DerivedType> {
+
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         let port = next_server_port();
         let client_secret = String::from("open, sesame");
@@ -491,13 +497,13 @@ pub mod tests {
                                                   move |_client_addr, _client_port, peer, client_messages_stream| {
                let client_secret_clone = client_secret_clone.clone();
                let server_secret_clone = server_secret_clone.clone();
-                assert!(peer.send(String::from("Welcome! State your business!")).is_ok(), "couldn't send");
+                assert!(peer.send(SocketDialogType::LocalMessages::from("Welcome! State your business!")).is_ok(), "couldn't send");
                 client_messages_stream
                     .flat_map(move |client_message| {
                        stream::iter([
-                           format!("Client just sent {:?}", client_message),
-                           if client_message == client_secret_clone {
-                               server_secret_clone.clone()
+                           SocketDialogType::LocalMessages::from(format!("Client just sent {:?}", client_message)),
+                           if client_message.deref() == &client_secret_clone {
+                               SocketDialogType::LocalMessages::from(server_secret_clone.clone())
                            } else {
                                panic!("Client sent the wrong secret: {:?} -- I was expecting '{}'", client_message, client_secret_clone);
                            }])
@@ -510,8 +516,7 @@ pub mod tests {
         tokio::time::sleep(Duration::from_millis(10)).await;
     
         // client
-        let client_secret = client_secret.clone();
-        let observed_secret_clone = Arc::clone(&observed_secret);
+        let observed_secret_clone = observed_secret.clone();
         let tokio_connection = TcpStream::connect(format!("{}:{}", LISTENING_INTERFACE, port).to_socket_addrs().expect("Error resolving address").next().unwrap()).await.expect("Error connecting");
         let socket_connection = SocketConnection::new(tokio_connection, ());
         let socket_communications_handler = SocketConnectionHandler::<CONFIG, SocketDialogType>::new(SocketDialogType::default());
@@ -520,12 +525,12 @@ pub mod tests {
                                                  move |_connection_event| future::ready(()),
                                                  move |_client_addr, _client_port, peer, server_messages_stream| {
                     let observed_secret_clone = Arc::clone(&observed_secret_clone);
-                    assert!(peer.send(client_secret.clone()).is_ok(), "couldn't send");
+                    assert!(peer.send(SocketDialogType::LocalMessages::from(client_secret.clone())).is_ok(), "couldn't send");
                     server_messages_stream
                         .then(move |server_message| {
-                            let observed_secret_clone = Arc::clone(&observed_secret_clone);
+                            let observed_secret_clone = observed_secret_clone.clone();
+                            println!("Server said: (type {}) {:?}", get_type(&server_message), server_message);
                             async move {
-                                println!("Server said: {:?}", server_message);
                                 let _ = observed_secret_clone.lock().await.insert(server_message);
                             }
                         })
@@ -542,14 +547,15 @@ pub mod tests {
     
         let locked_observed_secret = observed_secret.lock().await;
         let observed_secret = locked_observed_secret.as_ref().expect("Server secret has not been computed");
-        assert_eq!(*observed_secret, server_secret, "Communications didn't go according the plan");
+        assert_eq!(observed_secret.deref(), &server_secret, "Communications didn't go according the plan");
     }
-    
+
     /// assures that shutting down the client causes the connection to be dropped, as perceived by the server
     pub async fn client_termination<const CONFIG:     u64,
-                                    SocketDialogType: SocketDialog<CONFIG, RemoteMessages = String, LocalMessages = String, State = ()> + 'static>
+                                    SocketDialogType: SocketDialog<CONFIG, State = ()> + 'static,
+                                    DerefType: Display>
                                    ()
-                                   where <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: std::ops::Deref<Target=String> {
+                                   where <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: std::ops::Deref<Target=DerefType> {
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         let port = next_server_port();
         let server_disconnected = Arc::new(AtomicBool::new(false));
@@ -625,11 +631,13 @@ pub mod tests {
     /// # Testing the debug latencies
     /// sudo sync; sleep 1; cargo test -- --ignored --test-threads=1 --nocapture latency_measurements
     pub async fn latency_measurements<const CONFIG:     u64,
-                                      SocketDialogType: SocketDialog<CONFIG, RemoteMessages = String, LocalMessages = String, State = ()> + 'static>
+                                      SocketDialogType: SocketDialog<CONFIG, State = ()> + 'static,
+                                      DerefType: AsRef<str>>
     
                                      (tolerance: f64, debug_expected_count: u32, release_expected_count: u32)
     
-                                     where <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: std::ops::Deref<Target=String> {
+                                     where SocketDialogType::LocalMessages: From<&'static str> + From<String>,
+                                           <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: std::ops::Deref<Target=DerefType> {
         const TEST_DURATION_MS:    u64  = 2000;
         const TEST_DURATION_NS:    u64  = TEST_DURATION_MS * 1e6 as u64;
         const LISTENING_INTERFACE: &str = "127.0.0.1";
@@ -650,10 +658,11 @@ pub mod tests {
             |_listening_interface, _listening_port, peer, client_messages| {
                  client_messages.inspect(move |client_message| {
                      // Receives: "Ping(n)"
+                     let client_message = client_message.as_ref();
                      let n_str = &client_message[5..(client_message.len() - 1)];
                      let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original client message: {:?}. Parsing error: {:?}", n_str, client_message, err));
                      // Answers:  "Pong(n)"
-                     assert!(peer.send(format!("Pong({})", n)).is_ok(), "couldn't send");
+                     assert!(peer.send(SocketDialogType::LocalMessages::from(format!("Pong({})", n))).is_ok(), "couldn't send");
                  })
             }
         ).await.expect("Starting the server");
@@ -674,7 +683,7 @@ pub mod tests {
                     match connection_event {
                         ProtocolEvent::PeerArrived { peer } => {
                             // conversation starter
-                            assert!(peer.send(String::from("Ping(0)")).is_ok(), "couldn't send");
+                            assert!(peer.send(SocketDialogType::LocalMessages::from("Ping(0)")).is_ok(), "couldn't send");
                         },
                         ProtocolEvent::PeerLeft { .. } => {},
                         ProtocolEvent::LocalServiceTermination => {},
@@ -685,6 +694,7 @@ pub mod tests {
                     let counter_ref = Arc::clone(&counter_ref);
                     server_messages.inspect(move |server_message| {
                         // Receives: "Pong(n)"
+                        let server_message = server_message.as_ref();
                         let n_str = &server_message[5..(server_message.len()-1)];
                         let n = str::parse::<u32>(n_str).unwrap_or_else(|err| panic!("could not convert '{}' to number. Original server message: {:?}. Parsing error: {:?}", n_str, server_message, err));
                         let current_count = counter_ref.fetch_add(1, Relaxed);
@@ -692,7 +702,7 @@ pub mod tests {
                             panic!("Received {:?}, where Client was expecting 'Pong({})'", server_message, current_count);
                         }
                         // Answers: "Ping(n+1)"
-                        assert!(peer.send(format!("Ping({})", current_count+1)).is_ok(), "couldn't send");
+                        assert!(peer.send(SocketDialogType::LocalMessages::from(format!("Ping({})", current_count+1))).is_ok(), "couldn't send");
                     })
                 }
             )
@@ -730,11 +740,13 @@ pub mod tests {
     /// # Testing the debug latencies
     /// sudo sync; sleep 1; cargo test -- --ignored --test-threads=1 --nocapture message_flooding_throughput
     pub async fn message_flooding_throughput<const CONFIG:     u64,
-                                             SocketDialogType: SocketDialog<CONFIG, RemoteMessages = String, LocalMessages = String, State = ()> + 'static>
+                                             SocketDialogType: SocketDialog<CONFIG, State = ()> + 'static,
+                                             DerefType: AsRef<str>>
 
                                             (tolerance: f64, debug_expected_count: u32, release_expected_count: u32)
 
-                                            where <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: std::ops::Deref<Target=String> {
+                                            where SocketDialogType::LocalMessages: From<&'static str> + From<String>,
+                                                  <<SocketDialogType as SocketDialog<CONFIG>>::ProcessorUni as GenericUni>::DerivedItemType: std::ops::Deref<Target=DerefType> {
         const TEST_DURATION_MS:    u64  = 2000;
         const LISTENING_INTERFACE: &str = "127.0.0.1";
         let port = next_server_port();
@@ -760,6 +772,7 @@ pub mod tests {
                let unordered = Arc::clone(&unordered_ref);
                client_messages.inspect(move |client_message| {
                    // Message format: DoNotAnswer(n)
+                   let client_message = client_message.as_ref();
                    let n_str = &client_message[12..(client_message.len()-1)];
                    let n = str::parse::<u32>(n_str).unwrap_or_else(|_| panic!("could not convert '{}' to number. Original message: {:?}", n_str, client_message));
                    let count = received_messages_count.fetch_add(1, Relaxed);
@@ -791,7 +804,7 @@ pub mod tests {
                                 let start = Instant::now();
                                 let mut n = 0;
                                 loop {
-                                    let send_result = peer.send_async(format!("DoNotAnswer({})", n)).await;
+                                    let send_result = peer.send_async(SocketDialogType::LocalMessages::from(format!("DoNotAnswer({})", n))).await;
                                     assert!(send_result.is_ok(), "couldn't send: {:?}", send_result.unwrap_err());
                                     n += 1;
                                     // flush & bailout check for timeout every 128k messages
@@ -840,6 +853,13 @@ pub mod tests {
     
         }
     
+    }
+
+    // helpers
+    //////////
+
+    fn get_type<Type>(_val: &Type) -> String {
+        format!("{}", std::any::type_name::<Type>())
     }
 
 }

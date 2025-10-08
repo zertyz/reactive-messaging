@@ -39,7 +39,8 @@ The API has been stabilized -- new features yet to be added for v1.0:
 
 ## Production-ready?
 
-This crate is already being used successfully in production for both Textual (`ron`) and Fixed Binary (`mmap`),
-supporting ~11 million messages per day per instance.
+This crate is currently being used successfully in production for both Textual (`ron`) and Fixed Binary (`mmap`),
+supporting 380 msgs/s per instance, with 0.0% CPU overhead -- please check the "Flood Example" to measure base system
+resources needed for an arbitrary msgs/s load.
 
 We will formally claim "Production ready" once the book is ready and more tests and examples are made.
