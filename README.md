@@ -12,7 +12,9 @@ Still in beta, the distinct features of this library are:
   - serdes may be selected at runtime, sharing the same logic (with some exceptions in `rkyv`);
   - simple API for creating the client and server instances;
   - yet allowing advanced usages: composite protocols with different models between "states" and state transition logic;
-  - the network loops for both client & server are fully optimized;
+  - when working with composite protocols, you are free to upgrade the serializers -- like authenticating with `ron` and
+    message passing with `mmap`;
+  - the network loops for both client & server are fully optimized and generics is fully used, providing yet more optimizations;
   - compile-time (generics & const, yet powerful) configurations, to achieve the most performance possible;
   - full support for retrying strategies, using zero-cost abstractions provided by `keen-retry`;
 
@@ -40,7 +42,7 @@ The API has been stabilized -- new features yet to be added for v1.0:
 ## Production-ready?
 
 This crate is currently being used successfully in production for both Textual (`ron`) and Fixed Binary (`mmap`),
-supporting 380 msgs/s per instance, with 0.0% CPU overhead -- please check the "Flood Example" to measure base system
-resources needed for an arbitrary msgs/s load.
+supporting 380 msgs/s per instance, with 0.5% CPU overhead on a GCE `e2-micro` instance -- please check the "Flood Example"
+to measure base system resources needed for an arbitrary msgs/s load.
 
 We will formally claim "Production ready" once the book is ready and more tests and examples are made.
