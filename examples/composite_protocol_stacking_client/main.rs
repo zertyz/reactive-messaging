@@ -1,16 +1,15 @@
 #[path = "../composite_protocol_stacking_common/mod.rs"] mod composite_protocol_stacking_common;
 
-mod protocol_processor;
+mod client_protocol_processor;
 
 use composite_protocol_stacking_common::{
     NETWORK_CONFIG,
     protocol_model::{GameServerMessages, GameClientMessages}
 };
-use crate::protocol_processor::ClientProtocolProcessor;
+use crate::client_protocol_processor::ClientProtocolProcessor;
 use std::{
     future,
     sync::Arc,
-    time::Duration,
 };
 use reactive_messaging::prelude::*;
 use futures::StreamExt;
@@ -79,8 +78,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
         // game protocol processor
         let game_processor = spawn_client_processor!(NETWORK_CONFIG, MmapBinary, Atomic, socket_client, GameServerMessages, GameClientMessages,
             move |connection_event| {
-                client_processor_ref3.game_connection_events_handler(connection_event);
-                future::ready(())
+                let client_processor = client_processor_ref3.clone();
+                async move {
+                    client_processor.game_connection_events_handler(connection_event).await
+                }
             },
             move |client_addr, port, peer, server_messages_stream| {
                 let server_messages_stream = server_messages_stream

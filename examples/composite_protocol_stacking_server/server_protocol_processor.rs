@@ -11,13 +11,14 @@ use std::{
     fmt::Debug,
     sync::Arc,
 };
+use std::time::Duration;
 use reactive_messaging::prelude::{ProtocolEvent, Peer, ResponsiveStream};
 use reactive_mutiny::prelude::FullDuplexUniChannel;
 use dashmap::DashMap;
 use futures::future;
 use futures::stream::{self, Stream, StreamExt};
 use log::{info, warn, error};
-use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerError, PreGameServerMessages, ProtocolStates};
+use crate::composite_protocol_stacking_common::protocol_model::{PreGameClientMessages, PreGameServerError, PreGameServerMessages, ProtocolStates, PROTOCOL_VERSIONS};
 
 
 /// Session for each connected peer
@@ -74,7 +75,7 @@ impl ServerProtocolProcessor {
                                      peer:                   Arc<Peer<NETWORK_CONFIG, PreGameServerMessages, SenderChannel, ProtocolStates>>,
                                      client_messages_stream: impl Stream<Item=StreamItemType>)
 
-                                    -> impl Stream<Item=()> {
+                                    -> impl Stream<Item=bool> {
                             
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",
@@ -89,37 +90,56 @@ impl ServerProtocolProcessor {
                 async move {
                     // crate an umpire for the new game
                     match client_message.as_ref() {
+                        PreGameClientMessages::Version(client_protocol_version) => {
+                            if client_protocol_version == &PROTOCOL_VERSION {
+                                // Upgrade to the next protocol, sending the trigger message to do the same at the server
+                                Some(PreGameServerMessages::Version(PROTOCOL_VERSION))
+                            } else {
+                                warn!("Aborting Connection: Server protocol version is {:?} while client is {:?}",
+                                      PROTOCOL_VERSIONS.get_key_value(&PROTOCOL_VERSION),
+                                      PROTOCOL_VERSIONS.get_key_value(client_protocol_version));
+                                peer.set_state(ProtocolStates::Disconnect).await;
+                                Some(PreGameServerMessages::Error(PreGameServerError::IncompatibleProtocols))
+                            }
+                        },
                         PreGameClientMessages::Config(match_config) => {
                             // instantiate the game
                             let umpire_option = unsafe { &mut * (session.umpire.get()) };
                             let umpire = Umpire::new(match_config, Players::Opponent);
                             umpire_option.replace(umpire);
+                            // transition the protocol
                             peer.set_state(ProtocolStates::Game).await;
-                            PreGameServerMessages::Version(PROTOCOL_VERSION)
+                            None
                         },
                         PreGameClientMessages::Error(err) => {
                             warn!("Pre-game Client {peer:?} errored. Closing the connection after receiving: {err:?}");
                             peer.set_state(ProtocolStates::Disconnect).await;
-                            PreGameServerMessages::Error(PreGameServerError::AbortingDueToPeerError)
+                            Some(PreGameServerMessages::Error(PreGameServerError::AbortingDueToPeerError))
                         },
                     }
                 }
             })
-            .to_responsive_stream(peer_ref, |_, _| ())
-            .take(1)
+            .take_while(|server_message| future::ready(server_message.is_some()))   // stop if the protocol transitions positively
+            .filter_map(future::ready)
+            .to_responsive_stream(peer_ref, |server_message, _peer| matches!(server_message, PreGameServerMessages::Error(..)))
+            .take_while(|stop| future::ready(!stop))    // stop if an error happened (after sending the error message)
     }
 
-    pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
-                                          SenderChannel:        FullDuplexUniChannel<ItemType=GameServerMessages, DerivedItemType=GameServerMessages> + Send + Sync>
-                                         (&self,
-                                          connection_event: ProtocolEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>) {
+    pub async fn game_connection_events_handler<const NETWORK_CONFIG: u64,
+                                                SenderChannel:        FullDuplexUniChannel<ItemType=GameServerMessages, DerivedItemType=GameServerMessages> + Send + Sync>
+                                               (&self,
+                                                connection_event: ProtocolEvent<NETWORK_CONFIG, GameServerMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
             ProtocolEvent::PeerArrived { peer } => {
                 warn!("Game Started: {:?}", peer);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                peer.send_async(GameServerMessages::GameStarted).await
+                    .expect("Couldn't send the GameStarted message");
             },
             ProtocolEvent::PeerLeft { peer, stream_stats } => {
                 warn!("Game Disconnected: {:?} -- stats: {:?}", peer, stream_stats);
                 self.sessions.remove(&peer.peer_id);
+                peer.set_state(ProtocolStates::Disconnect).await;     // the next state -- after this dialog ends -- is "disconnect".
             }
             ProtocolEvent::LocalServiceTermination => {
                 info!("Ping-Pong server shutdown requested. Notifying all peers...");
@@ -139,9 +159,6 @@ impl ServerProtocolProcessor {
 
                                 -> impl Stream<Item=bool> {
 
-        peer.blocking_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
-        peer.send(GameServerMessages::GameStarted)
-            .expect("Couldn't send the GameStarted message");
         let peer_ref = peer.clone();
         let session = self.sessions.get(&peer.peer_id)
                                                  .unwrap_or_else(|| panic!("Server BUG! {peer:?} showed up, but we don't have a session for it! It should have been created by the `connection_events()` callback -- session Map contains {} entries",

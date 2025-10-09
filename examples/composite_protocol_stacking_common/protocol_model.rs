@@ -66,8 +66,9 @@ pub static PROTOCOL_VERSIONS: Lazy<HashMap<VersionType, &str>> = Lazy::new(||
     HashMap::from([
         (1, "2024-02-19"),
         (2, "2024-10-04"),
+        (3, "2025-10-08"),
     ]));
-pub static PROTOCOL_VERSION: VersionType = 2;
+pub static PROTOCOL_VERSION: VersionType = 3;
 type VersionType = u8;
 
 
@@ -90,9 +91,12 @@ pub enum ProtocolStates {
 #[archive_attr(derive(PartialEq))]
 pub enum PreGameClientMessages {
 
-    /// First message that the client must send, upon establishing a connection
-    /// -- tells what the game parameters will be.\
-    /// The response should be [PreGameServerMessages::Version] and, if both agree, the state progresses [ProtocolStates::Game]
+    /// First message that the client must send, upon establishing a connection.
+    /// Upon receiving this, the server must answer with [PreGameServerMessages::Version].
+    Version(VersionType),
+
+    /// The response to [PreGameServerMessages::Version]. If both agree, we will transition to
+    /// the next protocol [ProtocolStates::Game]
     Config(MatchConfig),
 
     // standard messages
@@ -181,11 +185,10 @@ pub enum GameClientError {
 #[archive_attr(derive(PartialEq))]
 pub enum PreGameServerMessages {
 
-    /// After taking notice of a new client -- after it sent [PreGameClientMessages::Config] --
+    /// After taking notice of a new client -- after it sent [PreGameClientMessages::Version] --
     /// answers to the client which version the server is running.\
-    /// After this, the server progresses to the [GameServerMessages] protocol and the
-    /// client should do it as well (progressing to [GameClientMessages]) or disconnect if
-    /// it doesn't agree with the server version.
+    /// After this, the server expects the client to send [PreGameClientMessages::Config] before progressing
+    /// to the [GameServerMessages] protocol.
     Version(VersionType),
 
     // standard messages
@@ -207,7 +210,9 @@ impl Default for PreGameServerMessages {
 #[archive_attr(derive(PartialEq))]
 pub enum GameServerMessages {
 
-    /// Issued after a [PreGameClientMessages::Config] has been received, indicating both the client and server should start the game
+    /// Issued after a [PreGameClientMessages::Config] has been received.
+    /// While the former indicates the client had transitioned to the [ProtocolStates::Game] protocol,
+    /// this one confirms the server also did it, so the game may start.
     GameStarted,
 
     /// When asked, at any time, through [GameClientMessages::DumpConfig], informs the match config in place
@@ -244,6 +249,9 @@ pub enum PreGameServerError {
     /// Occurs when the client couldn't process a legitimate message
     /// -- maybe due to overload
     InternalProcessorError,
+    /// Occurs when the local and peer are found to be using
+    /// incompatible protocol versions
+    IncompatibleProtocols,
 }
 
 /// Errors that the server may return in the `ProtocolStates::Game`

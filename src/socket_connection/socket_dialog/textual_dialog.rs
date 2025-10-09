@@ -203,12 +203,9 @@ for TextualDialog<CONFIG, RemoteMessagesType, LocalMessagesType, Serializer, Des
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::Formatter;
-    use std::ops::Deref;
     use super::*;
     use super::super::super::socket_connection_handler;
-    use reactive_mutiny::prelude::advanced::{AllocatorAtomicArray, ChannelUniMoveAtomic, ChannelUniMoveFullSync, OgreUnique, UniZeroCopyAtomic, UniZeroCopyFullSync};
-    use serde::{Deserialize, Serialize};
+    use reactive_mutiny::prelude::advanced::{ChannelUniMoveAtomic, ChannelUniMoveFullSync, UniZeroCopyAtomic, UniZeroCopyFullSync};
     use crate::config::{ConstConfig, RetryingStrategies};
     use crate::serde::{ReactiveMessagingRonDeserializer, ReactiveMessagingRonSerializer};
     use crate::unit_test_utils::TestString;

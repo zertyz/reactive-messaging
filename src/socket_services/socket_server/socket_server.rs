@@ -692,7 +692,7 @@ mod tests {
                 let server_received_messages_count = Arc::clone(&server_received_messages_count_ref1);
                 client_messages
                     .inspect(move |_| { server_received_messages_count.fetch_add(1, Relaxed); })
-                    .map(move |client_message| DummyClientAndServerMessages::FloodPing )
+                    .map(move |_client_message| DummyClientAndServerMessages::FloodPing )
                     .to_responsive_stream(peer, |_, _| ())
             }
         ).await.expect("Spawning a server processor");
@@ -711,7 +711,7 @@ mod tests {
                 let client_received_messages_count = Arc::clone(&client_received_messages_count_ref1);
                 server_messages
                     .inspect(move |_| { client_received_messages_count.fetch_add(1, Relaxed); } )
-                    .map(move |server_message| DummyClientAndServerMessages::FloodPing)
+                    .map(move |_server_message| DummyClientAndServerMessages::FloodPing)
                     .to_responsive_stream(peer, |_, _| ())
             }
         ).expect("Starting the client");

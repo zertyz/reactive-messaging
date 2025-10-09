@@ -75,8 +75,8 @@ impl ClientProtocolProcessor {
         let cloned_self1 = Arc::clone(self);
         let cloned_self2 = Arc::clone(self);
         let peer_ref = peer.clone();
-        peer.send(PreGameClientMessages::Config(MATCH_CONFIG))
-            .expect("Couldn't send the pre-game MATCH_CONFIG message");
+        peer.send(PreGameClientMessages::Version(PROTOCOL_VERSION))
+            .expect("Couldn't send the pre-game VERSION message");
         server_messages_stream
             .inspect(move |_| {cloned_self1.in_messages_count.fetch_add(1, Relaxed);})  // increment the incoming messages metrics
             .then(move |server_message| {
@@ -85,34 +85,34 @@ impl ClientProtocolProcessor {
                     match server_message.as_ref() {
                         PreGameServerMessages::Version(server_protocol_version) => {
                             if server_protocol_version == &PROTOCOL_VERSION {
-                                // Upgrade to the next protocol
+                                // Upgrade to the next protocol, sending the trigger message to do the same at the server
                                 peer.set_state(ProtocolStates::Game).await;
-                                None
+                                PreGameClientMessages::Config(MATCH_CONFIG)
                             } else {
-                                warn!("Aborting Connection: Client protocol version is {:?} while server is {server_protocol_version:?}", PROTOCOL_VERSIONS.get_key_value(&PROTOCOL_VERSION));
+                                warn!("Aborting Connection: Client protocol version is {:?} while server is {:?}",
+                                      PROTOCOL_VERSIONS.get_key_value(&PROTOCOL_VERSION),
+                                      PROTOCOL_VERSIONS.get_key_value(server_protocol_version));
                                 peer.set_state(ProtocolStates::Disconnect).await;
-                                Some(PreGameClientMessages::Error(PreGameClientError::IncompatibleProtocols))
+                                PreGameClientMessages::Error(PreGameClientError::IncompatibleProtocols)
                             }
                         },
                         PreGameServerMessages::Error(err) => {
                             warn!("Server (pre game) answered with error {err:?} -- closing the connection");
                             peer.set_state(ProtocolStates::Disconnect).await;
-                            Some(PreGameClientMessages::Error(PreGameClientError::TextualProtocolProcessorParsingError))
+                            PreGameClientMessages::Error(PreGameClientError::TextualProtocolProcessorParsingError)
                         },
                     }
                 }
             })
-            .take_while(|server_message| future::ready(server_message.is_some()))    // stop if the protocol was upgraded
-            .filter_map(future::ready)
+            .to_responsive_stream(peer_ref, |client_message, _peer| matches!(client_message, PreGameClientMessages::Error(..)) )
             .inspect(move |_| { cloned_self2.out_messages_count.fetch_add(1, Relaxed); })        // increment the outgoing messages metrics
-            .to_responsive_stream(peer_ref, |server_message, _peer| matches!(server_message, PreGameClientMessages::Error(..)) )
-            .take_while(|stop| future::ready(!stop))    // stop if an error happened (after sending the error message)
+            .take(1)
     }
 
-    pub fn game_connection_events_handler<const NETWORK_CONFIG: u64,
-                                          SenderChannel:        FullDuplexUniChannel<ItemType=GameClientMessages, DerivedItemType=GameClientMessages> + Send + Sync>
-                                         (self: &Arc<Self>,
-                                          connection_event: ProtocolEvent<NETWORK_CONFIG, GameClientMessages, SenderChannel, ProtocolStates>) {
+    pub async fn game_connection_events_handler<const NETWORK_CONFIG: u64,
+                                                SenderChannel:        FullDuplexUniChannel<ItemType=GameClientMessages, DerivedItemType=GameClientMessages> + Send + Sync>
+                                               (self: &Arc<Self>,
+                                                connection_event: ProtocolEvent<NETWORK_CONFIG, GameClientMessages, SenderChannel, ProtocolStates>) {
         match connection_event {
             ProtocolEvent::PeerArrived { peer: _ } => {},
             ProtocolEvent::PeerLeft { peer, stream_stats } => {
@@ -122,6 +122,7 @@ impl ClientProtocolProcessor {
                       peer,
                       stream_stats,
                       (in_messages_count + out_messages_count) as f64 / self.start_instant.elapsed().as_secs_f64());
+                peer.set_state(ProtocolStates::Disconnect).await;     // the next state -- after this dialog ends -- is "disconnect".
             }
             ProtocolEvent::LocalServiceTermination => {
                 info!("Ping-Pong client shutdown requested. Notifying the server...");
@@ -131,7 +132,7 @@ impl ClientProtocolProcessor {
 
     pub fn game_dialog_processor<const NETWORK_CONFIG: u64,
                                  SenderChannel:        FullDuplexUniChannel<ItemType=GameClientMessages, DerivedItemType=GameClientMessages> + Send + Sync,
-                                 StreamItemType:       AsRef<GameServerMessages>>
+                                 StreamItemType:       AsRef<GameServerMessages> + Debug>
 
                                 (self:                   &Arc<Self>,
                                  server_addr:            String,
@@ -141,7 +142,6 @@ impl ClientProtocolProcessor {
 
                                 -> impl Stream<Item=bool> {
 
-        peer.blocking_set_state(ProtocolStates::Disconnect);     // the next state -- after this stream ends -- is "disconnect".
         let cloned_self1 = Arc::clone(self);
         let cloned_self2 = Arc::clone(self);
         let peer_ref = Arc::clone(&peer);
